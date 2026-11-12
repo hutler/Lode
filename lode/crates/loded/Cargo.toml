@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+lode-meta.workspace = true
 lode-server.workspace = true
 tokio.workspace = true
 tracing.workspace = true

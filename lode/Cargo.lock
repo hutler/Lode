@@ -1077,6 +1077,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "lode-meta",
  "lode-server",
  "serde_json",
  "tempfile",

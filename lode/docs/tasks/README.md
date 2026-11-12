@@ -68,4 +68,18 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 
 | Task | State | Branch / PR | Notes |
 | --- | --- | --- | --- |
-| T001 | todo | | |
+| T001 | done | `lode/T001-*` | merged into `main` |
+| T002 | done | `lode/T002-*` | merged into `main` |
+| T003 | done | `lode/T003-*` | merged into `main` |
+| T004 | done | `lode/T004-*` | merged into `main` |
+| T005 | done | `lode/T005-*` | merged into `main` |
+| T010 | review | `lode/T010-server-skeleton` |  |
+| T011 | review | `lode/T011-authentication` |  |
+| T012 | review | `lode/T012-permissions` |  |
+| T013 | review | `lode/T013-blob-api` | plus `lode/path-windows-chars` (paths reject `< > : " \| ? *`) |
+| T014 | review | `lode/T014-commit-engine` |  |
+| T015 | review | `lode/T015-read-api` |  |
+| T016 | review | `lode/T016-branches` |  |
+| T017 | review | `lode/T017-module-framework` |  |
+| T018 | review | `lode/T018-gc` |  |
+| T019 | review | `lode/T019-fsck-backup` |  |

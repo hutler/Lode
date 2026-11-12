@@ -1,7 +1,11 @@
 //! Depot maintenance (ARCHITECTURE §11): garbage collection, consistency checks, backup.
 
+mod backup;
+mod fsck;
 mod gc;
 
+pub use backup::{backup, BackupError, BackupReport};
+pub use fsck::{fsck, FsckOptions};
 pub use gc::{collect_garbage, GcOptions};
 
 use axum::extract::State;
@@ -18,7 +22,24 @@ use crate::state::AppState;
 
 /// Maintenance routes. Server administrators only.
 pub fn routes() -> Router<AppState> {
-    Router::new().route(paths::ADMIN_GC, post(gc_handler))
+    Router::new()
+        .route(paths::ADMIN_GC, post(gc_handler))
+        .route(paths::ADMIN_FSCK, post(fsck_handler))
+}
+
+async fn fsck_handler(
+    State(state): State<AppState>,
+    caller: Caller,
+    ApiPath(depot): ApiPath<String>,
+    q: ApiQuery,
+) -> ApiResult<Json<MaintenanceReport>> {
+    caller.require_scope(SCOPE_ADMIN)?;
+    state.permissions().require_server_admin(&caller)?;
+    let (d, _) = resolve(&state, &caller, &depot).await?;
+    let opts = FsckOptions {
+        full: q.flag("full")?,
+    };
+    Ok(Json(fsck(&state, d.id, opts).await?))
 }
 
 async fn gc_handler(

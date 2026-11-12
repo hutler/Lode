@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use lode_meta::Reads;
 use lode_server::{BoundServer, ServerConfig, SystemClock};
 
 /// Lode version control server.
@@ -29,6 +30,25 @@ enum Command {
         /// Path to loded.toml.
         #[arg(long)]
         config: PathBuf,
+    },
+    /// Check depots for missing, damaged or inconsistent data. Exits with 1 on problems.
+    Fsck {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// Also decode and re-hash every stored object.
+        #[arg(long)]
+        full: bool,
+        /// Depots to check; all when none are given.
+        depots: Vec<String>,
+    },
+    /// Copy the data directory to an empty directory while the server keeps running.
+    Backup {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// Destination directory; must be missing or empty.
+        dest: PathBuf,
     },
     /// Run the server.
     Serve {
@@ -77,6 +97,57 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             println!("Revoked every token of the admin user.");
             println!("New admin token (shown only now; store it safely):");
             println!("{token}");
+            Ok(())
+        }
+        Command::Fsck {
+            config,
+            full,
+            depots,
+        } => {
+            let cfg = ServerConfig::load(&config)?;
+            let state = lode_server::open_state(cfg, Arc::new(SystemClock), Vec::new()).await?;
+            let all = state.meta().read(|tx| tx.depots()).await?;
+            let mut bad = false;
+            for d in &all {
+                if !depots.is_empty() && !depots.contains(&d.name) {
+                    continue;
+                }
+                let report = lode_server::maintenance::fsck(
+                    &state,
+                    d.id,
+                    lode_server::maintenance::FsckOptions { full },
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!("fsck of {} failed: {}", d.name, e.body().message))?;
+                println!(
+                    "{}: {} objects checked, {} problem(s)",
+                    d.name,
+                    report.objects_checked,
+                    report.problems.len()
+                );
+                for p in &report.problems {
+                    println!("  {p}");
+                }
+                bad |= !report.problems.is_empty();
+            }
+            if let Some(missing) = depots.iter().find(|n| !all.iter().any(|d| &d.name == *n)) {
+                anyhow::bail!("no depot `{missing}`");
+            }
+            if bad {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Command::Backup { config, dest } => {
+            let cfg = ServerConfig::load(&config)?;
+            let state = lode_server::open_state(cfg, Arc::new(SystemClock), Vec::new()).await?;
+            let report = lode_server::maintenance::backup(&state, &dest).await?;
+            println!(
+                "Backed up the database and {} objects ({} bytes) to {}",
+                report.objects,
+                report.bytes,
+                dest.display()
+            );
             Ok(())
         }
         Command::Serve { config } => {

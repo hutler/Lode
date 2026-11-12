@@ -621,9 +621,13 @@ the range in workspace config; the next commit sends it as `merged_from`.
   `POST /admin/depots/{d}/gc[?dry_run=true]` returns objects checked, objects and bytes removed.
 - **fsck** (`lode admin fsck`): every revision's tree is reachable and decodes; every referenced
   object exists; optional `--full` re-hashes every object; branch heads and `next_rev` are
-  consistent.
+  consistent. `POST /admin/depots/{d}/fsck[?full=true]` returns every problem with its
+  revision, path and object id; `loded fsck --config <file> [--full] [depot…]` does the same
+  offline and exits with 1 when anything is wrong.
 - **Backup:** SQLite online backup of `meta.db` first, then copy `depots/` (objects are
   immutable; any object referenced by the copied database is already on disk).
+  `loded backup --config <file> <dest>` runs beside a live server; `dest` must be missing or
+  empty and becomes a data directory, including `loded.toml`.
 
 ## 12. Testing strategy
 
