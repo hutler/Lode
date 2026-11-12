@@ -1,0 +1,9 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "name": "feature-x",
+  "from_branch": "main",
+  "from_rev": 1040
+}

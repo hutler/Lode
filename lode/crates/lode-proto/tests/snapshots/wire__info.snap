@@ -1,0 +1,13 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "server_version": "0.1.0",
+  "api_version": "1",
+  "modules": [
+    "locks",
+    "shelves",
+    "mcp"
+  ]
+}

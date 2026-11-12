@@ -1,0 +1,9 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "name": "ana",
+  "password": "secret",
+  "token_name": "workstation"
+}

@@ -1,0 +1,16 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "principal": {
+    "name": "fixer-bot",
+    "kind": "agent",
+    "owner": "ana"
+  },
+  "scopes": [
+    "read",
+    "shelve"
+  ],
+  "token_id": 7
+}

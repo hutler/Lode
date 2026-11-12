@@ -1,0 +1,11 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "path": "tools/build.sh",
+  "kind": "file",
+  "id": "0505050505050505050505050505050505050505050505050505050505050505",
+  "size": 77,
+  "executable": true
+}

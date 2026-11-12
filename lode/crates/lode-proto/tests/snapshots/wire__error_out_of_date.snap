@@ -1,0 +1,14 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "code": "out_of_date",
+  "message": "2 files changed on the branch",
+  "details": {
+    "paths": [
+      "a/b.txt",
+      "c.txt"
+    ]
+  }
+}

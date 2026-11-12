@@ -1,0 +1,24 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "branches": [
+    {
+      "name": "main",
+      "head_rev": 1042,
+      "created_rev": 1,
+      "state": "active"
+    },
+    {
+      "name": "release/1.0",
+      "head_rev": 990,
+      "created_rev": 900,
+      "parent": {
+        "branch": "main",
+        "rev": 899
+      },
+      "state": "archived"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "kind": "agent",
+  "name": "ci",
+  "display_name": "Build server",
+  "owner": "svc-ci"
+}

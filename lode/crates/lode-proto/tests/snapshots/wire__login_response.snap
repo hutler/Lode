@@ -1,0 +1,12 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "token": "lode_abc",
+  "principal": {
+    "name": "fixer-bot",
+    "kind": "agent",
+    "owner": "ana"
+  }
+}

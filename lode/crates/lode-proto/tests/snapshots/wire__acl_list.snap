@@ -1,0 +1,30 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "rules": [
+    {
+      "id": 1,
+      "subject": {
+        "kind": "all"
+      },
+      "branch": "*",
+      "path": "**",
+      "effect": "allow",
+      "level": "read"
+    },
+    {
+      "id": 2,
+      "depot": "game",
+      "subject": {
+        "kind": "group",
+        "name": "artists"
+      },
+      "branch": "release/*",
+      "path": "Source/**",
+      "effect": "deny",
+      "level": "write"
+    }
+  ]
+}

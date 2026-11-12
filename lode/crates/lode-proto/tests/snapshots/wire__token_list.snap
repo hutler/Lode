@@ -1,0 +1,17 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "tokens": [
+    {
+      "id": 7,
+      "name": "ci",
+      "scopes": [
+        "read"
+      ],
+      "created_at": "2026-11-12T10:30:00Z",
+      "expires_at": "2026-12-12T10:30:00Z"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "groups": [
+    {
+      "name": "artists",
+      "members": [
+        "ana"
+      ]
+    }
+  ]
+}

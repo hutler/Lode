@@ -1,0 +1,12 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "lines": [
+    {
+      "rev": 1001,
+      "author": "ana"
+    }
+  ]
+}

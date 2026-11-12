@@ -1,0 +1,9 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "after": 1042,
+  "changes": true,
+  "limit": 100
+}

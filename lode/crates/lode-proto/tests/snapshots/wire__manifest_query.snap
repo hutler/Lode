@@ -1,0 +1,11 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "rev": 1043,
+  "base": 1042,
+  "include": [
+    "Source/**"
+  ]
+}

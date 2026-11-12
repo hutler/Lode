@@ -1,0 +1,8 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "owner": "fixer-bot",
+  "state": "open"
+}

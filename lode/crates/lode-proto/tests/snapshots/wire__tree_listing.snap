@@ -1,0 +1,22 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "rev": 1043,
+  "path": "Source",
+  "entries": [
+    {
+      "name": "Door.cpp",
+      "kind": "file",
+      "id": "0202020202020202020202020202020202020202020202020202020202020202",
+      "size": 2048
+    },
+    {
+      "name": "Engine",
+      "kind": "dir",
+      "id": "0606060606060606060606060606060606060606060606060606060606060606",
+      "size": 0
+    }
+  ]
+}

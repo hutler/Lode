@@ -1,0 +1,11 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "branch": "main",
+  "paths": [
+    "Content/Door.uasset"
+  ],
+  "force": true
+}

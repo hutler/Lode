@@ -1,0 +1,7 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "expected_version": 3
+}

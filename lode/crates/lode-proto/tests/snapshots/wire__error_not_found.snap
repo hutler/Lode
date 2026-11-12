@@ -1,0 +1,8 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "code": "not_found",
+  "message": "no such depot"
+}

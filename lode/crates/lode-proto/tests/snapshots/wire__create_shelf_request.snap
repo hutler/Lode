@@ -1,0 +1,44 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "branch": "main",
+  "base_rev": 1042,
+  "description": "Fix door",
+  "changes": [
+    {
+      "path": "a/b.txt",
+      "action": "modify",
+      "base_id": "0101010101010101010101010101010101010101010101010101010101010101",
+      "new_id": "0202020202020202020202020202020202020202020202020202020202020202",
+      "kind": "file",
+      "size": 123
+    },
+    {
+      "path": "a/new.png",
+      "action": "add",
+      "new_id": "0303030303030303030303030303030303030303030303030303030303030303",
+      "kind": "file",
+      "size": 9,
+      "copy_from": {
+        "path": "a/old.png",
+        "rev": 41
+      }
+    },
+    {
+      "path": "a/old.png",
+      "action": "delete",
+      "base_id": "0404040404040404040404040404040404040404040404040404040404040404"
+    }
+  ],
+  "provenance": {
+    "client": "lode-cli/0.1.0",
+    "via": "mcp",
+    "agent": {
+      "model": "model-x",
+      "session": "s-1",
+      "tool": "create_shelf"
+    }
+  }
+}
