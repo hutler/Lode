@@ -570,6 +570,7 @@ fn shelves_types() {
             branch: "main".into(),
             base_rev: 1042,
             owner: bot(),
+            agent_owner: Some("ana".into()),
             description: "Fix door".into(),
             state: ShelfState::Submitted,
             submitted_rev: Some(1044),
@@ -578,6 +579,21 @@ fn shelves_types() {
             changes: Some(changes()[..1].to_vec()),
             merged_from: vec![],
             provenance: Some(provenance()),
+            diff: Some(vec![
+                ShelfFileDiff {
+                    path: p("Source/Door.cpp"),
+                    patch: Some(
+                        "--- a/Source/Door.cpp\n+++ b/Source/Door.cpp\n@@ -1 +1 @@\n-a\n+b\n"
+                            .into()
+                    ),
+                    skipped: None,
+                },
+                ShelfFileDiff {
+                    path: p("Content/Door.uasset"),
+                    patch: None,
+                    skipped: Some("binary".into()),
+                },
+            ]),
         }
     );
     snap!(

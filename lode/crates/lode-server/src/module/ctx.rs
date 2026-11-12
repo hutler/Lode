@@ -205,6 +205,35 @@ impl Commits<'_> {
         };
         commit::commit(self.state, caller, depot, branch, req, opts).await
     }
+
+    /// Checks a change set the way a commit would, against `base_rev` of `branch` instead of
+    /// the head, with `need` on every changed path (a shelf needs `Read`). Returns the
+    /// branch. See [`commit::check_change_set`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn check(
+        &self,
+        caller: &Caller,
+        depot: &DepotRow,
+        branch: &str,
+        base_rev: u64,
+        changes: &[lode_core::Change],
+        merged_from: &[lode_proto::commit::MergedFrom],
+        provenance: Option<&lode_proto::commit::Provenance>,
+        need: crate::perm::Level,
+    ) -> ApiResult<lode_meta::BranchRow> {
+        commit::check_change_set(
+            self.state,
+            caller,
+            depot,
+            branch,
+            base_rev,
+            changes,
+            merged_from,
+            provenance,
+            need,
+        )
+        .await
+    }
 }
 
 /// Content storage.

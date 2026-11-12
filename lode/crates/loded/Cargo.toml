@@ -20,6 +20,7 @@ anyhow.workspace = true
 clap.workspace = true
 lode-meta.workspace = true
 lode-mod-locks.workspace = true
+lode-mod-shelves.workspace = true
 lode-server.workspace = true
 tokio.workspace = true
 tracing.workspace = true

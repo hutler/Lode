@@ -16,7 +16,7 @@ use lode_meta::{
     BranchRow, BranchState, ChangeRow, DepotRow, MergeRow, MetaError, PrincipalRow, Reads,
     RevisionRow,
 };
-use lode_proto::commit::{CommitRequest, CommitResponse, Provenance, Via};
+use lode_proto::commit::{CommitRequest, CommitResponse, MergedFrom, Provenance, Via};
 use lode_proto::consts::MAX_PROVENANCE_BYTES;
 use lode_store::{PutOptions, StoreError};
 use serde_json::json;
@@ -190,19 +190,7 @@ pub async fn commit(
     if req.message.len() > MAX_MESSAGE_BYTES {
         return Err(invalid("message is too long"));
     }
-    if req.changes.len() > state.config().limits.max_changes_per_commit {
-        return Err(ApiError::new(
-            ErrorCode::TooLarge,
-            format!(
-                "at most {} changes per commit",
-                state.config().limits.max_changes_per_commit
-            ),
-        ));
-    }
-    if req.changes.is_empty() && req.merged_from.is_empty() {
-        return Err(invalid("a commit needs at least one change"));
-    }
-    validate_changes(&req.changes).map_err(change_set_error)?;
+    check_shape(state, &req.changes, !req.merged_from.is_empty())?;
 
     if let Some(resp) = replay(state, d, &req.request_id).await? {
         return Ok(resp);
@@ -212,53 +200,8 @@ pub async fn commit(
     // the objects this commit is about to reference (see `maintenance::gc`).
     let _fence = state.gc_fence().read().await;
 
-    // Every new blob must exist, be a blob, and have the size the change claims.
-    let mut sizes: HashMap<ObjectId, u64> = HashMap::new();
-    for c in &req.changes {
-        if let (Some(id), Some(size)) = (c.new_id, c.size) {
-            if sizes.insert(id, size).is_some_and(|prev| prev != size) {
-                return Err(invalid(format!("blob {id} is given two different sizes")));
-            }
-        }
-    }
-    let mut missing = Vec::new();
-    for (id, size) in &sizes {
-        match state.blobs().get_stored(d, id).await {
-            Ok(s) if s.kind == ObjectKind::Blob => {
-                if s.raw_len != *size {
-                    return Err(invalid(format!(
-                        "blob {id} has {} bytes, not {size}",
-                        s.raw_len
-                    )));
-                }
-            }
-            Ok(_) | Err(StoreError::NotFound(_)) => missing.push(*id),
-            Err(e) => return Err(e.into()),
-        }
-    }
-    if !missing.is_empty() {
-        missing.sort();
-        return Err(ApiError::new(
-            ErrorCode::MissingObjects,
-            format!("{} blob(s) must be uploaded first", missing.len()),
-        )
-        .with_details(json!({ "ids": missing })));
-    }
-
-    // A branch head never holds an unparseable configuration.
-    for c in &req.changes {
-        if c.path.as_str() == LODECONFIG && c.action != ChangeAction::Delete {
-            let id = c.new_id.ok_or_else(ApiError::internal)?;
-            if c.kind != Some(EntryKind::File) {
-                return Err(invalid(format!("{LODECONFIG} must be a regular file")));
-            }
-            let bytes = read_small_blob(state, d, &id, MAX_LODECONFIG_BYTES).await?;
-            LodeConfig::parse(&bytes).map_err(|e| {
-                invalid(format!("invalid {LODECONFIG}: {e}"))
-                    .with_details(json!({ "paths": [LODECONFIG] }))
-            })?;
-        }
-    }
+    check_blobs(state, d, &req.changes).await?;
+    check_lodeconfig(state, d, &req.changes).await?;
     let provenance = provenance_json(req.provenance.clone(), &opts)?;
 
     // --- Serialized per branch from here ---
@@ -290,128 +233,17 @@ pub async fn commit(
     let config = branch_config(state, d, &head.root_tree).await?;
 
     // Compare every change with the head, building the new trees.
-    let ops: Vec<EditOp> = req
-        .changes
-        .iter()
-        .map(|c| EditOp {
-            path: c.path.clone(),
-            expect: match c.action {
-                ChangeAction::Add => Expect::Absent,
-                ChangeAction::Modify | ChangeAction::Delete => {
-                    Expect::Id(c.base_id.unwrap_or(ObjectId::from_bytes([0; 32])))
-                }
-            },
-            entry: match c.action {
-                ChangeAction::Delete => None,
-                _ => Some(TreeEntry {
-                    name: c.path.name().to_owned(),
-                    kind: c.kind.unwrap_or(EntryKind::File),
-                    flags: if c.executable { FLAG_EXECUTABLE } else { 0 },
-                    id: c.new_id.unwrap_or(ObjectId::from_bytes([0; 32])),
-                    size: c.size.unwrap_or(0),
-                }),
-            },
-        })
-        .collect();
     let edited = TreeEditor::new(state.trees(), d)
-        .apply(&head.root_tree, &ops)
+        .apply(&head.root_tree, &edit_ops(&req.changes))
         .await
-        .map_err(|e| match e {
-            EditError::OutOfDate(paths) => ApiError::new(
-                ErrorCode::OutOfDate,
-                format!(
-                    "{} path(s) changed on the branch; update first",
-                    paths.len()
-                ),
-            )
-            .with_details(json!({ "paths": paths })),
-            EditError::CaseCollision(a, b) => ApiError::new(
-                ErrorCode::InvalidPath,
-                format!("{a} and {b} differ only in case"),
-            )
-            .with_details(json!({ "paths": [a, b] })),
-            EditError::Invalid(m) => invalid(m),
-            EditError::Load(e) => load_error(e),
-        })?;
+        .map_err(edit_error)?;
 
     // Write permission on every changed path.
-    let access = state.permissions().depot(caller, d).branch(branch);
-    let levels = access.levels(req.changes.iter().map(|c| &c.path));
-    let denied: Vec<&str> = req
-        .changes
-        .iter()
-        .zip(&levels)
-        .filter(|(_, l)| **l < Level::Write)
-        .map(|(c, _)| c.path.as_str())
-        .collect();
-    if !denied.is_empty() {
-        return Err(ApiError::new(
-            ErrorCode::PermissionDenied,
-            format!("no write access to {} path(s)", denied.len()),
-        )
-        .with_details(json!({ "paths": denied })));
-    }
+    check_level(state, caller, d, branch, &req.changes, Level::Write)?;
 
-    // copy_from: the source must exist and be readable.
-    for c in &req.changes {
-        let Some(cf) = &c.copy_from else { continue };
-        let rev = cf.rev;
-        let src = state
-            .meta()
-            .read(move |tx| {
-                let Some(r) = tx.revision(d, rev)? else {
-                    return Ok(None);
-                };
-                Ok(tx.branch_by_id(r.branch_id)?.map(|b| (r, b)))
-            })
-            .await?;
-        let bad = || {
-            invalid(format!(
-                "copy source {}@{} does not exist",
-                cf.path.as_str(),
-                cf.rev
-            ))
-            .with_details(json!({ "paths": [c.path.as_str()] }))
-        };
-        let Some((src_rev, src_branch)) = src else {
-            return Err(bad());
-        };
-        let entry = lookup(state.trees(), d, &src_rev.root_tree, &cf.path)
-            .await
-            .map_err(load_error)?;
-        if !entry.is_some_and(|e| e.kind != EntryKind::Dir) {
-            return Err(bad());
-        }
-        let level = state
-            .permissions()
-            .depot(caller, d)
-            .level(&src_branch.name, &cf.path);
-        if level < Level::Read {
-            return Err(bad());
-        }
-    }
+    check_copy_from(state, caller, d, &req.changes).await?;
 
-    // merged_from: the source branch exists and the range lies in its history.
-    let mut merges = Vec::new();
-    for m in &req.merged_from {
-        let name = m.branch.clone();
-        let src = state
-            .meta()
-            .read(move |tx| tx.branch(d, &name))
-            .await?
-            .ok_or_else(|| invalid(format!("merged_from: no branch `{}`", m.branch)))?;
-        if m.from_rev == 0 || m.from_rev > m.to_rev || m.to_rev > src.head_rev {
-            return Err(invalid(format!(
-                "merged_from: {}..{} is not in the history of `{}`",
-                m.from_rev, m.to_rev, m.branch
-            )));
-        }
-        merges.push(MergeRow {
-            source_branch_id: src.id,
-            from_rev: m.from_rev,
-            to_rev: m.to_rev,
-        });
-    }
+    let merges = merge_rows(state, d, &req.merged_from).await?;
 
     state
         .failpoints()
@@ -589,6 +421,317 @@ pub async fn commit(
         }),
         TxOutcome::Rejected(e) => Err(e),
     }
+}
+
+/// Count, emptiness and per-path rules of a change set.
+fn check_shape(state: &AppState, changes: &[Change], has_merges: bool) -> ApiResult<()> {
+    if changes.len() > state.config().limits.max_changes_per_commit {
+        return Err(ApiError::new(
+            ErrorCode::TooLarge,
+            format!(
+                "at most {} changes per commit",
+                state.config().limits.max_changes_per_commit
+            ),
+        ));
+    }
+    if changes.is_empty() && !has_merges {
+        return Err(invalid("a commit needs at least one change"));
+    }
+    validate_changes(changes).map_err(change_set_error)
+}
+
+/// Every new blob must exist, be a blob, and have the size the change claims.
+async fn check_blobs(state: &AppState, d: lode_core::DepotId, changes: &[Change]) -> ApiResult<()> {
+    let mut sizes: HashMap<ObjectId, u64> = HashMap::new();
+    for c in changes {
+        if let (Some(id), Some(size)) = (c.new_id, c.size) {
+            if sizes.insert(id, size).is_some_and(|prev| prev != size) {
+                return Err(invalid(format!("blob {id} is given two different sizes")));
+            }
+        }
+    }
+    let mut missing = Vec::new();
+    for (id, size) in &sizes {
+        match state.blobs().get_stored(d, id).await {
+            Ok(s) if s.kind == ObjectKind::Blob => {
+                if s.raw_len != *size {
+                    return Err(invalid(format!(
+                        "blob {id} has {} bytes, not {size}",
+                        s.raw_len
+                    )));
+                }
+            }
+            Ok(_) | Err(StoreError::NotFound(_)) => missing.push(*id),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if !missing.is_empty() {
+        missing.sort();
+        return Err(ApiError::new(
+            ErrorCode::MissingObjects,
+            format!("{} blob(s) must be uploaded first", missing.len()),
+        )
+        .with_details(json!({ "ids": missing })));
+    }
+    Ok(())
+}
+
+/// A branch head never holds an unparseable configuration.
+async fn check_lodeconfig(
+    state: &AppState,
+    d: lode_core::DepotId,
+    changes: &[Change],
+) -> ApiResult<()> {
+    for c in changes {
+        if c.path.as_str() == LODECONFIG && c.action != ChangeAction::Delete {
+            let id = c.new_id.ok_or_else(ApiError::internal)?;
+            if c.kind != Some(EntryKind::File) {
+                return Err(invalid(format!("{LODECONFIG} must be a regular file")));
+            }
+            let bytes = read_small_blob(state, d, &id, MAX_LODECONFIG_BYTES).await?;
+            LodeConfig::parse(&bytes).map_err(|e| {
+                invalid(format!("invalid {LODECONFIG}: {e}"))
+                    .with_details(json!({ "paths": [LODECONFIG] }))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// The tree edits of a change set.
+fn edit_ops(changes: &[Change]) -> Vec<EditOp> {
+    changes
+        .iter()
+        .map(|c| EditOp {
+            path: c.path.clone(),
+            expect: match c.action {
+                ChangeAction::Add => Expect::Absent,
+                ChangeAction::Modify | ChangeAction::Delete => {
+                    Expect::Id(c.base_id.unwrap_or(ObjectId::from_bytes([0; 32])))
+                }
+            },
+            entry: match c.action {
+                ChangeAction::Delete => None,
+                _ => Some(TreeEntry {
+                    name: c.path.name().to_owned(),
+                    kind: c.kind.unwrap_or(EntryKind::File),
+                    flags: if c.executable { FLAG_EXECUTABLE } else { 0 },
+                    id: c.new_id.unwrap_or(ObjectId::from_bytes([0; 32])),
+                    size: c.size.unwrap_or(0),
+                }),
+            },
+        })
+        .collect()
+}
+
+fn edit_error(e: EditError) -> ApiError {
+    match e {
+        EditError::OutOfDate(paths) => ApiError::new(
+            ErrorCode::OutOfDate,
+            format!(
+                "{} path(s) changed on the branch; update first",
+                paths.len()
+            ),
+        )
+        .with_details(json!({ "paths": paths })),
+        EditError::CaseCollision(a, b) => ApiError::new(
+            ErrorCode::InvalidPath,
+            format!("{a} and {b} differ only in case"),
+        )
+        .with_details(json!({ "paths": [a, b] })),
+        EditError::Invalid(m) => invalid(m),
+        EditError::Load(e) => load_error(e),
+    }
+}
+
+/// `need` on every changed path of `branch`.
+fn check_level(
+    state: &AppState,
+    caller: &Caller,
+    d: lode_core::DepotId,
+    branch: &str,
+    changes: &[Change],
+    need: Level,
+) -> ApiResult<()> {
+    let access = state.permissions().depot(caller, d).branch(branch);
+    let levels = access.levels(changes.iter().map(|c| &c.path));
+    let denied: Vec<&str> = changes
+        .iter()
+        .zip(&levels)
+        .filter(|(_, l)| **l < need)
+        .map(|(c, _)| c.path.as_str())
+        .collect();
+    if !denied.is_empty() {
+        let what = if need >= Level::Write {
+            "write"
+        } else {
+            "read"
+        };
+        return Err(ApiError::new(
+            ErrorCode::PermissionDenied,
+            format!("no {what} access to {} path(s)", denied.len()),
+        )
+        .with_details(json!({ "paths": denied })));
+    }
+    Ok(())
+}
+
+/// copy_from: the source must exist and be readable.
+async fn check_copy_from(
+    state: &AppState,
+    caller: &Caller,
+    d: lode_core::DepotId,
+    changes: &[Change],
+) -> ApiResult<()> {
+    for c in changes {
+        let Some(cf) = &c.copy_from else { continue };
+        let rev = cf.rev;
+        let src = state
+            .meta()
+            .read(move |tx| {
+                let Some(r) = tx.revision(d, rev)? else {
+                    return Ok(None);
+                };
+                Ok(tx.branch_by_id(r.branch_id)?.map(|b| (r, b)))
+            })
+            .await?;
+        let bad = || {
+            invalid(format!(
+                "copy source {}@{} does not exist",
+                cf.path.as_str(),
+                cf.rev
+            ))
+            .with_details(json!({ "paths": [c.path.as_str()] }))
+        };
+        let Some((src_rev, src_branch)) = src else {
+            return Err(bad());
+        };
+        let entry = lookup(state.trees(), d, &src_rev.root_tree, &cf.path)
+            .await
+            .map_err(load_error)?;
+        if !entry.is_some_and(|e| e.kind != EntryKind::Dir) {
+            return Err(bad());
+        }
+        let level = state
+            .permissions()
+            .depot(caller, d)
+            .level(&src_branch.name, &cf.path);
+        if level < Level::Read {
+            return Err(bad());
+        }
+    }
+    Ok(())
+}
+
+/// merged_from: the source branch exists and the range lies in its history.
+async fn merge_rows(
+    state: &AppState,
+    d: lode_core::DepotId,
+    merged_from: &[MergedFrom],
+) -> ApiResult<Vec<MergeRow>> {
+    let mut merges = Vec::new();
+    for m in merged_from {
+        let name = m.branch.clone();
+        let src = state
+            .meta()
+            .read(move |tx| tx.branch(d, &name))
+            .await?
+            .ok_or_else(|| invalid(format!("merged_from: no branch `{}`", m.branch)))?;
+        if m.from_rev == 0 || m.from_rev > m.to_rev || m.to_rev > src.head_rev {
+            return Err(invalid(format!(
+                "merged_from: {}..{} is not in the history of `{}`",
+                m.from_rev, m.to_rev, m.branch
+            )));
+        }
+        merges.push(MergeRow {
+            source_branch_id: src.id,
+            from_rev: m.from_rev,
+            to_rev: m.to_rev,
+        });
+    }
+    Ok(merges)
+}
+
+/// A change set as a shelf stores it, checked the way a commit would check it but against
+/// `base_rev` of `branch` instead of the head: the change-set rules, blob existence and
+/// sizes, a parseable `.lodeconfig`, `base_id` against the file at `base_rev`, `copy_from`,
+/// `merged_from` and the provenance size. The caller needs `need` on every changed path.
+/// Returns the branch row. Hold the GC fence (shared) across this check and the write that
+/// stores the change set.
+#[allow(clippy::too_many_arguments)]
+pub async fn check_change_set(
+    state: &AppState,
+    caller: &Caller,
+    depot: &DepotRow,
+    branch: &str,
+    base_rev: u64,
+    changes: &[Change],
+    merged_from: &[MergedFrom],
+    provenance: Option<&Provenance>,
+    need: Level,
+) -> ApiResult<BranchRow> {
+    let d = depot.id;
+    check_shape(state, changes, !merged_from.is_empty())?;
+    let access = state.permissions().depot(caller, d).branch(branch);
+    let not_found = || ApiError::not_found(format!("no branch `{branch}`"));
+    if !access.reads_anything() {
+        return Err(not_found());
+    }
+    let name = branch.to_owned();
+    let found = state
+        .meta()
+        .read(move |tx| {
+            let Some(b) = tx.branch(d, &name)? else {
+                return Ok(None);
+            };
+            // The base must lie in the branch's history (§4.3).
+            let chain = tx.branch_chain(b.id)?;
+            let base = tx.revision(d, base_rev)?.filter(|r| {
+                r.num <= b.head_rev
+                    && chain.iter().any(|seg| {
+                        seg.branch_id == r.branch_id && seg.max_rev.map_or(true, |m| r.num <= m)
+                    })
+            });
+            Ok(Some((b, base)))
+        })
+        .await?;
+    let (b, base) = found.ok_or_else(not_found)?;
+    let base = base.ok_or_else(|| {
+        invalid(format!(
+            "revision {base_rev} is not in the history of `{branch}`"
+        ))
+    })?;
+    if b.state == BranchState::Archived {
+        return Err(ApiError::new(
+            ErrorCode::BranchArchived,
+            format!("branch `{branch}` is archived"),
+        ));
+    }
+    check_level(state, caller, d, branch, changes, need)?;
+    check_blobs(state, d, changes).await?;
+    check_lodeconfig(state, d, changes).await?;
+    TreeEditor::new(state.trees(), d)
+        .apply(&base.root_tree, &edit_ops(changes))
+        .await
+        .map_err(|e| match e {
+            EditError::OutOfDate(paths) => ApiError::new(
+                ErrorCode::OutOfDate,
+                format!("{} path(s) do not match revision {base_rev}", paths.len()),
+            )
+            .with_details(json!({ "paths": paths })),
+            other => edit_error(other),
+        })?;
+    check_copy_from(state, caller, d, changes).await?;
+    merge_rows(state, d, merged_from).await?;
+    if let Some(p) = provenance {
+        let text = serde_json::to_string(p).map_err(|_| ApiError::internal())?;
+        if text.len() > MAX_PROVENANCE_BYTES {
+            return Err(invalid(format!(
+                "provenance exceeds {MAX_PROVENANCE_BYTES} bytes"
+            )));
+        }
+    }
+    Ok(b)
 }
 
 fn change_row(c: &Change, before: Option<&TreeEntry>) -> ChangeRow {

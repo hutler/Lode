@@ -7,7 +7,7 @@ mod handlers;
 mod trees;
 
 pub use editor::{EditError, EditOp, Edited, Expect, TreeEditor};
-pub use engine::{commit, CommitOptions};
+pub use engine::{check_change_set, commit, CommitOptions};
 pub use handlers::routes;
 pub use trees::{lookup, TreeLoadError, TreeLoader, TreeSource};
 

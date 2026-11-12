@@ -183,5 +183,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 /// Every module compiled into this build. `[modules]` decides which are enabled. Keep in step
 /// with `lode_testkit::available_modules`.
 fn available_modules() -> lode_server::module::Modules {
-    vec![lode_mod_locks::Locks::module()]
+    vec![
+        lode_mod_locks::Locks::module(),
+        lode_mod_shelves::Shelves::module(),
+    ]
 }

@@ -11,6 +11,7 @@ expression: v
     "name": "fixer-bot",
     "kind": "agent"
   },
+  "agent_owner": "ana",
   "description": "Fix door",
   "state": "submitted",
   "submitted_rev": 1044,
@@ -34,5 +35,15 @@ expression: v
       "session": "s-1",
       "tool": "create_shelf"
     }
-  }
+  },
+  "diff": [
+    {
+      "path": "Source/Door.cpp",
+      "patch": "--- a/Source/Door.cpp\n+++ b/Source/Door.cpp\n@@ -1 +1 @@\n-a\n+b\n"
+    },
+    {
+      "path": "Content/Door.uasset",
+      "skipped": "binary"
+    }
+  ]
 }

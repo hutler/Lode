@@ -76,7 +76,10 @@ async fn record(log: RequestLog, req: Request, next: Next) -> Response {
 /// Every module `loded` is built with; `[modules]` in the configuration picks the enabled
 /// ones, as in `loded`.
 pub fn available_modules() -> lode_server::module::Modules {
-    vec![lode_mod_locks::Locks::module()]
+    vec![
+        lode_mod_locks::Locks::module(),
+        lode_mod_shelves::Shelves::module(),
+    ]
 }
 
 /// Options for [`TestServer::start_with`].

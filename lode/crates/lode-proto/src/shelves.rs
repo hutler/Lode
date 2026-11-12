@@ -1,6 +1,6 @@
 //! Shelves module (ARCHITECTURE §9.2).
 
-use lode_core::Change;
+use lode_core::{Change, DepotPath};
 use serde::{Deserialize, Serialize};
 
 use crate::commit::{MergedFrom, Provenance};
@@ -81,6 +81,9 @@ pub struct ShelfView {
     pub base_rev: u64,
     /// Owner, with kind, so clients can tell agent work apart.
     pub owner: PrincipalRef,
+    /// The user who owns the agent, when the owner is an agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_owner: Option<String>,
     /// Description.
     pub description: String,
     /// State.
@@ -103,6 +106,22 @@ pub struct ShelfView {
     /// Provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<Provenance>,
+    /// Per-file diffs against the base; present on `GET …/{id}?diff=true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff: Option<Vec<ShelfFileDiff>>,
+}
+
+/// The diff of one changed file of a shelf against its base revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShelfFileDiff {
+    /// Path.
+    pub path: DepotPath,
+    /// Unified diff (`--- a/path`, `+++ b/path`), for text files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
+    /// Why there is no patch: `binary`, `symlink` or `too_large`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
 }
 
 /// `GET /depots/{d}/shelves`.

@@ -481,6 +481,25 @@ blob API first.
   writes `shelf.submitted` in the commit transaction (`in_commit`).
 - Shelf responses include `version`, the owner's `kind` and, for agents, `owner`.
 
+Details of the implementation:
+
+- Create and `PUT` run the commit engine's checks through `Commits::check` (`ModuleCtx`):
+  change-set rules, blob existence and sizes, a parseable `.lodeconfig`, each `base_id`
+  against the file at `base_rev` (which must lie in the branch's history), `copy_from`,
+  `merged_from` and the provenance size, with `read` instead of `write` on every path. The
+  GC fence is held shared from the check until the rows are written.
+- A shelf is visible to a caller who can read its branch and every path in it; to anyone
+  else it does not exist (`not_found`, left out of lists).
+- `GET …` lists open shelves unless `state` is given, newest first, without changes.
+  `GET …/{id}` includes the changes; `?diff=true` adds `diff`, one entry per change with a
+  unified diff (`--- a/x`, `+++ b/x`, `/dev/null` for adds and deletes) for text files, or
+  `skipped` (`binary`, `symlink`, `too_large`, `missing`). Files over 1 MiB are not
+  diffed, and no more patches are made once 4 MiB of them are written.
+- `PUT` and `DELETE` work on open shelves only (`conflict` otherwise, with `details.state`).
+  Deleting keeps the shelf row with state `deleted` and drops its changes, so its blobs are
+  collected once the grace period has passed. Deleting a deleted shelf answers its view.
+- For an agent owner, the view carries `agent_owner`, the agent's owning user.
+
 ### 9.3 MCP (`lode-mod-mcp`)
 
 Streamable-HTTP MCP endpoint at `/mcp`, built on the official Rust MCP SDK. Each tool is a thin

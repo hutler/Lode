@@ -1319,6 +1319,24 @@ version = "0.1.0"
 [[package]]
 name = "lode-mod-shelves"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "diffy",
+ "http-body-util",
+ "lode-core",
+ "lode-meta",
+ "lode-proto",
+ "lode-server",
+ "lode-store",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+]
 
 [[package]]
 name = "lode-mod-webhooks"
@@ -1397,6 +1415,7 @@ dependencies = [
  "lode-client",
  "lode-core",
  "lode-mod-locks",
+ "lode-mod-shelves",
  "lode-proto",
  "lode-server",
  "serde_json",
@@ -1430,6 +1449,7 @@ dependencies = [
  "clap",
  "lode-meta",
  "lode-mod-locks",
+ "lode-mod-shelves",
  "lode-server",
  "serde_json",
  "tempfile",
