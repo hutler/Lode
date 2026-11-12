@@ -316,9 +316,14 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
   operations, `admin`. These three are the core scopes. Modules declare their own (`lock`,
   `shelve`, `checks`) through `Module::scopes()`. A token may be given any core scope and any
   scope of an enabled module; a scope whose module is disabled is kept but has no effect.
-- **Client materialization.** Every path from the server is re-validated on the client. Files
-  are written by opening each directory component without following symlinks, so a hostile or
-  buggy server cannot write outside the workspace root.
+- **Client materialization.** Every path from the server is re-validated on the client
+  (`DepotPath` rules, and a first segment of `.lode` in any case is refused). Before a file is
+  written, each directory component is checked with `lstat`: a symlink or non-directory there
+  stops the command with `unsafe_path`, and a missing one is created with a plain `mkdir`. The
+  file is downloaded into `.lode/tmp`, verified, and renamed into place, replacing a symlink
+  rather than writing through it. A hostile or buggy server therefore cannot write outside the
+  workspace root. A local process racing the client between the check and the rename is out of
+  scope.
 - **Bootstrap.** `loded init` creates the data directory and prints a one-time admin token.
   `loded reset-admin` (offline, on the server machine) revokes the `admin` user's tokens and
   prints a new one.
@@ -545,6 +550,12 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
 <root>/.lode/lock             held (an exclusive SQLite lock) by a command that changes the workspace
 ```
 
+`lode checkout` stores the revision it is filling in as `checkout_rev` before downloading,
+records a `file` row as each file lands, and removes `checkout_rev` after setting
+`synced_rev`. Rerunning `lode checkout` with the same target and directory finds
+`checkout_rev`, skips files whose row and on-disk hash already match, and fetches the rest.
+Other commands refuse a workspace that still has `checkout_rev`.
+
 A command that changes the workspace takes `.lode/lock` and fails at once with "workspace is
 in use" if another process holds it; the operating system releases it if `lode` is killed.
 Read-only commands such as `status` do not take it.
@@ -562,8 +573,14 @@ and `LODE_TOKEN_FILE` (path to a file holding a token), taking precedence over a
 login. There is deliberately no variable holding the token itself: it would be inherited by
 every process a build starts.
 
+**User config.** The user's config directory is the platform one (`~/.config/lode`,
+`%APPDATA%\lode\config`, `~/Library/Application Support/lode`), or `LODE_CONFIG_DIR` when
+set. It holds `settings.toml` (`server`, the default server, written by `lode login`) and
+`credentials/`. The server URL is taken from `--server`, then the workspace, then
+`LODE_SERVER`, then `settings.toml`.
+
 ```sql
-config     (key TEXT PK, value TEXT)   -- server_url, depot, branch, workspace_id, synced_rev, access_epoch, view json
+config     (key TEXT PK, value TEXT)   -- server_url, depot, branch, workspace_id, synced_rev, access_epoch, view json, checkout_rev
 file       (path TEXT PK, base_id BLOB NULL, kind INT, flags INT, size INT, mtime_ns INT,
             state TEXT /*normal|added|deleted|conflicted*/, copy_from_path, copy_from_rev,
             changelist_id INT NULL, lock_held INT DEFAULT 0)
@@ -573,7 +590,7 @@ conflict   (path TEXT PK, base_id BLOB, theirs_id BLOB, theirs_rev INT)
 
 Credentials are stored per server URL in the user's config directory with owner-only
 permissions, never in the workspace: one token file per server (scheme, host, port and path
-prefix) under `<config dir>/lode/credentials/`. On Unix the directory is `0700` and the files
+prefix) under `<config dir>/credentials/`. On Unix the directory is `0700` and the files
 `0600`; on Windows they sit under the user's profile and rely on its ACL.
 
 ### 10.2 Status scan
