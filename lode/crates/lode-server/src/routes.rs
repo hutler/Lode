@@ -27,6 +27,8 @@ pub fn core_routes() -> Router<AppState> {
         .route(paths::INFO, get(info))
         .merge(crate::auth::routes())
         .merge(crate::perm::routes())
+        .merge(crate::depots::routes())
+        .merge(crate::blobs::routes())
 }
 
 /// Adds the error fallback and the middleware stack, and binds the state.

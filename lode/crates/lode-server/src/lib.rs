@@ -5,8 +5,10 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod blobs;
 pub mod clock;
 pub mod config;
+pub mod depots;
 pub mod error;
 pub mod extract;
 pub mod perm;

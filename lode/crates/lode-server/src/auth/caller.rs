@@ -47,6 +47,23 @@ impl Caller {
         }
     }
 
+    /// Fails with `permission_denied` unless the token carries at least one of `scopes`.
+    pub fn require_any_scope(&self, scopes: &[&str]) -> Result<(), ApiError> {
+        if scopes.iter().any(|s| self.has_scope(s)) {
+            Ok(())
+        } else {
+            let list = scopes
+                .iter()
+                .map(|s| format!("`{s}`"))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            Err(ApiError::new(
+                ErrorCode::PermissionDenied,
+                format!("this token needs the {list} scope"),
+            ))
+        }
+    }
+
     /// Whether this is the built-in administrator.
     pub fn is_builtin_admin(&self) -> bool {
         self.principal.kind == PrincipalKind::User && self.principal.name == ADMIN_USER

@@ -16,12 +16,12 @@ pub use scopes::{ScopeRegistry, CORE_SCOPES, SCOPE_ADMIN, SCOPE_READ, SCOPE_WRIT
 pub use token::{generate_token, hash_token, TOKEN_PREFIX};
 
 /// Converts stored milliseconds to a timestamp.
-pub(crate) fn ms_to_time(ms: i64) -> time::OffsetDateTime {
+pub fn ms_to_time(ms: i64) -> time::OffsetDateTime {
     time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
         .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
 }
 
 /// Converts a timestamp to stored milliseconds.
-pub(crate) fn time_to_ms(t: time::OffsetDateTime) -> i64 {
+pub fn time_to_ms(t: time::OffsetDateTime) -> i64 {
     i64::try_from(t.unix_timestamp_nanos() / 1_000_000).unwrap_or(i64::MAX)
 }

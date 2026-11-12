@@ -245,6 +245,12 @@ impl DepotAccess {
         self.branch(branch).level(path)
     }
 
+    /// Whether the depot is visible to the caller at all: an administrator, or at least
+    /// one allow rule applies (on any branch or path).
+    pub fn is_visible(&self) -> bool {
+        self.bypass || self.rules.iter().any(|r| r.allow)
+    }
+
     /// The ids of the rules that apply, for diagnostics.
     pub fn rule_ids(&self) -> Vec<i64> {
         self.rules.iter().map(|r| r.id.0).collect()

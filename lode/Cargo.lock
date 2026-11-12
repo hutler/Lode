@@ -1017,6 +1017,8 @@ dependencies = [
  "argon2",
  "axum",
  "base64 0.22.1",
+ "blake3",
+ "bytes",
  "futures",
  "http-body-util",
  "lode-core",
@@ -1039,6 +1041,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "zstd",
 ]
 
 [[package]]

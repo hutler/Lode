@@ -91,6 +91,29 @@ impl From<lode_meta::MetaError> for ApiError {
     }
 }
 
+impl From<lode_store::StoreError> for ApiError {
+    fn from(e: lode_store::StoreError) -> Self {
+        use lode_store::StoreError as E;
+        match &e {
+            E::Io(io) if io.kind() == std::io::ErrorKind::InvalidData => {
+                ApiError::invalid_request(format!("invalid request body: {io}"))
+            }
+            E::Io(io) if io.kind() == std::io::ErrorKind::ConnectionAborted => {
+                ApiError::invalid_request("the request body ended early")
+            }
+            _ => {
+                let code = e.code();
+                if code == ErrorCode::Internal {
+                    tracing::error!(error = %e, "blob store error");
+                    ApiError::internal()
+                } else {
+                    ApiError::new(code, e.to_string())
+                }
+            }
+        }
+    }
+}
+
 /// Result type for handlers.
 pub type ApiResult<T> = Result<T, ApiError>;
 
