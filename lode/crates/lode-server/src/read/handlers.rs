@@ -21,12 +21,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::extract::{ApiPath, ApiQuery};
 use crate::state::AppState;
 
-/// Header naming the blob id of a file.
-pub const HEADER_ID: &str = "x-lode-id";
-/// Header naming a file's kind (`file` or `symlink`).
-pub const HEADER_KIND: &str = "x-lode-kind";
-/// Header saying whether a file is executable (`true` or `false`).
-pub const HEADER_EXECUTABLE: &str = "x-lode-executable";
+pub use lode_proto::consts::{HEADER_EXECUTABLE, HEADER_ID, HEADER_KIND};
 
 /// Read routes.
 pub fn routes() -> Router<AppState> {

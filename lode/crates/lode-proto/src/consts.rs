@@ -9,6 +9,15 @@ pub const API_BASE: &str = "/api/v1";
 /// Header carrying the access epoch on manifest responses (ARCHITECTURE §6).
 pub const HEADER_ACCESS_EPOCH: &str = "X-Lode-Access-Epoch";
 
+/// Header naming the blob id of a file served by `GET /files`.
+pub const HEADER_ID: &str = "x-lode-id";
+
+/// Header naming the kind (`file` or `symlink`) of a file served by `GET /files`.
+pub const HEADER_KIND: &str = "x-lode-kind";
+
+/// Header saying whether a file served by `GET /files` is executable (`true` or `false`).
+pub const HEADER_EXECUTABLE: &str = "x-lode-executable";
+
 /// Media type of manifest responses: one JSON object per line.
 pub const NDJSON: &str = "application/x-ndjson";
 

@@ -567,7 +567,9 @@ conflict   (path TEXT PK, base_id BLOB, theirs_id BLOB, theirs_rev INT)
 ```
 
 Credentials are stored per server URL in the user's config directory with owner-only
-permissions, never in the workspace.
+permissions, never in the workspace: one token file per server (scheme, host, port and path
+prefix) under `<config dir>/lode/credentials/`. On Unix the directory is `0700` and the files
+`0600`; on Windows they sit under the user's profile and rely on its ACL.
 
 ### 10.2 Status scan
 
