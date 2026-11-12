@@ -10,6 +10,7 @@
 mod cmd;
 mod context;
 mod error;
+mod local;
 mod materialize;
 mod output;
 
@@ -58,6 +59,22 @@ enum Command {
     /// Show or change which paths are checked out.
     #[command(subcommand)]
     View(cmd::view::ViewCmd),
+    /// Show changed files.
+    Status(cmd::status::StatusArgs),
+    /// Start tracking files.
+    Add(cmd::files::AddArgs),
+    /// Delete files (or stop tracking them with --keep).
+    Rm(cmd::files::RmArgs),
+    /// Move or rename files, keeping their history.
+    Mv(cmd::files::MoveArgs),
+    /// Copy files, recording where the copy came from.
+    Cp(cmd::files::MoveArgs),
+    /// Discard local changes.
+    Revert(cmd::revert::RevertArgs),
+    /// Show local changes as a unified diff.
+    Diff(cmd::diff::DiffArgs),
+    /// Delete untracked files.
+    Clean(cmd::revert::CleanArgs),
 }
 
 async fn run(cli: Cli) -> CliResult<Value> {
@@ -79,6 +96,14 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
         Some(Command::View(c)) => cmd::view::view(&ctx, c).await,
+        Some(Command::Status(a)) => cmd::status::status(&ctx, a).await,
+        Some(Command::Add(a)) => cmd::files::add(&ctx, a).await,
+        Some(Command::Rm(a)) => cmd::files::rm(&ctx, a).await,
+        Some(Command::Mv(a)) => cmd::files::mv(&ctx, a).await,
+        Some(Command::Cp(a)) => cmd::files::cp(&ctx, a).await,
+        Some(Command::Revert(a)) => cmd::revert::revert(&ctx, a).await,
+        Some(Command::Diff(a)) => cmd::diff::diff(&ctx, a).await,
+        Some(Command::Clean(a)) => cmd::revert::clean(&ctx, a).await,
     }
 }
 

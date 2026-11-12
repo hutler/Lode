@@ -603,6 +603,21 @@ write within the same timestamp tick cannot hide behind a matching stat. A track
 tracked even if an ignore pattern matches it. Local names that are not valid depot paths are
 listed and skipped; symlinks are reported as symlinks and never followed.
 
+**Local change commands.** `lode mv` and `lode cp` record the origin (`copy_from`, the source
+path at `synced_rev`) on an `added` row; `mv` also marks the source `deleted`, so a commit
+sends add-with-copy-from plus delete. Moving or copying an added file carries its origin
+along; moving a file back onto its deleted origin turns the pair back into an edit of the
+origin. `lode diff` prints a git-style unified diff (`--- a/x`, `+++ b/x`, `/dev/null` for
+adds and deletes) that `patch -p1` applies; binary files, and files over 16 MiB, are reported
+with their sizes only. Base content for diff comes from the blob cache or the server and is
+cached; `revert` restores from the cache or downloads straight into `.lode/tmp`, without
+filling the cache with large files. `lode clean` removes untracked (and with `--ignored`,
+ignored) files in the view and then the directories left empty, never `.lode/`.
+
+**Diff and merge library: `diffy` 0.5.** It produces unified patches and does three-way text
+merges with conflict markers, which `lode update` needs (§10.4). `imara-diff` is faster on
+very large inputs but has no three-way merge, so it would mean a second crate.
+
 ### 10.3 Commit
 
 Scan → select changes (paths, changelist) → refuse if any selected file is `conflicted` →

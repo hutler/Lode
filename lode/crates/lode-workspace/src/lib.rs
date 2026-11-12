@@ -60,7 +60,7 @@ impl Workspace {
     /// Refuses if `root` already is one.
     pub fn create(root: &Path, init: &WorkspaceInit) -> Result<Self> {
         std::fs::create_dir_all(root).at(root)?;
-        let root = std::fs::canonicalize(root).at(root)?;
+        let root = paths::canonical(root).at(root)?;
         let layout = Layout::new(&root);
         if layout.db().exists() {
             return Err(WorkspaceError::AlreadyAWorkspace(root));
@@ -92,7 +92,7 @@ impl Workspace {
 
     /// Opens the workspace containing `start` (a directory), searching upwards.
     pub fn discover(start: &Path) -> Result<Self> {
-        let start_abs = std::fs::canonicalize(start).at(start)?;
+        let start_abs = paths::canonical(start).at(start)?;
         let root = layout::discover(&start_abs)
             .ok_or_else(|| WorkspaceError::NotAWorkspace(start.to_path_buf()))?;
         Self::open(&root)

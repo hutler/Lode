@@ -51,6 +51,7 @@ axum = "0.8"
 blake3 = "1"
 bytes = "1"
 directories = "6"
+diffy = { version = "0.5", features = ["std"] }
 clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 globset = "0.4"

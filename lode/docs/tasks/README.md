@@ -87,3 +87,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T021 | review | `lode/T021-workspace` | status of 200,000 files: 1.8 s (debug build, Linux) |
 | T027 | review | `lode/T027-testkit` | adds commit failpoints to `lode-server` |
 | T022 | review | `lode/T022-checkout` | `rpassword` for the no-echo prompt; `cache_dir` setting not read yet, only `LODE_CACHE_DIR` |
+| T023 | review | `lode/T023-local-changes` | diff and merge crate: `diffy` 0.5 (needs Rust 1.85) |

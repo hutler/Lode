@@ -87,7 +87,7 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
         .join(lode_workspace::layout::DB_FILE)
         .is_file();
     let mut ws = if resuming {
-        let ws = Workspace::open(&std::fs::canonicalize(&dir)?)?;
+        let ws = Workspace::open(&lode_workspace::paths::canonical(&dir)?)?;
         let same = ws.db().config(keys::DEPOT)?.as_deref() == Some(depot.as_str())
             && ws.db().config(keys::BRANCH)?.as_deref() == Some(args.branch.as_str());
         if ws.db().config(CHECKOUT_REV)?.is_none() || !same {

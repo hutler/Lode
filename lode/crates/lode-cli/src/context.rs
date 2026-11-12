@@ -61,6 +61,8 @@ impl Ctx {
                 cwd.display()
             )));
         }
+        // Canonical, like the workspace root, so command-line paths can be matched to it.
+        let cwd = lode_workspace::paths::canonical(&cwd)?;
         let config_dir = match std::env::var_os("LODE_CONFIG_DIR") {
             Some(d) if !d.is_empty() => PathBuf::from(d),
             _ => directories::ProjectDirs::from("", "", "lode")

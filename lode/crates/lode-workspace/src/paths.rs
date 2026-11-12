@@ -61,6 +61,31 @@ pub fn to_depot(root: &Path, cwd: &Path, local: &Path) -> Result<Option<DepotPat
         })
 }
 
+/// `path` without the Windows verbatim prefix that `canonicalize` adds (`\\?\C:\x` becomes
+/// `C:\x`), so that it compares equal to paths typed by the user or returned by
+/// `current_dir`. Unchanged elsewhere, and for verbatim forms with no plain spelling.
+pub fn simplify(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::Prefix;
+        if let (Some(Component::Prefix(pre)), Some(text)) =
+            (path.components().next(), path.to_str())
+        {
+            match pre.kind() {
+                Prefix::VerbatimDisk(_) => return PathBuf::from(&text[4..]),
+                Prefix::VerbatimUNC(..) => return PathBuf::from(format!(r"\\{}", &text[8..])),
+                _ => {}
+            }
+        }
+    }
+    path
+}
+
+/// The canonical form of `path` (symlinks resolved), [`simplify`]-ed.
+pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(path).map(simplify)
+}
+
 /// Removes `.` and resolves `..` lexically, without touching the file system (symlinks in
 /// the workspace are content, never followed).
 fn normalize(p: &Path) -> PathBuf {
