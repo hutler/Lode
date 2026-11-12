@@ -4,9 +4,8 @@ use axum::extract::FromRequestParts;
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use lode_core::ErrorCode;
-use lode_meta::{PrincipalKind, PrincipalRow, Reads, TokenId};
+use lode_meta::{GroupId, PrincipalKind, PrincipalRow, Reads, TokenId};
 
-use super::scopes::SCOPE_ADMIN;
 use super::token::{ct_eq, hash_token, TOKEN_PREFIX};
 use crate::error::ApiError;
 use crate::state::AppState;
@@ -26,6 +25,8 @@ pub struct Caller {
     pub scopes: Vec<String>,
     /// The token used.
     pub token_id: TokenId,
+    /// Groups the principal belongs to, as of this request.
+    pub groups: Vec<GroupId>,
 }
 
 impl Caller {
@@ -49,20 +50,6 @@ impl Caller {
     /// Whether this is the built-in administrator.
     pub fn is_builtin_admin(&self) -> bool {
         self.principal.kind == PrincipalKind::User && self.principal.name == ADMIN_USER
-    }
-
-    /// Fails unless the caller may administer the server: the `admin` scope and the
-    /// built-in administrator. Access-rule based administration arrives with permissions.
-    pub fn require_server_admin(&self) -> Result<(), ApiError> {
-        self.require_scope(SCOPE_ADMIN)?;
-        if self.is_builtin_admin() {
-            Ok(())
-        } else {
-            Err(ApiError::new(
-                ErrorCode::PermissionDenied,
-                "only a server administrator can do this",
-            ))
-        }
     }
 }
 
@@ -104,11 +91,14 @@ pub(crate) async fn authenticate(state: &AppState, token: &str) -> Result<Caller
             let Some(row) = tx.token_by_hash(&hash)? else {
                 return Ok(None);
             };
-            let principal = tx.principal(row.principal_id)?;
-            Ok(principal.map(|p| (row, p)))
+            let Some(principal) = tx.principal(row.principal_id)? else {
+                return Ok(None);
+            };
+            let groups = tx.groups_of(principal.id)?;
+            Ok(Some((row, principal, groups)))
         })
         .await?;
-    let Some((row, principal)) = found else {
+    let Some((row, principal, groups)) = found else {
         return Err(unauthenticated("invalid token"));
     };
     if !ct_eq(&row.hash, &hash) {
@@ -135,5 +125,6 @@ pub(crate) async fn authenticate(state: &AppState, token: &str) -> Result<Caller
         scopes: state.scopes().effective(&row.scopes),
         principal,
         token_id: row.id,
+        groups,
     })
 }

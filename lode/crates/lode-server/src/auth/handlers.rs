@@ -332,7 +332,7 @@ async fn list_principals(
     State(state): State<AppState>,
     caller: Caller,
 ) -> ApiResult<Json<PrincipalList>> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     let list = state
         .meta()
         .read(|tx| {
@@ -363,7 +363,7 @@ async fn create_principal(
     caller: Caller,
     ApiJson(req): ApiJson<CreatePrincipalRequest>,
 ) -> ApiResult<(StatusCode, Json<PrincipalView>)> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     check_name("principal", &req.name)?;
     let kind = match req.kind {
         lode_proto::PrincipalKind::User => PrincipalKind::User,
@@ -435,7 +435,7 @@ async fn patch_principal(
     Path(name): Path<String>,
     ApiJson(req): ApiJson<PatchPrincipalRequest>,
 ) -> ApiResult<Json<PrincipalView>> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     let password_hash = match req.password {
         Some(pw) => {
             check_password(&pw)?;
@@ -477,7 +477,7 @@ async fn create_token_for(
     Path(name): Path<String>,
     ApiJson(req): ApiJson<CreateTokenRequest>,
 ) -> ApiResult<(StatusCode, Json<CreateTokenResponse>)> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     let expires = check_token_request(&state, &caller, &req)?;
     let target = state
         .meta()
@@ -495,7 +495,7 @@ async fn create_token_for(
 }
 
 async fn list_groups(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<GroupList>> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     let groups = state
         .meta()
         .read(|tx| {
@@ -522,7 +522,7 @@ async fn create_group(
     caller: Caller,
     ApiJson(req): ApiJson<CreateGroupRequest>,
 ) -> ApiResult<(StatusCode, Json<GroupView>)> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     check_name("group", &req.name)?;
     let name = req.name.clone();
     state
@@ -546,7 +546,7 @@ async fn change_member(
     name: String,
     add: bool,
 ) -> ApiResult<StatusCode> {
-    caller.require_server_admin()?;
+    state.permissions().require_server_admin(&caller)?;
     state
         .meta()
         .write(move |tx| {
@@ -564,6 +564,7 @@ async fn change_member(
             Ok(Ok(()))
         })
         .await??;
+    state.permissions().reload(state.meta()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

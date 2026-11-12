@@ -28,11 +28,18 @@ pub struct MigrationSet {
 /// The core schema.
 pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
     namespace: "core",
-    migrations: &[Migration {
-        version: 1,
-        name: "init",
-        sql: include_str!("../migrations/core/0001_init.sql"),
-    }],
+    migrations: &[
+        Migration {
+            version: 1,
+            name: "init",
+            sql: include_str!("../migrations/core/0001_init.sql"),
+        },
+        Migration {
+            version: 2,
+            name: "access_epoch",
+            sql: include_str!("../migrations/core/0002_access_epoch.sql"),
+        },
+    ],
 };
 
 const VERSION_TABLE: &str = "CREATE TABLE IF NOT EXISTS schema_version (

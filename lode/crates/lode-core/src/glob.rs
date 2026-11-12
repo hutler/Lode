@@ -79,6 +79,13 @@ impl PathGlobSet {
     pub fn matches_str(&self, s: &str) -> bool {
         self.set.is_match(s)
     }
+
+    /// Fills `out` with the indices (into [`PathGlobSet::patterns`]) of every pattern that
+    /// matches `s`, in ascending order. `out` is cleared first, so one buffer can be reused
+    /// across many paths.
+    pub fn matches_into(&self, s: &str, out: &mut Vec<usize>) {
+        self.set.matches_into(s, out);
+    }
 }
 
 impl PartialEq for PathGlobSet {
@@ -115,6 +122,16 @@ mod tests {
         assert!(!g.matches_str("release/1.0/hotfix"));
         assert!(g.matches(&p("src/main.rs")));
         assert!(!g.matches(&p("src/a/main.rs")));
+    }
+
+    #[test]
+    fn matches_into_reports_every_matching_pattern() {
+        let g = PathGlobSet::new(["**", "src/**", "*.md", "src/*.rs"]).unwrap();
+        let mut out = vec![99];
+        g.matches_into("src/main.rs", &mut out);
+        assert_eq!(out, [0, 1, 3]);
+        g.matches_into("README.md", &mut out);
+        assert_eq!(out, [0, 2]);
     }
 
     #[test]

@@ -105,3 +105,16 @@ opt-level = 3
 
 [profile.dev.package.blake2]
 opt-level = 3
+
+# Glob matching backs every permission check; keep the bulk-check test fast in debug builds.
+[profile.dev.package.globset]
+opt-level = 3
+
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.aho-corasick]
+opt-level = 3
+
+[profile.dev.package.memchr]
+opt-level = 3

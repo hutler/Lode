@@ -76,8 +76,10 @@ pub mod paths {
     pub const ADMIN_GROUPS: &str = "/api/v1/admin/groups";
     /// Admin: add (`PUT`) or remove (`DELETE`) a group member.
     pub const ADMIN_GROUP_MEMBER: &str = "/api/v1/admin/groups/{group}/members/{name}";
-    /// Admin: access rules.
+    /// Admin: access rules (`GET`, `POST`).
     pub const ADMIN_ACL: &str = "/api/v1/admin/acl";
+    /// Admin: one access rule (`DELETE`).
+    pub const ADMIN_ACL_RULE: &str = "/api/v1/admin/acl/{id}";
     /// Admin: garbage collection of a depot.
     pub const ADMIN_GC: &str = "/api/v1/admin/depots/{d}/gc";
     /// Admin: consistency check of a depot.

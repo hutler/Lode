@@ -169,6 +169,7 @@ rev_merge  (depot_id, rev, source_branch_id, from_rev, to_rev)   -- inclusive ra
 rev_meta   (depot_id, rev, key TEXT, value TEXT, PRIMARY KEY (depot_id, rev, key))
 outbox     (id INTEGER PK AUTOINCREMENT, depot_id, kind TEXT, payload TEXT /*json*/, created_at)
 outbox_cursor (subscriber TEXT PK, last_id INT)
+counter    (name TEXT PK, value INT)   -- 'access_epoch' (§6), raised with every acl or grp_member change
 ```
 
 `rev_change` is the per-path history index (drives `log <path>`, `blame`, rename following).

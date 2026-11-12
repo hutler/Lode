@@ -77,7 +77,10 @@ fn module_migration_set_applies_once_and_is_tracked_separately() {
     let path = dir.path().join("meta.db");
     let s = MetaStore::open(&path, &[MOD_SET], MetaConfig::default()).unwrap();
     assert_eq!(s.with_writer(|c| schema_version(c, "locks")).unwrap(), 1);
-    assert_eq!(s.with_writer(|c| schema_version(c, "core")).unwrap(), 1);
+    assert_eq!(
+        s.with_writer(|c| schema_version(c, "core")).unwrap(),
+        CORE_MIGRATIONS.migrations.len() as u32
+    );
     drop(s);
     // Reopening runs nothing again (a second CREATE TABLE would fail).
     let s = MetaStore::open(&path, &[MOD_SET], MetaConfig::default()).unwrap();
@@ -548,4 +551,55 @@ async fn online_backup_copies_the_database() {
         .await
         .unwrap()
         .is_some());
+}
+
+#[tokio::test]
+async fn access_epoch_rises_with_rules_and_membership() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = open(&dir);
+    let epochs = s
+        .write(|tx| {
+            let mut seen = vec![tx.access_epoch()?];
+            let user = tx.create_principal(
+                &NewPrincipal {
+                    kind: PrincipalKind::User,
+                    name: "ana".into(),
+                    display_name: None,
+                    owner_id: None,
+                    password_hash: None,
+                },
+                NOW,
+            )?;
+            let g = tx.create_group("artists")?;
+            seen.push(tx.access_epoch()?);
+            tx.add_group_member(g, user)?;
+            seen.push(tx.access_epoch()?);
+            tx.remove_group_member(g, user)?;
+            seen.push(tx.access_epoch()?);
+            let id = tx.insert_acl(&AclRow {
+                id: AclId(0),
+                depot_id: None,
+                subject: AclSubject::All,
+                branch_glob: "*".into(),
+                path_glob: "**".into(),
+                effect: AclEffect::Allow,
+                level: AccessLevel::Read,
+            })?;
+            seen.push(tx.access_epoch()?);
+            tx.delete_acl(id)?;
+            seen.push(tx.access_epoch()?);
+            Ok(seen)
+        })
+        .await
+        .unwrap();
+    assert_eq!(epochs, [1, 1, 2, 3, 4, 5]);
+    // A failed transaction leaves the epoch where it was.
+    let r: Result<(), _> = s
+        .write(|tx| {
+            tx.bump_access_epoch()?;
+            Err(MetaError::BadValue("abort".into()))
+        })
+        .await;
+    assert!(r.is_err());
+    assert_eq!(s.read(|tx| tx.access_epoch()).await.unwrap(), 5);
 }

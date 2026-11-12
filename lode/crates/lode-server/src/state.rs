@@ -8,6 +8,7 @@ use lode_store::BlobStore;
 use crate::auth::{LoginLimiter, ScopeRegistry};
 use crate::clock::SharedClock;
 use crate::config::ServerConfig;
+use crate::perm::Permissions;
 
 /// Cheap to clone; everything lives behind one `Arc`.
 #[derive(Clone)]
@@ -23,6 +24,7 @@ struct Inner {
     modules: Vec<String>,
     scopes: ScopeRegistry,
     login_limiter: LoginLimiter,
+    permissions: Permissions,
 }
 
 impl AppState {
@@ -44,6 +46,7 @@ impl AppState {
                 modules,
                 scopes: ScopeRegistry::core(),
                 login_limiter: LoginLimiter::default(),
+                permissions: Permissions::default(),
             }),
         }
     }
@@ -76,6 +79,11 @@ impl AppState {
     /// Failed-login tracking.
     pub fn login_limiter(&self) -> &LoginLimiter {
         &self.inner.login_limiter
+    }
+
+    /// Access rules. Empty until [`Permissions::reload`] runs, which `open_state` does.
+    pub fn permissions(&self) -> &Permissions {
+        &self.inner.permissions
     }
 
     /// Enabled modules.

@@ -362,6 +362,16 @@ pub trait Reads {
         collect(rows)
     }
 
+    /// The access epoch: raised by every change to access rules or group membership.
+    fn access_epoch(&self) -> Result<u64> {
+        let v: i64 = self.db().query_row(
+            "SELECT value FROM counter WHERE name = 'access_epoch'",
+            [],
+            |r| r.get(0),
+        )?;
+        u64::try_from(v).map_err(|_| MetaError::BadValue("negative access epoch".into()))
+    }
+
     /// Every access rule, in id order.
     fn acl_all(&self) -> Result<Vec<AclRow>> {
         let mut st = self
@@ -659,20 +669,29 @@ impl WriteTx<'_> {
         Ok(GroupId(self.conn().last_insert_rowid()))
     }
 
-    /// Adds a member; adding an existing member does nothing.
+    /// Adds a member; adding an existing member does nothing. Raises the access epoch.
     pub fn add_group_member(&self, group: GroupId, principal: PrincipalId) -> Result<()> {
         self.conn().execute(
             "INSERT OR IGNORE INTO grp_member (grp_id, principal_id) VALUES (?1, ?2)",
             params![group.0, principal.0],
         )?;
-        Ok(())
+        self.bump_access_epoch()
     }
 
-    /// Removes a member; removing a non-member does nothing.
+    /// Removes a member; removing a non-member does nothing. Raises the access epoch.
     pub fn remove_group_member(&self, group: GroupId, principal: PrincipalId) -> Result<()> {
         self.conn().execute(
             "DELETE FROM grp_member WHERE grp_id = ?1 AND principal_id = ?2",
             params![group.0, principal.0],
+        )?;
+        self.bump_access_epoch()
+    }
+
+    /// Raises the access epoch by one, in this transaction.
+    pub fn bump_access_epoch(&self) -> Result<()> {
+        self.conn().execute(
+            "UPDATE counter SET value = value + 1 WHERE name = 'access_epoch'",
+            [],
         )?;
         Ok(())
     }
@@ -730,7 +749,7 @@ impl WriteTx<'_> {
             .execute("DELETE FROM token WHERE principal_id = ?1", [principal.0])?)
     }
 
-    /// Adds an access rule; `rule.id` is ignored.
+    /// Adds an access rule; `rule.id` is ignored. Raises the access epoch.
     pub fn insert_acl(&self, rule: &AclRow) -> Result<AclId> {
         let (kind, sid) = match rule.subject {
             AclSubject::All => ("all", None),
@@ -751,16 +770,19 @@ impl WriteTx<'_> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![rule.depot_id.map(|d| d.0), kind, sid, rule.branch_glob, rule.path_glob, effect, level],
         )?;
-        Ok(AclId(self.conn().last_insert_rowid()))
+        let id = AclId(self.conn().last_insert_rowid());
+        self.bump_access_epoch()?;
+        Ok(id)
     }
 
-    /// Deletes an access rule.
+    /// Deletes an access rule. Raises the access epoch.
     pub fn delete_acl(&self, id: AclId) -> Result<()> {
         self.expect_one(
             self.conn()
                 .execute("DELETE FROM acl WHERE id = ?1", [id.0])?,
             "acl rule",
-        )
+        )?;
+        self.bump_access_epoch()
     }
 
     /// Creates a branch row. The caller inserts the revision that `created_rev` and

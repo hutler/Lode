@@ -197,7 +197,9 @@ pub async fn open_state(
         },
     )
     .await?;
-    Ok(AppState::new(meta, Arc::new(blobs), config, clock, modules))
+    let state = AppState::new(meta, Arc::new(blobs), config, clock, modules);
+    state.permissions().reload(state.meta()).await?;
+    Ok(state)
 }
 
 /// The remote address of a connection, available to handlers as

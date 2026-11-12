@@ -9,6 +9,7 @@ pub mod clock;
 pub mod config;
 pub mod error;
 pub mod extract;
+pub mod perm;
 pub mod routes;
 pub mod server;
 pub mod state;
@@ -19,6 +20,7 @@ pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{ConfigError, Limits, ModulesConfig, ServerConfig, TlsConfig};
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath};
+pub use perm::{BranchAccess, DepotAccess, Level, Permissions};
 pub use routes::{core_routes, finish, router, REQUEST_ID_HEADER};
 pub use server::{
     init, open_state, reset_admin, shutdown_signal, BoundServer, ClientInfo, InitReport,
