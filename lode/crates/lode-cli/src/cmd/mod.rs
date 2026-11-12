@@ -8,4 +8,5 @@ pub mod history;
 pub mod login;
 pub mod revert;
 pub mod status;
+pub mod update;
 pub mod view;

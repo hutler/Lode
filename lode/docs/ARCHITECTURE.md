@@ -547,6 +547,7 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
 <root>/.lode/workspace.db     SQLite
 <root>/.lode/cache/           blob cache for diff/merge bases, LRU, default cap 1 GiB
 <root>/.lode/tmp/             downloads in progress (same filesystem as the files)
+<root>/.lode/conflicts/       local content set aside by text conflicts, by id, until resolved
 <root>/.lode/lock             held (an exclusive SQLite lock) by a command that changes the workspace
 ```
 
@@ -580,12 +581,12 @@ set. It holds `settings.toml` (`server`, the default server, written by `lode lo
 `LODE_SERVER`, then `settings.toml`.
 
 ```sql
-config     (key TEXT PK, value TEXT)   -- server_url, depot, branch, workspace_id, synced_rev, access_epoch, view json, checkout_rev, pending_commit
+config     (key TEXT PK, value TEXT)   -- server_url, depot, branch, workspace_id, synced_rev, access_epoch, view json, checkout_rev, pending_commit, update_rev
 file       (path TEXT PK, base_id BLOB NULL, kind INT, flags INT, size INT, mtime_ns INT,
             state TEXT /*normal|added|deleted|conflicted*/, copy_from_path, copy_from_rev,
             changelist_id INT NULL, lock_held INT DEFAULT 0)
 changelist (id INTEGER PK, name TEXT UNIQUE, description TEXT)
-conflict   (path TEXT PK, base_id BLOB, theirs_id BLOB, theirs_rev INT)
+conflict   (path TEXT PK, base_id BLOB, theirs_id BLOB, theirs_rev INT, mine_id BLOB)
 ```
 
 Credentials are stored per server URL in the user's config directory with owner-only
@@ -660,7 +661,30 @@ New content is downloaded to `.lode/tmp`, verified against its id, then renamed 
 set when all entries are processed.
 
 Text or binary: `.lodeconfig` `[files]` patterns first, otherwise binary if the first 8 KiB
-contains a NUL byte.
+contains a NUL byte. Files over 16 MiB and symlinks are handled as binary.
+
+Details of the client implementation:
+
+- The target revision is stored as `update_rev` before anything changes. A rerun continues to
+  it with the same delta; rows already at the incoming id are skipped, and a conflict already
+  recorded for that revision is kept as it is. Merges and conflicts are written first, then
+  deletions (with directories left empty), then downloads.
+- An update refuses to start while conflicts are unresolved or a commit is pending. Going to
+  an older revision is refused if any affected file has local changes.
+- A file missing on disk (without `rm`) counts as unmodified, so it is replaced or deleted.
+  A local add meeting an incoming add with the same content becomes tracked; with other
+  content it is a conflict, like an untracked file in the way.
+- On a conflict the row's `base_id` becomes the incoming id (none for an incoming delete),
+  and the `conflict` row keeps the old base, the incoming id and revision. A text conflict
+  writes the markers into the file and keeps the local version in `.lode/conflicts/`
+  (`mine_id`).
+- `lode resolve --theirs` restores the incoming version (or deletes the file);
+  `--mine` restores the kept local version (or keeps the file as it is); `--merged` keeps the
+  file as it is. A file kept against an incoming delete becomes an add; a local delete kept
+  against an incoming change stays a delete. Resolving removes `.theirs-r<N>` and the kept
+  copy. `revert` of a conflicted file takes theirs.
+- In a full-manifest sync, a tracked file absent from the manifest that has local changes is
+  untracked and left on disk (`kept`).
 
 ### 10.5 Merge
 

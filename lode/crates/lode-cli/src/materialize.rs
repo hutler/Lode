@@ -84,15 +84,17 @@ pub fn prepare_target(root: &Path, path: &DepotPath) -> CliResult<PathBuf> {
     Ok(target)
 }
 
+/// Sets a file's executable bit (no-op where there is none).
 #[cfg(unix)]
-fn set_mode(file: &Path, executable: bool) -> io::Result<()> {
+pub fn set_mode(file: &Path, executable: bool) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mode = if executable { 0o755 } else { 0o644 };
     fs::set_permissions(file, fs::Permissions::from_mode(mode))
 }
 
+/// Sets a file's executable bit (no-op where there is none).
 #[cfg(not(unix))]
-fn set_mode(_file: &Path, _executable: bool) -> io::Result<()> {
+pub fn set_mode(_file: &Path, _executable: bool) -> io::Result<()> {
     Ok(())
 }
 

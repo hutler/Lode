@@ -90,3 +90,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T023 | review | `lode/T023-local-changes` | diff and merge crate: `diffy` 0.5 (needs Rust 1.85) |
 | T026 | review | `lode/T026-history` | snapshot tests use `insta`; `--depot` is an option of `log`/`cat`/`ls` |
 | T024 | review | `lode/T024-commit` | missing files stop a commit (use `rm` or `revert`) |
+| T025 | review | `lode/T025-update` | workspace schema 2: `conflict.mine_id` for `resolve --mine` |

@@ -342,6 +342,7 @@ async fn revert_all_clears_conflicts_and_their_files() {
                 base_id: r.base_id,
                 theirs_id: r.base_id,
                 theirs_rev: 7,
+                mine_id: None,
             })
         })
         .unwrap();

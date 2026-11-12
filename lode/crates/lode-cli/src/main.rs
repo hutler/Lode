@@ -77,6 +77,10 @@ enum Command {
     Clean(cmd::revert::CleanArgs),
     /// Send local changes to the server as a new revision.
     Commit(cmd::commit::CommitArgs),
+    /// Bring the workspace to a newer (or older) revision, merging local changes.
+    Update(cmd::update::UpdateArgs),
+    /// Settle a conflict left by an update.
+    Resolve(cmd::update::ResolveArgs),
     /// Show revision history.
     Log(cmd::history::LogArgs),
     /// Print a file as of a revision.
@@ -113,6 +117,8 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Diff(a)) => cmd::diff::diff(&ctx, a).await,
         Some(Command::Clean(a)) => cmd::revert::clean(&ctx, a).await,
         Some(Command::Commit(a)) => cmd::commit::commit(&ctx, a).await,
+        Some(Command::Update(a)) => cmd::update::update(&ctx, a).await,
+        Some(Command::Resolve(a)) => cmd::update::resolve(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,

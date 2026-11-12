@@ -40,6 +40,8 @@ const MIGRATIONS: &[&str] = &[
         theirs_id  BLOB,
         theirs_rev INTEGER
      ) WITHOUT ROWID;",
+    // 2: the local content before a text merge wrote conflict markers (`resolve --mine`).
+    "ALTER TABLE conflict ADD COLUMN mine_id BLOB;",
 ];
 
 /// Newest schema version this build knows.
@@ -156,6 +158,9 @@ pub struct ConflictRow {
     pub theirs_id: Option<ObjectId>,
     /// Revision the incoming content came from.
     pub theirs_rev: u64,
+    /// The local content before conflict markers were written into the file, kept in
+    /// `.lode/conflicts/`; `None` when the local file was left as it was.
+    pub mine_id: Option<ObjectId>,
 }
 
 /// A named changelist.
@@ -360,9 +365,9 @@ impl WorkspaceDb {
 
     /// Every conflict.
     pub fn conflicts(&self) -> Result<Vec<ConflictRow>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT path, base_id, theirs_id, theirs_rev FROM conflict ORDER BY path")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT path, base_id, theirs_id, theirs_rev, mine_id FROM conflict ORDER BY path",
+        )?;
         let raws = stmt
             .query_map([], |r| {
                 Ok((
@@ -370,16 +375,18 @@ impl WorkspaceDb {
                     r.get::<_, Option<Vec<u8>>>(1)?,
                     r.get::<_, Option<Vec<u8>>>(2)?,
                     r.get::<_, i64>(3)?,
+                    r.get::<_, Option<Vec<u8>>>(4)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         raws.into_iter()
-            .map(|(p, b, t, rev)| {
+            .map(|(p, b, t, rev, m)| {
                 Ok(ConflictRow {
                     path: path_from(p)?,
                     base_id: id_from(b)?,
                     theirs_id: id_from(t)?,
                     theirs_rev: u64::try_from(rev).unwrap_or(0),
+                    mine_id: id_from(m)?,
                 })
             })
             .collect()
@@ -480,13 +487,14 @@ impl DbTx<'_> {
     /// Records a conflict.
     pub fn put_conflict(&self, c: &ConflictRow) -> Result<()> {
         self.tx.execute(
-            "INSERT OR REPLACE INTO conflict (path, base_id, theirs_id, theirs_rev)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR REPLACE INTO conflict (path, base_id, theirs_id, theirs_rev, mine_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 c.path.as_str(),
                 c.base_id.as_ref().map(|id| id.as_bytes().to_vec()),
                 c.theirs_id.as_ref().map(|id| id.as_bytes().to_vec()),
                 size_i64(c.theirs_rev),
+                c.mine_id.as_ref().map(|id| id.as_bytes().to_vec()),
             ],
         )?;
         Ok(())
@@ -557,6 +565,7 @@ mod tests {
                 base_id: None,
                 theirs_id: Some(id),
                 theirs_rev: 9,
+                mine_id: Some(id),
             })
         })
         .unwrap();

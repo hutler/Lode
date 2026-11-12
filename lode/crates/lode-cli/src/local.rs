@@ -12,7 +12,8 @@ use lode_core::{DepotPath, EntryKind, ObjectId};
 use lode_workspace::db::keys;
 use lode_workspace::scan::stat_for_row;
 use lode_workspace::{
-    BlobCache, FileRow, FileState, ScanOptions, ScanReport, Workspace, DEFAULT_CACHE_CAP,
+    BlobCache, ConflictRow, FileRow, FileState, ScanOptions, ScanReport, Workspace,
+    DEFAULT_CACHE_CAP,
 };
 use serde_json::json;
 
@@ -104,6 +105,24 @@ pub fn theirs_path(local: &Path, rev: u64) -> PathBuf {
     let mut name = local.as_os_str().to_owned();
     name.push(format!(".theirs-r{rev}"));
     PathBuf::from(name)
+}
+
+/// Where `.lode/conflicts/` keeps the local content `id` set aside by a text conflict.
+pub fn mine_path(ws: &Workspace, id: &ObjectId) -> PathBuf {
+    ws.layout().conflicts().join(id.to_hex())
+}
+
+/// Forgets a conflict: its row, its `.theirs-r<N>` file and the content it set aside.
+pub fn clear_conflict(ws: &mut Workspace, c: &ConflictRow) -> CliResult<()> {
+    remove_if_exists(&theirs_path(&ws.local_path(&c.path), c.theirs_rev))?;
+    ws.db_mut().write(|tx| tx.remove_conflict(&c.path))?;
+    if let Some(id) = c.mine_id {
+        // Two conflicts can set aside the same content.
+        if !ws.db().conflicts()?.iter().any(|o| o.mine_id == Some(id)) {
+            remove_if_exists(&mine_path(ws, &id))?;
+        }
+    }
+    Ok(())
 }
 
 /// Removes a file if it is there.

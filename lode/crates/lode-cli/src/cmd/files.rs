@@ -231,11 +231,10 @@ pub async fn rm(ctx: &Ctx, args: RmArgs) -> CliResult<Value> {
         }
         let conflict = ws.db().conflicts()?.into_iter().find(|c| c.path == e.path);
         if let Some(c) = &conflict {
-            local::remove_if_exists(&local::theirs_path(&ws.local_path(&e.path), c.theirs_rev))?;
+            local::clear_conflict(&mut ws, c)?;
         }
         ws.db_mut().write(|tx| {
-            tx.remove_conflict(&e.path)?;
-            if row.state == FileState::Added {
+            if row.state == FileState::Added || row.base_id.is_none() {
                 tx.remove_file(&e.path)?;
             } else {
                 let mut r = row.clone();

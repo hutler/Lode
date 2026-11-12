@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use crate::context::Ctx;
 use crate::error::{CliError, CliResult};
 use crate::local::{self, under, Bases};
+use crate::materialize::remove_and_prune;
 
 /// `lode revert` options.
 #[derive(Debug, clap::Args)]
@@ -61,6 +62,11 @@ pub async fn revert(ctx: &Ctx, args: RevertArgs) -> CliResult<Value> {
             Status::Missing if row.state == FileState::Added => {
                 ws.db_mut().write(|tx| tx.remove_file(&e.path))?;
             }
+            // A conflict with a deletion on the server: taking theirs removes the file.
+            Status::Conflicted if row.base_id.is_none() => {
+                remove_and_prune(ws.root(), &e.path)?;
+                ws.db_mut().write(|tx| tx.remove_file(&e.path))?;
+            }
             Status::Modified | Status::Missing | Status::Deleted | Status::Conflicted => {
                 bases.restore(&mut ws, row).await?;
             }
@@ -73,8 +79,7 @@ pub async fn revert(ctx: &Ctx, args: RevertArgs) -> CliResult<Value> {
         if !args.all && !paths.iter().any(|p| under(&c.path, p)) {
             continue;
         }
-        local::remove_if_exists(&local::theirs_path(&ws.local_path(&c.path), c.theirs_rev))?;
-        ws.db_mut().write(|tx| tx.remove_conflict(&c.path))?;
+        local::clear_conflict(&mut ws, c)?;
     }
     for p in &reverted {
         ctx.out.line(format!("Reverted {p}"));

@@ -14,6 +14,8 @@ pub const LOCK_FILE: &str = "lock";
 pub const CACHE_DIR: &str = "cache";
 /// Downloads in progress; on the same file system as the files, so a rename is atomic.
 pub const TMP_DIR: &str = "tmp";
+/// Directory under `.lode` holding local content set aside by a conflict.
+pub const CONFLICTS_DIR: &str = "conflicts";
 /// Name of ignore files (gitignore syntax), at the root or in any directory.
 pub const IGNORE_FILE: &str = ".lodeignore";
 
@@ -57,6 +59,11 @@ impl Layout {
     /// `.lode/tmp/`.
     pub fn tmp(&self) -> PathBuf {
         self.dot_lode().join(TMP_DIR)
+    }
+
+    /// `.lode/conflicts/`: local content set aside by text conflicts, by id.
+    pub fn conflicts(&self) -> PathBuf {
+        self.dot_lode().join(CONFLICTS_DIR)
     }
 
     /// Creates the directories.
