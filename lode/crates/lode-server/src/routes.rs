@@ -1,0 +1,87 @@
+//! Router assembly: core routes, the error fallback and the middleware stack.
+
+use std::any::Any;
+
+use axum::extract::{DefaultBodyLimit, State};
+use axum::http::{HeaderName, Request, Response};
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::{Json, Router};
+use lode_proto::auth::Info;
+use lode_proto::consts::{paths, API_VERSION};
+use tower::ServiceBuilder;
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::trace::TraceLayer;
+
+use crate::error::ApiError;
+use crate::state::AppState;
+
+/// Header carrying the per-request id.
+pub const REQUEST_ID_HEADER: &str = "x-request-id";
+
+/// The core routes, without fallback or middleware. Modules and tests merge their own routes
+/// into this before calling [`finish`].
+pub fn core_routes() -> Router<AppState> {
+    Router::new().route(paths::INFO, get(info))
+}
+
+/// Adds the error fallback and the middleware stack, and binds the state.
+pub fn finish(routes: Router<AppState>, state: AppState) -> Router {
+    let limit = usize::try_from(state.config().limits.max_request_json).unwrap_or(usize::MAX);
+    let request_id = HeaderName::from_static(REQUEST_ID_HEADER);
+    routes
+        .fallback(fallback)
+        .method_not_allowed_fallback(method_not_allowed)
+        .layer(DefaultBodyLimit::max(limit))
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetRequestIdLayer::new(request_id.clone(), MakeRequestUuid))
+                .layer(TraceLayer::new_for_http().make_span_with(make_span))
+                .layer(PropagateRequestIdLayer::new(request_id))
+                .layer(CatchPanicLayer::custom(on_panic)),
+        )
+        .with_state(state)
+}
+
+/// The full router of a server with no modules.
+pub fn router(state: AppState) -> Router {
+    finish(core_routes(), state)
+}
+
+async fn info(State(state): State<AppState>) -> Json<Info> {
+    Json(Info {
+        server_version: env!("CARGO_PKG_VERSION").to_owned(),
+        api_version: API_VERSION.to_owned(),
+        modules: state.modules().to_vec(),
+    })
+}
+
+async fn fallback() -> ApiError {
+    ApiError::not_found("no such endpoint")
+}
+
+async fn method_not_allowed() -> ApiError {
+    ApiError::not_found("this endpoint does not support that method")
+}
+
+fn make_span<B>(req: &Request<B>) -> tracing::Span {
+    let id = req
+        .headers()
+        .get(REQUEST_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("-");
+    // The path is logged, the query string is not: it can carry depot paths.
+    tracing::info_span!("request", request_id = %id, method = %req.method(), path = %req.uri().path())
+}
+
+fn on_panic(payload: Box<dyn Any + Send + 'static>) -> Response<axum::body::Body> {
+    // The message goes to the server log only; the client gets a fixed `internal` body.
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    tracing::error!(panic = %message, "request handler panicked");
+    ApiError::internal().into_response()
+}

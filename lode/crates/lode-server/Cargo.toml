@@ -10,3 +10,32 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+axum.workspace = true
+futures.workspace = true
+lode-core.workspace = true
+lode-meta.workspace = true
+lode-proto.workspace = true
+lode-store.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+toml.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+http-body-util = "0.1"
+tower = { workspace = true, features = ["util"] }
+rustls.workspace = true
+tokio-rustls.workspace = true
+serde_json.workspace = true
