@@ -23,7 +23,9 @@ pub const REQUEST_ID_HEADER: &str = "x-request-id";
 /// The core routes, without fallback or middleware. Modules and tests merge their own routes
 /// into this before calling [`finish`].
 pub fn core_routes() -> Router<AppState> {
-    Router::new().route(paths::INFO, get(info))
+    Router::new()
+        .route(paths::INFO, get(info))
+        .merge(crate::auth::routes())
 }
 
 /// Adds the error fallback and the middleware stack, and binds the state.

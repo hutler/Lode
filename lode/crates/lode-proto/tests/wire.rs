@@ -422,6 +422,19 @@ fn admin_types() {
         }
     );
     snap!(
+        "patch_principal_request",
+        PatchPrincipalRequest {
+            disabled: Some(true),
+            password: None,
+        }
+    );
+    snap!(
+        "create_group_request",
+        CreateGroupRequest {
+            name: "artists".into(),
+        }
+    );
+    snap!(
         "group_list",
         GroupList {
             groups: vec![GroupView {

@@ -68,8 +68,14 @@ pub mod paths {
     pub const BLAME: &str = "/api/v1/depots/{d}/blame";
     /// Admin: principals.
     pub const ADMIN_PRINCIPALS: &str = "/api/v1/admin/principals";
+    /// Admin: one principal (`PATCH`).
+    pub const ADMIN_PRINCIPAL: &str = "/api/v1/admin/principals/{name}";
+    /// Admin: create a token for another principal (`POST`).
+    pub const ADMIN_PRINCIPAL_TOKENS: &str = "/api/v1/admin/principals/{name}/tokens";
     /// Admin: groups.
     pub const ADMIN_GROUPS: &str = "/api/v1/admin/groups";
+    /// Admin: add (`PUT`) or remove (`DELETE`) a group member.
+    pub const ADMIN_GROUP_MEMBER: &str = "/api/v1/admin/groups/{group}/members/{name}";
     /// Admin: access rules.
     pub const ADMIN_ACL: &str = "/api/v1/admin/acl";
     /// Admin: garbage collection of a depot.

@@ -267,7 +267,7 @@ Base path `/api/v1`. JSON unless stated. Auth: `Authorization: Bearer <token>`.
 | `GET /depots/{d}/tree?rev=&path=` | List one directory |
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision (M5) |
-| `…/admin/principals`, `/groups`, `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration |
+| `…/admin/principals[/{name}]` (`GET`/`POST`; `PATCH` `{disabled?, password?}`), `…/admin/principals/{name}/tokens` (`POST`, token for another principal), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
 Manifests and trees are filtered by read permission and by `include`/`exclude`.

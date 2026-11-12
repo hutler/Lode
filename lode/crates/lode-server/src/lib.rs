@@ -4,6 +4,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod auth;
 pub mod clock;
 pub mod config;
 pub mod error;
@@ -13,10 +14,14 @@ pub mod server;
 pub mod state;
 pub mod tls;
 
+pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{ConfigError, Limits, ModulesConfig, ServerConfig, TlsConfig};
 pub use error::{ApiError, ApiResult};
-pub use extract::ApiJson;
+pub use extract::{ApiJson, ApiPath};
 pub use routes::{core_routes, finish, router, REQUEST_ID_HEADER};
-pub use server::{init, open_state, shutdown_signal, BoundServer, InitReport, ServerError};
+pub use server::{
+    init, open_state, reset_admin, shutdown_signal, BoundServer, ClientInfo, InitReport,
+    ServerError,
+};
 pub use state::AppState;

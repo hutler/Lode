@@ -24,6 +24,12 @@ enum Command {
         /// Directory to create or fill.
         data_dir: PathBuf,
     },
+    /// Offline recovery: revoke the `admin` user's tokens and print a new one.
+    ResetAdmin {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+    },
     /// Run the server.
     Serve {
         /// Path to loded.toml.
@@ -60,6 +66,17 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 Some(path) => println!("Wrote default configuration {}", path.display()),
                 None => println!("Kept the existing loded.toml"),
             }
+            println!();
+            println!("Admin token (shown only now; store it safely):");
+            println!("{}", report.admin_token);
+            Ok(())
+        }
+        Command::ResetAdmin { config } => {
+            let cfg = ServerConfig::load(&config)?;
+            let token = lode_server::reset_admin(&cfg).await?;
+            println!("Revoked every token of the admin user.");
+            println!("New admin token (shown only now; store it safely):");
+            println!("{token}");
             Ok(())
         }
         Command::Serve { config } => {

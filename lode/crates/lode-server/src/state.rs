@@ -5,6 +5,7 @@ use std::sync::Arc;
 use lode_meta::MetaStore;
 use lode_store::BlobStore;
 
+use crate::auth::{LoginLimiter, ScopeRegistry};
 use crate::clock::SharedClock;
 use crate::config::ServerConfig;
 
@@ -20,6 +21,8 @@ struct Inner {
     config: ServerConfig,
     clock: SharedClock,
     modules: Vec<String>,
+    scopes: ScopeRegistry,
+    login_limiter: LoginLimiter,
 }
 
 impl AppState {
@@ -39,6 +42,8 @@ impl AppState {
                 config,
                 clock,
                 modules,
+                scopes: ScopeRegistry::core(),
+                login_limiter: LoginLimiter::default(),
             }),
         }
     }
@@ -61,6 +66,16 @@ impl AppState {
     /// Time source.
     pub fn clock(&self) -> &SharedClock {
         &self.inner.clock
+    }
+
+    /// Registered scopes.
+    pub fn scopes(&self) -> &ScopeRegistry {
+        &self.inner.scopes
+    }
+
+    /// Failed-login tracking.
+    pub fn login_limiter(&self) -> &LoginLimiter {
+        &self.inner.login_limiter
     }
 
     /// Enabled modules.

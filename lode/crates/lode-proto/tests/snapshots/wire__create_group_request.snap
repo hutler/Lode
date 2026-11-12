@@ -1,0 +1,7 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "name": "artists"
+}

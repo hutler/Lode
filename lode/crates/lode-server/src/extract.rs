@@ -1,7 +1,8 @@
 //! Extractors whose rejections use the API error shape.
 
-use axum::extract::rejection::JsonRejection;
-use axum::extract::{FromRequest, Request};
+use axum::extract::rejection::{JsonRejection, PathRejection};
+use axum::extract::{FromRequest, FromRequestParts, Request};
+use axum::http::request::Parts;
 use axum::http::StatusCode;
 use lode_core::ErrorCode;
 use serde::de::DeserializeOwned;
@@ -32,5 +33,29 @@ fn json_rejection(r: JsonRejection) -> ApiError {
     if r.status() == StatusCode::PAYLOAD_TOO_LARGE {
         return ApiError::new(ErrorCode::TooLarge, "request body is too large");
     }
+    ApiError::invalid_request(r.body_text())
+}
+
+/// Like `axum::extract::Path`, but a malformed segment is answered with `invalid_request`
+/// in the usual error shape.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ApiPath<T>(pub T);
+
+impl<T, S> FromRequestParts<S> for ApiPath<T>
+where
+    T: DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match axum::extract::Path::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Path(v)) => Ok(Self(v)),
+            Err(r) => Err(path_rejection(r)),
+        }
+    }
+}
+
+fn path_rejection(r: PathRejection) -> ApiError {
     ApiError::invalid_request(r.body_text())
 }

@@ -294,6 +294,35 @@ pub trait Reads {
             .optional()?)
     }
 
+    /// Every group, by name.
+    fn groups(&self) -> Result<Vec<GroupRow>> {
+        let mut st = self
+            .db()
+            .prepare("SELECT id, name FROM grp ORDER BY name")?;
+        let rows = st.query_map([], |r| {
+            Ok(GroupRow {
+                id: GroupId(r.get(0)?),
+                name: r.get(1)?,
+            })
+        })?;
+        collect(rows)
+    }
+
+    /// Members of a group, by name.
+    fn group_members(&self, group: GroupId) -> Result<Vec<PrincipalRow>> {
+        let mut st = self.db().prepare(&format!(
+            "SELECT {} FROM principal p JOIN grp_member m ON m.principal_id = p.id \
+             WHERE m.grp_id = ?1 ORDER BY p.name",
+            PRINCIPAL_COLS
+                .split(", ")
+                .map(|c| format!("p.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))?;
+        let rows = st.query_map([group.0], principal_row)?;
+        collect(rows)
+    }
+
     /// Groups the principal belongs to.
     fn groups_of(&self, principal: PrincipalId) -> Result<Vec<GroupId>> {
         let mut st = self

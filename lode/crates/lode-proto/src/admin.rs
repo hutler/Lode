@@ -30,6 +30,24 @@ pub struct PrincipalList {
     pub principals: Vec<PrincipalView>,
 }
 
+/// `PATCH /admin/principals/{name}`. Absent fields are left unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchPrincipalRequest {
+    /// Disable or re-enable. Disabled principals cannot authenticate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    /// New password, for users.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+}
+
+/// `POST /admin/groups`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateGroupRequest {
+    /// Name.
+    pub name: String,
+}
+
 /// A group with its members.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupView {

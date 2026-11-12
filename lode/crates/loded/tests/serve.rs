@@ -30,6 +30,19 @@ fn http_get(addr: &str, path: &str) -> String {
     out
 }
 
+fn http_get_auth(addr: &str, path: &str, token: &str) -> String {
+    let mut s = TcpStream::connect(addr).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    out
+}
+
 #[test]
 fn init_then_serve_answers_info() {
     let dir = tempfile::tempdir().unwrap();
@@ -41,7 +54,13 @@ fn init_then_serve_answers_info() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    assert!(String::from_utf8_lossy(&out.stdout).contains("Initialized"));
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("Initialized"));
+    let admin_token = stdout
+        .lines()
+        .find(|l| l.starts_with("lode_"))
+        .expect("init prints the admin token")
+        .to_owned();
 
     // Use a free port instead of the default one.
     let cfg_path = data.join("loded.toml");
@@ -77,6 +96,23 @@ fn init_then_serve_answers_info() {
     assert_eq!(info["server_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(info["modules"], serde_json::json!([]));
     assert!(response.to_ascii_lowercase().contains("x-request-id:"));
+
+    let response = http_get_auth(&addr, "/api/v1/auth/whoami", &admin_token);
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains("\"name\":\"admin\""));
+
+    // reset-admin works offline next to a running server and revokes the old token.
+    let out = Command::cargo_bin("loded")
+        .unwrap()
+        .args(["reset-admin", "--config"])
+        .arg(&cfg_path)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let fresh = stdout.lines().find(|l| l.starts_with("lode_")).unwrap();
+    assert!(http_get_auth(&addr, "/api/v1/auth/whoami", &admin_token).starts_with("HTTP/1.1 401"));
+    assert!(http_get_auth(&addr, "/api/v1/auth/whoami", fresh).starts_with("HTTP/1.1 200"));
 
     let response = http_get(&addr, "/api/v1/does-not-exist");
     assert!(response.starts_with("HTTP/1.1 404"), "{response}");

@@ -409,6 +409,14 @@ async fn typed_rows_round_trip() {
         tx.add_group_member(g, user)?;
         tx.add_group_member(g, user)?;
         assert_eq!(tx.groups_of(user)?, [g]);
+        tx.add_group_member(g, agent)?;
+        let names: Vec<_> = tx.group_members(g)?.into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["ana", "fixer-bot"]);
+        let b = tx.create_group("builders")?;
+        let groups: Vec<_> = tx.groups()?.into_iter().map(|g| g.name).collect();
+        assert_eq!(groups, ["artists", "builders"]);
+        assert!(tx.group_members(b)?.is_empty());
+        tx.remove_group_member(g, agent)?;
         tx.remove_group_member(g, user)?;
         assert!(tx.groups_of(user)?.is_empty());
 
