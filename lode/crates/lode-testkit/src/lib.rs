@@ -330,6 +330,28 @@ impl TestServer {
     }
 }
 
+/// The built `lode` binary. Cargo names it in `CARGO_BIN_EXE_lode` only for tests of
+/// `lode-cli`; other tests look for it next to (or above) their own executable, in the
+/// target profile directory, wherever this cargo puts test binaries below it.
+fn lode_binary() -> std::io::Result<PathBuf> {
+    if let Some(p) = std::env::var_os("CARGO_BIN_EXE_lode").filter(|p| !p.is_empty()) {
+        return PathBuf::from(p).canonicalize();
+    }
+    let name = format!("lode{}", std::env::consts::EXE_SUFFIX);
+    let exe = std::env::current_exe()?;
+    exe.ancestors()
+        .skip(1)
+        .map(|dir| dir.join(&name))
+        .find(|p| p.is_file())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no {name} above {}", exe.display()),
+            )
+        })?
+        .canonicalize()
+}
+
 impl Drop for TestServer {
     fn drop(&mut self) {
         if let Some(tx) = self.shutdown.take() {
@@ -378,7 +400,7 @@ impl TestWorkspace {
             server_url: None,
             token_file: None,
             bin: must(
-                assert_cmd::cargo::cargo_bin("lode").canonicalize(),
+                lode_binary(),
                 "find the lode binary (build it with `cargo build -p lode-cli`)",
             ),
         }

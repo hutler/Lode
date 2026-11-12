@@ -309,10 +309,12 @@ async fn revert_restores_exact_content_and_mode() {
     // Base content comes from the server: nothing is cached yet.
     let before = server.requests().count("GET", "/blobs/");
     let v = ws.json(&["revert", "a", "b.txt", "tool.sh", "added.txt"]);
-    assert_eq!(
-        strings(&v["reverted"]),
-        ["a/1.txt", "a/2.txt", "added.txt", "b.txt", "tool.sh"]
-    );
+    // Only a Unix chmod changes tool.sh.
+    let mut expected = vec!["a/1.txt", "a/2.txt", "added.txt", "b.txt"];
+    if cfg!(unix) {
+        expected.push("tool.sh");
+    }
+    assert_eq!(strings(&v["reverted"]), expected);
     assert!(server.requests().count("GET", "/blobs/") > before);
     assert_eq!(ws.read("a/1.txt"), FILES[1].1);
     assert_eq!(ws.read("a/2.txt"), FILES[2].1);
