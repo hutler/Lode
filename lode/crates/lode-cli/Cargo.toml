@@ -32,6 +32,7 @@ tempfile.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
 toml.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

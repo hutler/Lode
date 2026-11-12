@@ -580,7 +580,7 @@ set. It holds `settings.toml` (`server`, the default server, written by `lode lo
 `LODE_SERVER`, then `settings.toml`.
 
 ```sql
-config     (key TEXT PK, value TEXT)   -- server_url, depot, branch, workspace_id, synced_rev, access_epoch, view json, checkout_rev
+config     (key TEXT PK, value TEXT)   -- server_url, depot, branch, workspace_id, synced_rev, access_epoch, view json, checkout_rev, pending_commit
 file       (path TEXT PK, base_id BLOB NULL, kind INT, flags INT, size INT, mtime_ns INT,
             state TEXT /*normal|added|deleted|conflicted*/, copy_from_path, copy_from_rev,
             changelist_id INT NULL, lock_held INT DEFAULT 0)
@@ -629,6 +629,16 @@ very large inputs but has no three-way merge, so it would mean a second crate.
 Scan → select changes (paths, changelist) → refuse if any selected file is `conflicted` →
 hash → `objects/missing` → upload missing blobs in parallel (default 8) → `POST commits` →
 on success update `base_id`, size, mtime, state for committed files and clear lock flags.
+
+Missing files (gone without `lode rm`) stop the commit, as do conflicted ones. Each sent file
+is hashed with a stat before and after, and stat-checked again after the upload; a file that
+changed in between aborts the commit. The request, with a fresh `request_id`, is stored as
+`pending_commit` before it is sent. A definite refusal (4xx) removes it; a lost answer (a
+timeout, a crash, a 5xx) keeps it, and the next `lode commit` sends the same request again
+before anything else. The server answers a known `request_id` with the revision it already
+made, so a retry never makes a second revision. The message comes from `-m`, `-F` or
+`$VISUAL`/`$EDITOR` (only in a terminal, never with `--json`); `#` lines are dropped and an
+empty message aborts.
 
 ### 10.4 Update
 

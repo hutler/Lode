@@ -52,7 +52,7 @@ pub struct MoveArgs {
 }
 
 /// An `added` row for the file at `local`, with its kind, executable bit, size and mtime.
-fn disk_row(local: &Path, path: DepotPath) -> CliResult<FileRow> {
+pub fn added_row(local: &Path, path: DepotPath) -> CliResult<FileRow> {
     let meta = fs::symlink_metadata(local)?;
     let kind = if meta.file_type().is_symlink() {
         EntryKind::Symlink
@@ -155,7 +155,7 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
             }
             _ => continue,
         }
-        rows.push(disk_row(&ws.local_path(&e.path), e.path.clone())?);
+        rows.push(added_row(&ws.local_path(&e.path), e.path.clone())?);
     }
     ws.db_mut().write(|tx| {
         for r in &rows {
@@ -441,7 +441,7 @@ async fn move_or_copy(ctx: &Ctx, args: MoveArgs, is_move: bool) -> CliResult<Val
                 old
             }
             None => {
-                let mut r = disk_row(&to_local, p.to.clone())?;
+                let mut r = added_row(&to_local, p.to.clone())?;
                 r.copy_from = origin;
                 r
             }

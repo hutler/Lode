@@ -75,6 +75,8 @@ enum Command {
     Diff(cmd::diff::DiffArgs),
     /// Delete untracked files.
     Clean(cmd::revert::CleanArgs),
+    /// Send local changes to the server as a new revision.
+    Commit(cmd::commit::CommitArgs),
     /// Show revision history.
     Log(cmd::history::LogArgs),
     /// Print a file as of a revision.
@@ -110,6 +112,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Revert(a)) => cmd::revert::revert(&ctx, a).await,
         Some(Command::Diff(a)) => cmd::diff::diff(&ctx, a).await,
         Some(Command::Clean(a)) => cmd::revert::clean(&ctx, a).await,
+        Some(Command::Commit(a)) => cmd::commit::commit(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
