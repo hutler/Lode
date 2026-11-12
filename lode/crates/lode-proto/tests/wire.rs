@@ -473,6 +473,8 @@ fn admin_types() {
         MaintenanceReport {
             objects_checked: 1000,
             objects_affected: 1,
+            bytes_affected: 0,
+            dry_run: false,
             problems: vec!["object 0a… is missing".into()],
         }
     );

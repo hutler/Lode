@@ -208,6 +208,10 @@ pub async fn commit(
         return Ok(resp);
     }
 
+    // From the blob checks until the revision is written, garbage collection must not delete
+    // the objects this commit is about to reference (see `maintenance::gc`).
+    let _fence = state.gc_fence().read().await;
+
     // Every new blob must exist, be a blob, and have the size the change claims.
     let mut sizes: HashMap<ObjectId, u64> = HashMap::new();
     for c in &req.changes {

@@ -37,6 +37,8 @@ struct Inner {
     config_cache: Lru<ObjectId, Arc<LodeConfig>>,
     branch_locks: Mutex<HashMap<(DepotId, String), BranchLock>>,
     outbox_notify: Arc<tokio::sync::Notify>,
+    gc_fence: tokio::sync::RwLock<()>,
+    gc_running: tokio::sync::Mutex<()>,
 }
 
 /// Serializes commits to one branch.
@@ -78,6 +80,8 @@ impl AppState {
                 config_cache: Lru::new(CONFIG_CACHE_ENTRIES),
                 branch_locks: Mutex::new(HashMap::new()),
                 outbox_notify: Arc::new(tokio::sync::Notify::new()),
+                gc_fence: tokio::sync::RwLock::new(()),
+                gc_running: tokio::sync::Mutex::new(()),
             }),
         };
         let mut tools = ToolRegistry::default();
@@ -171,5 +175,17 @@ impl AppState {
     /// Woken after a transaction appends to the outbox.
     pub fn outbox_notify(&self) -> Arc<tokio::sync::Notify> {
         self.inner.outbox_notify.clone()
+    }
+
+    /// Held shared by anything that makes existing objects referenced (a commit from its
+    /// blob checks to its transaction); garbage collection holds it exclusively while it
+    /// deletes. Never hold it across a call that takes it again.
+    pub fn gc_fence(&self) -> &tokio::sync::RwLock<()> {
+        &self.inner.gc_fence
+    }
+
+    /// Held while a garbage collection runs; one at a time.
+    pub(crate) fn gc_running(&self) -> &tokio::sync::Mutex<()> {
+        &self.inner.gc_running
     }
 }

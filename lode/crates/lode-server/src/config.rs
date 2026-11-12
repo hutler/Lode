@@ -43,6 +43,10 @@ shelves = true
 mcp = true
 webhooks = false
 checks = false
+
+[gc]
+# Unreferenced objects younger than this are kept (24 hours).
+grace_seconds = 86400
 "#;
 
 /// Errors reading the configuration.
@@ -84,6 +88,26 @@ pub struct ServerConfig {
     /// Which modules are enabled.
     #[serde(default)]
     pub modules: ModulesConfig,
+    /// Garbage collection.
+    #[serde(default)]
+    pub gc: GcConfig,
+}
+
+/// The `[gc]` table.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GcConfig {
+    /// Unreferenced objects younger than this many seconds are kept, so uploads for a commit
+    /// that has not arrived yet survive (ARCHITECTURE §11). Default 24 hours.
+    pub grace_seconds: u64,
+}
+
+impl Default for GcConfig {
+    fn default() -> Self {
+        Self {
+            grace_seconds: 24 * 60 * 60,
+        }
+    }
 }
 
 /// PEM files for HTTPS.
@@ -203,6 +227,7 @@ impl ServerConfig {
             data_dir: data_dir.into(),
             tls: None,
             limits: Limits::default(),
+            gc: GcConfig::default(),
             modules: ModulesConfig::default(),
         }
     }

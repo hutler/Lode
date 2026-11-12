@@ -134,6 +134,12 @@ pub struct MaintenanceReport {
     pub objects_checked: u64,
     /// Objects removed (gc) or found damaged or missing (fsck).
     pub objects_affected: u64,
+    /// Bytes removed (gc), or that a dry run would remove.
+    #[serde(default)]
+    pub bytes_affected: u64,
+    /// True when nothing was changed.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub dry_run: bool,
     /// One line per problem found.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub problems: Vec<String>,

@@ -614,7 +614,11 @@ the range in workspace config; the next commit sends it as `merged_from`.
 
 - **GC** (`lode admin gc`): mark from every revision's root tree (walking tree objects, memoized
   by id) plus module `gc_roots`; sweep objects that are unmarked **and** older than a grace
-  period (default 24 h, protects uploads of in-flight commits). Runs online.
+  period (`[gc] grace_seconds`, default 24 h, protects uploads whose commit has not started).
+  Runs online: deletion happens in batches under an exclusive fence that every commit holds
+  shared from its blob checks to its transaction, and each batch first marks the revisions
+  committed since the previous mark, so a finished commit never loses an object.
+  `POST /admin/depots/{d}/gc[?dry_run=true]` returns objects checked, objects and bytes removed.
 - **fsck** (`lode admin fsck`): every revision's tree is reachable and decodes; every referenced
   object exists; optional `--full` re-hashes every object; branch heads and `next_rev` are
   consistent.

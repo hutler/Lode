@@ -5,6 +5,7 @@ expression: v
 {
   "objects_checked": 1000,
   "objects_affected": 1,
+  "bytes_affected": 0,
   "problems": [
     "object 0a… is missing"
   ]

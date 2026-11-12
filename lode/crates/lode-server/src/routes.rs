@@ -33,6 +33,7 @@ pub fn core_routes() -> Router<AppState> {
         .merge(crate::commit::routes())
         .merge(crate::read::routes())
         .merge(crate::branches::routes())
+        .merge(crate::maintenance::routes())
 }
 
 /// Binds the state, mounts the routes of the enabled modules, and adds the error fallback

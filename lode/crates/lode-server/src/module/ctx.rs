@@ -75,6 +75,13 @@ impl ModuleCtx {
         self.state.clock()
     }
 
+    /// Hold this shared while making stored objects referenced by the module's own tables
+    /// (as a shelf does), so garbage collection cannot delete them in between. Do not hold
+    /// it while calling [`Commits`], which takes it itself.
+    pub fn gc_fence(&self) -> &tokio::sync::RwLock<()> {
+        self.state.gc_fence()
+    }
+
     /// Wakes the event dispatcher after the module wrote to the outbox.
     pub fn notify_events(&self) {
         self.state.outbox_notify().notify_one();
