@@ -59,3 +59,113 @@ where
 fn path_rejection(r: PathRejection) -> ApiError {
     ApiError::invalid_request(r.body_text())
 }
+
+/// The query string as decoded `(key, value)` pairs, keeping repeated keys such as
+/// `include=a&include=b`.
+#[derive(Debug, Clone, Default)]
+pub struct ApiQuery(pub Vec<(String, String)>);
+
+impl<S: Send + Sync> FromRequestParts<S> for ApiQuery {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let raw = parts.uri.query().unwrap_or("");
+        let mut out = Vec::new();
+        for pair in raw.split('&').filter(|p| !p.is_empty()) {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            out.push((percent_decode(k)?, percent_decode(v)?));
+        }
+        Ok(Self(out))
+    }
+}
+
+fn percent_decode(s: &str) -> Result<String, ApiError> {
+    let bad = || ApiError::invalid_request("malformed query string");
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while let Some(&b) = bytes.get(i) {
+        match b {
+            b'+' => out.push(b' '),
+            b'%' => {
+                let hex = s.get(i + 1..i + 3).ok_or_else(bad)?;
+                out.push(u8::from_str_radix(hex, 16).map_err(|_| bad())?);
+                i += 2;
+            }
+            _ => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8(out).map_err(|_| bad())
+}
+
+impl ApiQuery {
+    /// The last value of `key`.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Every value of `key`, in order.
+    pub fn all(&self, key: &str) -> Vec<String> {
+        self.0
+            .iter()
+            .filter(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .collect()
+    }
+
+    /// `key` as a number, if present.
+    pub fn u64(&self, key: &str) -> Result<Option<u64>, ApiError> {
+        self.get(key)
+            .map(|v| {
+                v.parse()
+                    .map_err(|_| ApiError::invalid_request(format!("`{key}` must be a number")))
+            })
+            .transpose()
+    }
+
+    /// `key` as a flag: absent, `false` or `0` is false; empty, `true` or `1` is true.
+    pub fn flag(&self, key: &str) -> Result<bool, ApiError> {
+        match self.get(key) {
+            None | Some("false" | "0") => Ok(false),
+            Some("" | "true" | "1") => Ok(true),
+            Some(_) => Err(ApiError::invalid_request(format!(
+                "`{key}` must be true or false"
+            ))),
+        }
+    }
+
+    /// `key` as a depot path, if present.
+    pub fn path(&self, key: &str) -> Result<Option<lode_core::DepotPath>, ApiError> {
+        self.get(key)
+            .map(|v| {
+                lode_core::DepotPath::parse(v)
+                    .map_err(|e| ApiError::new(ErrorCode::InvalidPath, format!("`{key}`: {e}")))
+            })
+            .transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_and_keeps_repeats() {
+        assert_eq!(percent_decode("a%2Fb+c").ok().as_deref(), Some("a/b c"));
+        assert!(percent_decode("%zz").is_err());
+        assert!(percent_decode("%4").is_err());
+        let q = ApiQuery(vec![
+            ("include".into(), "a/**".into()),
+            ("include".into(), "b/**".into()),
+            ("rev".into(), "7".into()),
+        ]);
+        assert_eq!(q.all("include"), vec!["a/**", "b/**"]);
+        assert_eq!(q.u64("rev").ok().flatten(), Some(7));
+        assert!(q.flag("own").is_ok_and(|f| !f));
+    }
+}

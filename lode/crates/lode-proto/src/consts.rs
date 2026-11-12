@@ -24,6 +24,15 @@ pub const MAX_BLOB_SIZE: u64 = 64 * 1024 * 1024 * 1024;
 /// Default limit on changes in one commit.
 pub const MAX_CHANGES_PER_COMMIT: usize = 500_000;
 
+/// Default cap on changed paths listed per revision in a revision list.
+pub const MAX_CHANGES_LISTED: usize = 1_000;
+
+/// Default page size of the revision list.
+pub const DEFAULT_REVISION_PAGE: u32 = 100;
+
+/// Largest page size of the revision list.
+pub const MAX_REVISION_PAGE: u32 = 1_000;
+
 /// Most ids in one `objects/missing` call.
 pub const MAX_MISSING_QUERY: usize = 10_000;
 

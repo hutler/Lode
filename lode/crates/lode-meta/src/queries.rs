@@ -454,6 +454,65 @@ pub trait Reads {
         collect(rows)
     }
 
+    /// Revisions matching `f`, in number order.
+    fn find_revisions(&self, depot: DepotId, f: &RevisionFilter) -> Result<Vec<RevisionRow>> {
+        use rusqlite::types::Value;
+        let mut sql = format!("SELECT {REVISION_COLS} FROM revision r WHERE r.depot_id = ?1");
+        let mut args: Vec<Value> = vec![Value::Integer(depot.0)];
+        let mut arg = |sql: &mut String, frag: &str, v: Value| {
+            args.push(v);
+            sql.push_str(&frag.replace('?', &format!("?{}", args.len())));
+        };
+        if let Some(min) = f.min {
+            arg(&mut sql, " AND r.num >= ?", Value::Integer(to_i64(min)?));
+        }
+        if let Some(max) = f.max {
+            arg(&mut sql, " AND r.num <= ?", Value::Integer(to_i64(max)?));
+        }
+        if let Some(segs) = &f.segments {
+            if segs.is_empty() {
+                return Ok(Vec::new());
+            }
+            sql.push_str(" AND (");
+            for (i, seg) in segs.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(" OR ");
+                }
+                arg(
+                    &mut sql,
+                    "(r.branch_id = ?",
+                    Value::Integer(seg.branch_id.0),
+                );
+                match seg.max_rev {
+                    Some(m) => arg(&mut sql, " AND r.num <= ?)", Value::Integer(to_i64(m)?)),
+                    None => sql.push(')'),
+                }
+            }
+            sql.push(')');
+        }
+        if let Some(path) = &f.path {
+            arg(
+                &mut sql,
+                " AND EXISTS (SELECT 1 FROM rev_change c WHERE c.depot_id = r.depot_id \
+                 AND c.rev = r.num AND c.path = ?",
+                Value::Text(path.clone()),
+            );
+            if f.copies_only {
+                sql.push_str(" AND c.action = 'A' AND c.copy_from_path IS NOT NULL");
+            }
+            sql.push(')');
+        }
+        sql.push_str(if f.ascending {
+            " ORDER BY r.num ASC"
+        } else {
+            " ORDER BY r.num DESC"
+        });
+        arg(&mut sql, " LIMIT ?", Value::Integer(i64::from(f.limit)));
+        let mut st = self.db().prepare(&sql)?;
+        let rows = st.query_map(rusqlite::params_from_iter(args), revision_row)?;
+        collect(rows)
+    }
+
     /// Changes of a revision, by path.
     fn changes(&self, depot: DepotId, rev: u64) -> Result<Vec<ChangeRow>> {
         let mut st = self.db().prepare(&format!(

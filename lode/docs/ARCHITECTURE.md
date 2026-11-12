@@ -264,16 +264,20 @@ percent-encoded (`release%2F1.0`).
 | `PUT /depots/{d}/blobs/{id}` | Upload. Body is the raw content, optionally `Content-Encoding: zstd` |
 | `GET /depots/{d}/blobs/{id}` | Download; honours `Accept-Encoding: zstd`; supports `Range` on raw bytes only when stored uncompressed, otherwise full body |
 | `POST /depots/{d}/branches/{b}/commits` | Commit (section 5) |
-| `GET /depots/{d}/revisions?branch=&path=&before=&after=&own=&changes=&limit=` | Revision list, paged. Default order is newest first, paging with `before`. With `after=N` the order is ascending from `N+1`, for polling. Without `branch` the list covers the whole depot; every item names its branch. With `branch`, inherited history (§4.3) is included unless `own=true`. `changes=true` adds each revision's changed paths, capped per revision with a `changes_truncated` flag |
+| `GET /depots/{d}/revisions?branch=&path=&before=&after=&own=&changes=&limit=` | Revision list, paged. Default order is newest first, paging with `before`. With `after=N` the order is ascending from `N+1`, for polling. Without `branch` the list covers the whole depot; every item names its branch. With `branch`, inherited history (§4.3) is included unless `own=true`. `changes=true` adds each revision's changed paths, capped per revision (`[limits] max_changes_listed`, default 1,000) with a `changes_truncated` flag. With `path`, `follow=true` continues through `copy_from` into the source path's history |
 | `GET /depots/{d}/revisions/{n}` | One revision with its changes |
 | `GET /depots/{d}/manifest?rev=N[&base=M][&include=…][&exclude=…]` | NDJSON stream. Without `base`: every file at `N`. With `base`: only differences `M → N`, each line `{"op":"put"|"del", …}` |
 | `GET /depots/{d}/tree?rev=&path=` | List one directory |
-| `GET /depots/{d}/files?rev=&path=` | File content at a revision |
+| `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision (M5) |
 | `…/admin/principals[/{name}]` (`GET`/`POST`; `PATCH` `{disabled?, password?}`), `…/admin/principals/{name}/tokens` (`POST`, token for another principal), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
-Manifests and trees are filtered by read permission and by `include`/`exclude`.
+Manifests and trees are filtered by read permission and by `include`/`exclude` (repeatable
+query parameters). A delta manifest filters each side with the rules of that revision's branch,
+so applying it to the full manifest of `M` gives the full manifest of `N`. A directory appears in
+a tree listing only if it holds at least one visible file. A revision on a branch the caller
+cannot read at all is `not_found` and is left out of revision lists.
 
 **Access epoch.** A delta manifest cannot tell a client that a path it holds has become
 unreadable, because the filter uses current permissions on both sides. The server therefore

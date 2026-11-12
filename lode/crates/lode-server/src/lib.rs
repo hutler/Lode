@@ -14,6 +14,7 @@ pub mod error;
 pub mod extract;
 pub mod lru;
 pub mod perm;
+pub mod read;
 pub mod routes;
 pub mod server;
 pub mod state;
@@ -23,7 +24,7 @@ pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{ConfigError, Limits, ModulesConfig, ServerConfig, TlsConfig};
 pub use error::{ApiError, ApiResult};
-pub use extract::{ApiJson, ApiPath};
+pub use extract::{ApiJson, ApiPath, ApiQuery};
 pub use perm::{BranchAccess, DepotAccess, Level, Permissions};
 pub use routes::{core_routes, finish, router, REQUEST_ID_HEADER};
 pub use server::{

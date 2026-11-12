@@ -33,6 +33,8 @@ max_request_json = 67108864
 max_blob_size = 68719476736
 # Most changes in one commit.
 max_changes_per_commit = 500000
+# Most changed paths listed per revision in a revision list.
+max_changes_listed = 1000
 
 # Optional features compiled into loded. Webhooks and checks are off by default.
 [modules]
@@ -104,6 +106,8 @@ pub struct Limits {
     pub max_blob_size: u64,
     /// Most changes in one commit.
     pub max_changes_per_commit: usize,
+    /// Most changed paths listed per revision in a revision list.
+    pub max_changes_listed: usize,
 }
 
 impl Default for Limits {
@@ -112,6 +116,7 @@ impl Default for Limits {
             max_request_json: lode_proto::consts::MAX_REQUEST_JSON,
             max_blob_size: lode_proto::consts::MAX_BLOB_SIZE,
             max_changes_per_commit: lode_proto::consts::MAX_CHANGES_PER_COMMIT,
+            max_changes_listed: lode_proto::consts::MAX_CHANGES_LISTED,
         }
     }
 }
@@ -218,6 +223,7 @@ mod tests {
         assert_eq!(cfg.limits.max_request_json, 64 * 1024 * 1024);
         assert_eq!(cfg.limits.max_blob_size, 64 * 1024 * 1024 * 1024);
         assert_eq!(cfg.limits.max_changes_per_commit, 500_000);
+        assert_eq!(cfg.limits.max_changes_listed, 1_000);
         assert!(cfg.modules.locks && cfg.modules.shelves && cfg.modules.mcp);
         assert!(!cfg.modules.webhooks && !cfg.modules.checks);
     }

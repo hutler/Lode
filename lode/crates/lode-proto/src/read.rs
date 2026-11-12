@@ -86,6 +86,9 @@ pub struct RevisionListQuery {
     /// Only the branch's own revisions.
     #[serde(default, skip_serializing_if = "crate::is_false")]
     pub own: bool,
+    /// With `path`: continue through copies and renames (`copy_from`) to the source's history.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub follow: bool,
     /// Include changed paths.
     #[serde(default, skip_serializing_if = "crate::is_false")]
     pub changes: bool,

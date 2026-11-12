@@ -16,7 +16,8 @@ use lode_proto::consts::{paths, ENCODING_ZSTD, MAX_MISSING_QUERY};
 use lode_proto::depot::{MissingObjectsRequest, MissingObjectsResponse, PutBlobResponse};
 use lode_store::{PutOptions, PutOutcome, StoreError};
 
-use self::io::{reader_stream, BodyReader, ZstdDecodeReader};
+pub(crate) use self::io::reader_stream;
+use self::io::{BodyReader, ZstdDecodeReader};
 use crate::auth::{Caller, SCOPE_READ, SCOPE_WRITE};
 use crate::depots::resolve;
 use crate::error::{ApiError, ApiResult};

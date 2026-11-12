@@ -320,6 +320,16 @@ impl BranchAccess {
         move |p: &DepotPath| self.level_with(p.as_str(), &mut buf) >= Level::Read
     }
 
+    /// Whether any path may be readable: an administrator, or at least one allow rule of
+    /// level read or above applies to the branch. A branch without one is hidden entirely.
+    pub fn reads_anything(&self) -> bool {
+        self.bypass
+            || self
+                .grants
+                .iter()
+                .any(|(allow, level)| *allow && *level >= Level::Read)
+    }
+
     /// Whether every path is readable without checking (administrators, or no deny rule
     /// and an allow-read rule on `**`). Lets listings skip per-path checks.
     pub fn reads_everything(&self) -> bool {

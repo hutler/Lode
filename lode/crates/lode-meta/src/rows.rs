@@ -307,3 +307,22 @@ pub struct PathHistoryEntry {
     /// The change to the path.
     pub change: ChangeRow,
 }
+
+/// Which revisions [`crate::Reads::find_revisions`] returns.
+#[derive(Debug, Clone, Default)]
+pub struct RevisionFilter {
+    /// Only revisions in these history segments; the whole depot when `None`.
+    pub segments: Option<Vec<HistorySegment>>,
+    /// Only revisions that changed this path.
+    pub path: Option<String>,
+    /// With `path`: only revisions that added it as a copy (`copy_from` set).
+    pub copies_only: bool,
+    /// Lowest number included.
+    pub min: Option<u64>,
+    /// Highest number included.
+    pub max: Option<u64>,
+    /// Oldest first instead of newest first.
+    pub ascending: bool,
+    /// Most rows returned.
+    pub limit: u32,
+}
