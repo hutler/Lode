@@ -7,13 +7,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
-use lode_meta::{MetaConfig, MetaStore, NewPrincipal, PrincipalKind, Reads};
+use lode_meta::{MetaConfig, MetaStore, MigrationSet, NewPrincipal, PrincipalKind, Reads};
 use lode_store::{FsBlobStore, FsBlobStoreConfig};
 use tokio::net::TcpListener;
 
 use crate::auth::{generate_token, hash_token, ScopeRegistry, ADMIN_USER};
 use crate::clock::{Clock, SharedClock, SystemClock};
 use crate::config::{ServerConfig, CONFIG_FILE_NAME, DEFAULT_CONFIG};
+use crate::module::Modules;
 use crate::state::AppState;
 use crate::tls::{load_server_config, TlsError, TlsListener};
 
@@ -84,7 +85,7 @@ pub async fn init(data_dir: &Path) -> Result<InitReport, ServerError> {
     tokio::fs::create_dir_all(data_dir)
         .await
         .map_err(io_err(format!("cannot create {}", data_dir.display())))?;
-    let meta = open_meta(db).await?;
+    let meta = open_meta(db, Vec::new()).await?;
     FsBlobStore::open(data_dir, FsBlobStoreConfig::default()).await?;
 
     let token = generate_token(&mut rand::rngs::OsRng);
@@ -129,8 +130,8 @@ pub async fn init(data_dir: &Path) -> Result<InitReport, ServerError> {
     })
 }
 
-async fn open_meta(db: PathBuf) -> Result<MetaStore, ServerError> {
-    tokio::task::spawn_blocking(move || MetaStore::open(db, &[], MetaConfig::default()))
+async fn open_meta(db: PathBuf, modules: Vec<MigrationSet>) -> Result<MetaStore, ServerError> {
+    tokio::task::spawn_blocking(move || MetaStore::open(db, &modules, MetaConfig::default()))
         .await
         .map_err(|e| ServerError::Io {
             context: "opening the database".into(),
@@ -154,7 +155,7 @@ fn check_initialized(dir: &Path) -> Result<PathBuf, ServerError> {
 /// returns a new token with all core scopes.
 pub async fn reset_admin(config: &ServerConfig) -> Result<String, ServerError> {
     let db = check_initialized(&config.data_dir)?;
-    let meta = open_meta(db).await?;
+    let meta = open_meta(db, Vec::new()).await?;
     let token = generate_token(&mut rand::rngs::OsRng);
     let hash = hash_token(&token);
     let now = SystemClock.now_ms();
@@ -181,15 +182,24 @@ pub async fn reset_admin(config: &ServerConfig) -> Result<String, ServerError> {
 
 /// Opens an initialized data directory and builds the shared state.
 ///
-/// `modules` names the enabled, registered modules (reported by `/info`).
+/// `modules` are the enabled modules (see [`crate::module::select_enabled`]); their
+/// migrations run here, and `/info` reports their names.
 pub async fn open_state(
     config: ServerConfig,
     clock: SharedClock,
-    modules: Vec<String>,
+    modules: Modules,
 ) -> Result<AppState, ServerError> {
     let dir = config.data_dir.clone();
     let db = check_initialized(&dir)?;
-    let meta = open_meta(db).await?;
+    // Only enabled modules migrate, so a disabled module adds no tables.
+    let sets = modules
+        .iter()
+        .map(|m| MigrationSet {
+            namespace: m.name(),
+            migrations: m.migrations(),
+        })
+        .collect();
+    let meta = open_meta(db, sets).await?;
     let blobs = FsBlobStore::open(
         &dir,
         FsBlobStoreConfig {

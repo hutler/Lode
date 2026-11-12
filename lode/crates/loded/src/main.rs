@@ -81,9 +81,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         }
         Command::Serve { config } => {
             let cfg = ServerConfig::load(&config)?;
-            // No modules are registered yet (T017); /info reports none.
+            let modules = lode_server::module::select_enabled(&cfg.modules, available_modules());
             let state =
-                lode_server::open_state(cfg.clone(), Arc::new(SystemClock), Vec::new()).await?;
+                lode_server::open_state(cfg.clone(), Arc::new(SystemClock), modules).await?;
+            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+            let dispatcher = lode_server::events::Dispatcher::spawn(state.clone(), async move {
+                let _ = stop_rx.await;
+            });
             let router = lode_server::router(state);
             let server = BoundServer::bind(&cfg, router).await?;
             // Tests and wrapper scripts read this line to find the port.
@@ -97,8 +101,16 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 .run(lode_server::shutdown_signal())
                 .await
                 .context("server error")?;
+            let _ = stop_tx.send(());
+            let _ = dispatcher.await;
             tracing::info!("stopped");
             Ok(())
         }
     }
+}
+
+/// Every module compiled into this build. `[modules]` decides which are enabled. The real
+/// modules arrive with their tasks (M3, M4, M6).
+fn available_modules() -> lode_server::module::Modules {
+    Vec::new()
 }

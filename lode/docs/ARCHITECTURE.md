@@ -342,10 +342,10 @@ pub trait Module: Send + Sync + 'static {
     fn scopes(&self) -> &'static [ScopeDef] { &[] }                      // { name, agent_default }
     fn migrations(&self) -> &'static [Migration] { &[] }
     fn routes(&self, ctx: ModuleCtx) -> Option<axum::Router> { None }   // mounted by the server
-    fn pre_commit(&self, tx: &ReadTx, c: &CommitCtx) -> Result<(), Rejection> { Ok(()) }
-    fn in_commit(&self, tx: &mut WriteTx, c: &CommittedCtx) -> Result<()> { Ok(()) }
-    fn on_event(&self, ev: &Event) -> BoxFuture<'_, Result<()>> { … }    // after commit, at-least-once
-    fn gc_roots(&self, tx: &ReadTx, depot: DepotId, out: &mut dyn FnMut(ObjectId)) -> Result<()> { Ok(()) }
+    fn pre_commit(&self, tx: &dyn Reads, c: &CommitCtx) -> Result<(), ApiError> { Ok(()) } // read-only
+    fn in_commit(&self, tx: &WriteTx, c: &CommittedCtx) -> Result<(), ApiError> { Ok(()) } // error rolls back
+    fn on_event<'a>(&'a self, ev: &'a Event) -> BoxFuture<'a, Result<(), BoxError>> { … } // after commit, at-least-once
+    fn gc_roots(&self, tx: &dyn Reads, depot: DepotId, out: &mut dyn FnMut(ObjectId)) -> Result<(), MetaError> { Ok(()) }
     fn mcp_tools(&self, ctx: ModuleCtx) -> Vec<ToolDef> { vec![] }       // tools this module offers to agents
 }
 ```
@@ -356,8 +356,9 @@ pub trait Module: Send + Sync + 'static {
 - `CommitCtx` exposes the **author** and the **submitter** (the same principal for a direct
   commit; different when a module commits on someone's behalf, as shelf submit does), the
   branch, the change list, the client-supplied `extensions` map, the parsed branch
-  configuration (§5.2 step 2) and a head-tree lookup. `extensions` comes from the request body
-  and must never be treated as proof of anything.
+  configuration (§5.2 step 2) with `config_section(name)` for a module's own `[name]` table,
+  the message, and `head_entry(path)`, the head-tree entry of each changed path. `extensions`
+  comes from the request body and must never be treated as proof of anything.
 - `CommitCtx.origin` says how the commit reached the engine and is set only by server code:
   `Direct` for a commit request from a client, or `Module { name, attrs }` when a module
   calls `Commits` (shelf submit passes `name = "shelves"`,

@@ -18,6 +18,7 @@ pub const CORE_SCOPES: [&str; 3] = [SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN];
 #[derive(Debug, Clone)]
 pub struct ScopeRegistry {
     names: BTreeSet<String>,
+    agent_defaults: BTreeSet<String>,
 }
 
 impl Default for ScopeRegistry {
@@ -31,6 +32,7 @@ impl ScopeRegistry {
     pub fn core() -> Self {
         Self {
             names: CORE_SCOPES.iter().map(|s| (*s).to_owned()).collect(),
+            agent_defaults: BTreeSet::new(),
         }
     }
 
@@ -41,6 +43,21 @@ impl ScopeRegistry {
         S: Into<String>,
     {
         self.names.extend(names.into_iter().map(Into::into));
+    }
+
+    /// Adds scopes declared by a module through `Module::scopes()`.
+    pub fn extend_defs(&mut self, defs: &[crate::module::ScopeDef]) {
+        for d in defs {
+            self.names.insert(d.name.to_owned());
+            if d.agent_default {
+                self.agent_defaults.insert(d.name.to_owned());
+            }
+        }
+    }
+
+    /// Module scopes that agents get by default, sorted.
+    pub fn agent_defaults(&self) -> Vec<String> {
+        self.agent_defaults.iter().cloned().collect()
     }
 
     /// Whether `name` is registered.

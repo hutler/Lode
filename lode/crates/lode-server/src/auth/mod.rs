@@ -8,6 +8,7 @@ mod ratelimit;
 mod scopes;
 mod token;
 
+pub(crate) use caller::authenticate;
 pub use caller::{Caller, ADMIN_USER};
 pub use handlers::routes;
 pub use password::{hash_password, verify_password, MIN_PASSWORD_LEN};

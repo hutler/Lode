@@ -10,9 +10,10 @@ use lode_store::BlobStore;
 
 use crate::auth::{LoginLimiter, ScopeRegistry};
 use crate::clock::SharedClock;
-use crate::commit::{Hooks, TreeLoader};
+use crate::commit::TreeLoader;
 use crate::config::ServerConfig;
 use crate::lru::Lru;
+use crate::module::{Module, ModuleCtx, Modules, ToolRegistry};
 use crate::perm::Permissions;
 
 /// Cheap to clone; everything lives behind one `Arc`.
@@ -26,14 +27,15 @@ struct Inner {
     blobs: Arc<dyn BlobStore>,
     config: ServerConfig,
     clock: SharedClock,
-    modules: Vec<String>,
+    modules: Modules,
+    module_names: Vec<String>,
+    tools: std::sync::OnceLock<ToolRegistry>,
     scopes: ScopeRegistry,
     login_limiter: LoginLimiter,
     permissions: Permissions,
     trees: TreeLoader,
     config_cache: Lru<ObjectId, Arc<LodeConfig>>,
     branch_locks: Mutex<HashMap<(DepotId, String), BranchLock>>,
-    hooks: Hooks,
     outbox_notify: Arc<tokio::sync::Notify>,
 }
 
@@ -46,16 +48,21 @@ const TREE_CACHE_ENTRIES: usize = 10_000;
 const CONFIG_CACHE_ENTRIES: usize = 256;
 
 impl AppState {
-    /// Assembles the state. `modules` lists the names of the modules that are enabled and
-    /// registered, in the order `/info` reports them.
+    /// Assembles the state with the enabled modules, in registration order. Their scopes
+    /// join the registry and their tools are collected.
     pub fn new(
         meta: MetaStore,
         blobs: Arc<dyn BlobStore>,
         config: ServerConfig,
         clock: SharedClock,
-        modules: Vec<String>,
+        modules: Modules,
     ) -> Self {
-        Self {
+        let mut scopes = ScopeRegistry::core();
+        for m in &modules {
+            scopes.extend_defs(m.scopes());
+        }
+        let module_names = modules.iter().map(|m| m.name().to_owned()).collect();
+        let state = Self {
             inner: Arc::new(Inner {
                 meta,
                 trees: TreeLoader::new(blobs.clone(), TREE_CACHE_ENTRIES),
@@ -63,15 +70,23 @@ impl AppState {
                 config,
                 clock,
                 modules,
-                scopes: ScopeRegistry::core(),
+                module_names,
+                tools: std::sync::OnceLock::new(),
+                scopes,
                 login_limiter: LoginLimiter::default(),
                 permissions: Permissions::default(),
                 config_cache: Lru::new(CONFIG_CACHE_ENTRIES),
                 branch_locks: Mutex::new(HashMap::new()),
-                hooks: Hooks::new(),
                 outbox_notify: Arc::new(tokio::sync::Notify::new()),
             }),
+        };
+        let mut tools = ToolRegistry::default();
+        for m in state.modules() {
+            tools.extend(m.mcp_tools(ModuleCtx::new(state.clone(), m.name())));
         }
+        // Freshly created, so the cell is empty and this cannot fail.
+        let _ = state.inner.tools.set(tools);
+        state
     }
 
     /// Metadata store.
@@ -110,8 +125,22 @@ impl AppState {
     }
 
     /// Enabled modules.
-    pub fn modules(&self) -> &[String] {
+    pub fn modules(&self) -> &[Arc<dyn Module>] {
         &self.inner.modules
+    }
+
+    /// Names of the enabled modules.
+    pub fn module_names(&self) -> &[String] {
+        &self.inner.module_names
+    }
+
+    /// Tools of the enabled modules.
+    pub fn tools(&self) -> &ToolRegistry {
+        static EMPTY: std::sync::OnceLock<ToolRegistry> = std::sync::OnceLock::new();
+        self.inner
+            .tools
+            .get()
+            .unwrap_or_else(|| EMPTY.get_or_init(ToolRegistry::default))
     }
 
     /// Tree loader with its cache.
@@ -137,11 +166,6 @@ impl AppState {
         map.entry((depot, branch.to_owned()))
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
-    }
-
-    /// Commit hooks of the enabled modules.
-    pub fn hooks(&self) -> &Hooks {
-        &self.inner.hooks
     }
 
     /// Woken after a transaction appends to the outbox.

@@ -431,7 +431,7 @@ pub async fn commit(
         .unwrap_or_else(|| caller.principal.clone());
     let submitter = caller.principal.clone();
     let now = state.clock().now_ms();
-    let hooks = state.hooks().clone();
+    let hooks = state.modules().to_vec();
     let request_id = req.request_id.clone();
     let message = req.message;
     let changes = req.changes;
@@ -479,6 +479,7 @@ pub async fn commit(
                 branch: &b,
                 author: &author,
                 submitter: &submitter,
+                message: &message,
                 changes: &changes,
                 extensions: &extensions,
                 branch_config: &config,
@@ -486,7 +487,7 @@ pub async fn commit(
                 head_entries: &before,
             };
             for h in &hooks {
-                if let Err(e) = h.pre_commit(tx, &ctx) {
+                if let Err(e) = h.pre_commit(tx as &dyn Reads, &ctx) {
                     return Ok(TxOutcome::Rejected(e));
                 }
             }

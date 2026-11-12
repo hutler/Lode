@@ -1,5 +1,7 @@
 //! `.lodeconfig`, the versioned branch configuration (SPEC §5.6).
 
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 use crate::glob::{GlobError, PathGlobSet};
@@ -16,7 +18,7 @@ pub struct CheckRequirement {
 
 /// Parsed `.lodeconfig`. Unknown sections and keys are ignored so that newer files still
 /// parse on older servers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LodeConfig {
     /// `[locks].required`: paths that need a lock to be modified or deleted.
     pub lock_required: PathGlobSet,
@@ -28,6 +30,8 @@ pub struct LodeConfig {
     pub checks_branches: PathGlobSet,
     /// `[checks].required`: checks that must be `success`.
     pub checks_required: Vec<CheckRequirement>,
+    /// Every other top-level table, by name, for modules that define their own section.
+    pub sections: BTreeMap<String, toml::Table>,
 }
 
 impl Default for LodeConfig {
@@ -38,6 +42,7 @@ impl Default for LodeConfig {
             text: PathGlobSet::empty(),
             checks_branches: PathGlobSet::empty(),
             checks_required: Vec::new(),
+            sections: BTreeMap::new(),
         }
     }
 }
@@ -67,6 +72,8 @@ struct Raw {
     files: RawFiles,
     #[serde(default)]
     checks: RawChecks,
+    #[serde(flatten)]
+    rest: toml::Table,
 }
 
 #[derive(Deserialize, Default)]
@@ -134,7 +141,20 @@ impl LodeConfig {
             text: PathGlobSet::new(raw.files.text)?,
             checks_branches: PathGlobSet::new(raw.checks.branches)?,
             checks_required,
+            sections: raw
+                .rest
+                .into_iter()
+                .filter_map(|(k, v)| match v {
+                    toml::Value::Table(t) => Some((k, t)),
+                    _ => None,
+                })
+                .collect(),
         })
+    }
+
+    /// A module's own section, such as `[example]`, if the file has one.
+    pub fn section(&self, name: &str) -> Option<&toml::Table> {
+        self.sections.get(name)
     }
 }
 

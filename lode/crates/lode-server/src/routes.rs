@@ -15,6 +15,7 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
+use crate::module::ModuleCtx;
 use crate::state::AppState;
 
 /// Header carrying the per-request id.
@@ -34,12 +35,18 @@ pub fn core_routes() -> Router<AppState> {
         .merge(crate::branches::routes())
 }
 
-/// Adds the error fallback and the middleware stack, and binds the state.
+/// Binds the state, mounts the routes of the enabled modules, and adds the error fallback
+/// and the middleware stack.
 pub fn finish(routes: Router<AppState>, state: AppState) -> Router {
     let limit = usize::try_from(state.config().limits.max_request_json).unwrap_or(usize::MAX);
     let request_id = HeaderName::from_static(REQUEST_ID_HEADER);
-    routes
-        .fallback(fallback)
+    let mut app: Router = routes.with_state(state.clone());
+    for m in state.modules() {
+        if let Some(r) = m.routes(ModuleCtx::new(state.clone(), m.name())) {
+            app = app.merge(r);
+        }
+    }
+    app.fallback(fallback)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(limit))
         .layer(
@@ -49,10 +56,9 @@ pub fn finish(routes: Router<AppState>, state: AppState) -> Router {
                 .layer(PropagateRequestIdLayer::new(request_id))
                 .layer(CatchPanicLayer::custom(on_panic)),
         )
-        .with_state(state)
 }
 
-/// The full router of a server with no modules.
+/// The full router: core routes plus those of the enabled modules.
 pub fn router(state: AppState) -> Router {
     finish(core_routes(), state)
 }
@@ -61,7 +67,7 @@ async fn info(State(state): State<AppState>) -> Json<Info> {
     Json(Info {
         server_version: env!("CARGO_PKG_VERSION").to_owned(),
         api_version: API_VERSION.to_owned(),
-        modules: state.modules().to_vec(),
+        modules: state.module_names().to_vec(),
     })
 }
 
