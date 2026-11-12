@@ -140,9 +140,11 @@ the branch head, never from the change being committed.
 ### 5.7 Path rules
 
 Paths are UTF-8, NFC-normalized, `/`-separated and relative to the depot root. Rejected:
-empty segments, `.` and `..`, control characters, backslash, segments ending in a dot or space,
-Windows reserved device names, and any path that would collide with another path in the same
-directory when compared case-insensitively.
+empty segments, `.` and `..`, control characters, backslash, the characters Windows forbids in
+file names (`< > : " | ? *`), segments ending in a dot or space, Windows reserved device names
+(including `COM¹`–`COM³` and `LPT¹`–`LPT³`), and any path that would collide with another path
+in the same directory when compared case-insensitively. Every path in a depot can therefore be
+checked out on Windows, macOS and Linux.
 
 ## 6. Default modules
 

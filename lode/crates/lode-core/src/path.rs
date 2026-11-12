@@ -35,15 +35,48 @@ pub enum PathError {
     /// A segment is a Windows reserved device name, with or without an extension.
     #[error("path segment {0:?} is a reserved Windows device name")]
     ReservedName(String),
+    /// A character Windows does not allow in file names: `< > : " | ? *`.
+    #[error("path contains {0:?}, which Windows does not allow in file names")]
+    WindowsInvalidChar(char),
     /// A segment contains `/` (only when validating a single segment).
     #[error("path segment {0:?} contains a separator")]
     Separator(String),
 }
 
 const RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+    // Windows also reserves these with superscript digits.
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
 ];
+
+/// Characters Windows refuses in file names (besides `\\`, `/` and controls).
+const WINDOWS_INVALID: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
 
 /// Checks one path segment (a file or directory name). Expects NFC input.
 pub fn validate_segment(seg: &str) -> Result<(), PathError> {
@@ -61,6 +94,9 @@ pub fn validate_segment(seg: &str) -> Result<(), PathError> {
     }
     if seg.chars().any(char::is_control) {
         return Err(PathError::ControlCharacter);
+    }
+    if let Some(c) = seg.chars().find(|c| WINDOWS_INVALID.contains(c)) {
+        return Err(PathError::WindowsInvalidChar(c));
     }
     if seg.ends_with('.') || seg.ends_with(' ') {
         return Err(PathError::TrailingDotOrSpace(seg.to_owned()));
@@ -235,6 +271,16 @@ mod tests {
             ("LPT9", ReservedName("LPT9".into())),
             ("Aux", ReservedName("Aux".into())),
             ("PRN.x", ReservedName("PRN.x".into())),
+            ("com\u{b9}.txt", ReservedName("com\u{b9}.txt".into())),
+            ("LPT\u{b3}", ReservedName("LPT\u{b3}".into())),
+            ("a<b", WindowsInvalidChar('<')),
+            ("a>b", WindowsInvalidChar('>')),
+            ("c:/x", WindowsInvalidChar(':')),
+            ("file:stream", WindowsInvalidChar(':')),
+            ("say \"hi\"", WindowsInvalidChar('"')),
+            ("a|b", WindowsInvalidChar('|')),
+            ("why?", WindowsInvalidChar('?')),
+            ("dir/*.txt", WindowsInvalidChar('*')),
             ("CON .txt", ReservedName("CON .txt".into())),
         ];
         for (input, want) in cases {
