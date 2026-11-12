@@ -12,6 +12,7 @@ use crate::auth::{LoginLimiter, ScopeRegistry};
 use crate::clock::SharedClock;
 use crate::commit::TreeLoader;
 use crate::config::ServerConfig;
+use crate::failpoint::Failpoints;
 use crate::lru::Lru;
 use crate::module::{Module, ModuleCtx, Modules, ToolRegistry};
 use crate::perm::Permissions;
@@ -39,6 +40,7 @@ struct Inner {
     outbox_notify: Arc<tokio::sync::Notify>,
     gc_fence: tokio::sync::RwLock<()>,
     gc_running: tokio::sync::Mutex<()>,
+    failpoints: Arc<Failpoints>,
 }
 
 /// Serializes commits to one branch.
@@ -82,6 +84,7 @@ impl AppState {
                 outbox_notify: Arc::new(tokio::sync::Notify::new()),
                 gc_fence: tokio::sync::RwLock::new(()),
                 gc_running: tokio::sync::Mutex::new(()),
+                failpoints: Arc::default(),
             }),
         };
         let mut tools = ToolRegistry::default();
@@ -187,5 +190,10 @@ impl AppState {
     /// Held while a garbage collection runs; one at a time.
     pub(crate) fn gc_running(&self) -> &tokio::sync::Mutex<()> {
         &self.inner.gc_running
+    }
+
+    /// Failpoints tests can arm (see [`crate::failpoint`]).
+    pub fn failpoints(&self) -> &Arc<Failpoints> {
+        &self.inner.failpoints
     }
 }

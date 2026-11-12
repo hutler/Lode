@@ -647,5 +647,9 @@ the range in workspace config; the next commit sends it as `merged_from`.
 - Concurrency test: N clients committing overlapping and disjoint changes; history must be a
   valid serial order and no update lost.
 - Crash tests: abort the server at injected points in the commit path; `fsck` must pass after
-  restart.
+  restart. The points are named failpoints on `AppState::failpoints()`
+  (`commit.before_trees`, `commit.in_transaction`, `commit.after_transaction`); nothing arms
+  them outside tests.
+- `TestWorkspace` runs `lode` with `LODE_CONFIG_DIR` and the home directories pointed at a
+  temporary directory, so tests never read or write the developer's credentials.
 - CI on Linux, Windows and macOS: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.

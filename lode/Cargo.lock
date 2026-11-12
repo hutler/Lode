@@ -1337,6 +1337,18 @@ dependencies = [
 [[package]]
 name = "lode-testkit"
 version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "axum",
+ "futures",
+ "lode-client",
+ "lode-core",
+ "lode-proto",
+ "lode-server",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "lode-workspace"

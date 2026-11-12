@@ -413,6 +413,9 @@ pub async fn commit(
         });
     }
 
+    state
+        .failpoints()
+        .check(crate::failpoint::COMMIT_BEFORE_TREES)?;
     // Store the new trees. Not transactional; an aborted commit leaves garbage for GC.
     for (id, bytes) in &edited.new_trees {
         state
@@ -450,6 +453,7 @@ pub async fn commit(
     // (rolling back) and leaves the reason here.
     let late_reject: Arc<std::sync::Mutex<Option<ApiError>>> = Arc::default();
     let late_slot = late_reject.clone();
+    let failpoints = state.failpoints().clone();
     let outcome = state
         .meta()
         .write(move |tx| {
@@ -530,6 +534,12 @@ pub async fn commit(
                     return Err(MetaError::NotFound(format!("rejected by {}", h.name())));
                 }
             }
+            if failpoints.hit(crate::failpoint::COMMIT_IN_TRANSACTION) {
+                if let Ok(mut slot) = late_slot.lock() {
+                    *slot = Some(ApiError::internal());
+                }
+                return Err(MetaError::NotFound("failpoint".into()));
+            }
             let data = crate::branches::revision_created(
                 num,
                 &b.name,
@@ -562,6 +572,9 @@ pub async fn commit(
     match outcome {
         TxOutcome::Done(rev) => {
             state.outbox_notify().notify_one();
+            state
+                .failpoints()
+                .check(crate::failpoint::COMMIT_AFTER_TRANSACTION)?;
             Ok(CommitResponse {
                 rev,
                 branch: branch.to_owned(),

@@ -81,6 +81,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 zstd = "0.13"
 
 # Test-only
+assert_cmd = "2"
 # rcgen: test certificates for the TLS tests (not on the allow-list; dev-only, see T010 report).
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 insta = { version = "1", features = ["json"] }

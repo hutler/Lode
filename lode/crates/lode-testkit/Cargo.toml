@@ -10,3 +10,17 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+assert_cmd.workspace = true
+axum.workspace = true
+lode-client.workspace = true
+lode-core.workspace = true
+lode-proto.workspace = true
+lode-server.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+futures.workspace = true

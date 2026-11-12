@@ -14,6 +14,7 @@ pub mod depots;
 pub mod error;
 pub mod events;
 pub mod extract;
+pub mod failpoint;
 pub mod lru;
 pub mod maintenance;
 pub mod module;
