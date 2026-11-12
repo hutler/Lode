@@ -36,6 +36,7 @@ use lode_proto::depot::{
     BranchList, BranchView, CreateBranchRequest, CreateDepotRequest, DepotList, DepotView,
     MissingObjectsRequest, MissingObjectsResponse, PatchBranchRequest,
 };
+use lode_proto::locks::{LockList, LockRequest, LocksQuery, UnlockRequest, UnlockResponse};
 use lode_proto::read::{
     ManifestDelta, ManifestEntry, RevisionList, RevisionListQuery, RevisionView, TreeListing,
 };
@@ -479,6 +480,49 @@ impl Client {
             req,
         )
         .await
+    }
+
+    // ---- locks module ----
+
+    /// `POST /depots/{d}/locks`: takes every lock or none. Taking a lock the same workspace
+    /// already holds changes nothing, so a retry is safe.
+    pub async fn lock(&self, depot: &str, req: &LockRequest) -> Result<LockList> {
+        self.json_body(
+            Retry::Yes,
+            Method::POST,
+            self.url(&["depots", depot, "locks"])?,
+            req,
+        )
+        .await
+    }
+
+    /// `DELETE /depots/{d}/locks`.
+    pub async fn unlock(&self, depot: &str, req: &UnlockRequest) -> Result<UnlockResponse> {
+        self.json_body(
+            Retry::Yes,
+            Method::DELETE,
+            self.url(&["depots", depot, "locks"])?,
+            req,
+        )
+        .await
+    }
+
+    /// `GET /depots/{d}/locks`.
+    pub async fn locks(&self, depot: &str, q: &LocksQuery) -> Result<LockList> {
+        let mut url = self.url(&["depots", depot, "locks"])?;
+        {
+            let mut p = url.query_pairs_mut();
+            if let Some(b) = &q.branch {
+                p.append_pair("branch", b);
+            }
+            if let Some(x) = &q.prefix {
+                p.append_pair("prefix", x);
+            }
+            if let Some(o) = &q.owner {
+                p.append_pair("owner", o);
+            }
+        }
+        self.json(Retry::Yes, Method::GET, url).await
     }
 
     // ---- history and trees ----

@@ -534,6 +534,14 @@ impl DbTx<'_> {
         )? > 0)
     }
 
+    /// Records whether this workspace holds the lock of a tracked file.
+    pub fn set_lock_held(&self, path: &DepotPath, held: bool) -> Result<bool> {
+        Ok(self.tx.execute(
+            "UPDATE file SET lock_held = ?2 WHERE path = ?1",
+            params![path.as_str(), held],
+        )? > 0)
+    }
+
     /// Number of tracked files in a changelist.
     pub fn changelist_size(&self, id: i64) -> Result<u64> {
         let n: i64 = self.tx.query_row(

@@ -693,6 +693,15 @@ that had no files in the commit stays). `revert` takes a file out of its changel
 puts both halves of a move into the same changelist, and `changelist move` moves them
 together, so `commit -c` sends a rename whole.
 
+**Locks in the workspace.** `file.lock_held` records which files this workspace has locked;
+`lock`, `unlock`, commit and `locks` set it, and `update` reconciles it with the server and
+warns about a lock that was broken. Files that match `[locks].required` in the workspace's
+`.lodeconfig` are read-only on disk (Windows attribute, Unix write bits) while they are
+unchanged and not locked here: after checkout, update, revert, commit and unlock. `lock` makes
+them writable. The bit is a reminder only; the server enforces the rule at commit. A file
+whose recorded mtime is too recent to trust is compared by content before it is made
+read-only, and writes by `lode` itself clear the bit first.
+
 ### 10.4 Update
 
 `GET manifest?rev=target&base=synced_rev` (full manifest when switching branch, changing the

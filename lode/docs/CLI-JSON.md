@@ -27,7 +27,7 @@ Failure:
 | Exit | Meaning | Typical codes |
 | --- | --- | --- |
 | 0 | success | |
-| 1 | operation failed | `not_found`, `out_of_date`, `conflict`, `conflicted`, `locked`, `lock_required`, `local_changes`, `nothing_to_commit`, `missing`, `aborted`, `not_a_workspace`, `already_a_workspace`, `not_empty`, `workspace_in_use`, `checkout_incomplete`, `pending_commit`, `ignored`, `outside_view`, `unsafe_path`, `changed_during_commit` |
+| 1 | operation failed | `not_found`, `out_of_date`, `conflict`, `conflicted`, `locked`, `lock_required`, `local_changes`, `nothing_to_commit`, `missing`, `aborted`, `module_disabled`, `not_a_workspace`, `already_a_workspace`, `not_empty`, `workspace_in_use`, `checkout_incomplete`, `pending_commit`, `ignored`, `outside_view`, `unsafe_path`, `changed_during_commit` |
 | 2 | usage error | `usage`, `invalid_path`, `invalid_pattern`, `invalid_url`, `insecure_url` |
 | 3 | authentication or permission | `unauthenticated`, `permission_denied` |
 | 4 | network or server | `network`, `internal`, `protocol`, `hash_mismatch`, any 5xx |
@@ -79,13 +79,15 @@ distinct blobs fetched from the server.
 {
   "files": [
     { "path": "c/2.txt", "status": "added", "copy_from": { "path": "a/2.txt", "rev": 7 },
-      "moved": true, "changelist": null, "locked": false }
+      "moved": true, "changelist": null, "locked": false, "needs_lock": false }
   ],
   "invalid": [ { "local": "/abs/path", "reason": "…" } ]
 }
 ```
 
 Only changed paths are listed. `moved` is true when the origin is deleted in the same change.
+`locked` is true when this workspace holds the file's lock; `needs_lock` is true for a changed
+file that matches `[locks].required` and is not locked here (the commit would be refused).
 
 ### `lode add <paths>`
 
@@ -129,6 +131,23 @@ Only changed paths are listed. `moved` is true when the origin is deleted in the
 
 `resumed` is true when the command finished an earlier commit whose answer was lost
 (`replayed` then tells whether the server had already made the revision).
+
+`--keep-locks` keeps this workspace's locks on the committed files; without it they are
+released by the commit.
+
+### `lode lock <paths…> [-m COMMENT]` / `lode unlock <paths…> [--force]`
+
+`{ "locked": [paths] }` and `{ "released": [paths] }`. A lock is all or nothing: if any file
+is locked by someone else the command fails with `locked` (`details.paths`), and a file that is
+older locally than at the branch head fails with `out_of_date` (run `lode update` first).
+`--force` breaks someone else's lock and needs depot admin. On a server without the locks
+module, `lock`, `unlock` and `locks` fail with `module_disabled`.
+
+### `lode locks [--mine] [path-prefix]`
+
+`{ "locks": [ { "path", "branch", "owner": { "name", "kind" }, "workspace", "comment",
+"created_at", "mine": bool } ] }`; `comment` is left out when there is none. `mine` is true for locks held by this
+workspace.
 
 ### `lode changelist new|list|move|delete`
 

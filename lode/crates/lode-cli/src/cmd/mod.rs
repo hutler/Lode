@@ -6,6 +6,7 @@ pub mod commit;
 pub mod diff;
 pub mod files;
 pub mod history;
+pub mod locks;
 pub mod login;
 pub mod revert;
 pub mod status;

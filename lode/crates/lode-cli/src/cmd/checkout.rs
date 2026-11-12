@@ -144,6 +144,7 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
         }
         tx.remove_config(CHECKOUT_REV)
     })?;
+    crate::cmd::locks::protect_all(&ws)?;
     let root = ws.root().to_path_buf();
     ctx.out.line(format!(
         "Checked out {depot}@{} r{rev} into {}: {count} files ({}).",

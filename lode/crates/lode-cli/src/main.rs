@@ -83,6 +83,12 @@ enum Command {
     Update(cmd::update::UpdateArgs),
     /// Settle a conflict left by an update.
     Resolve(cmd::update::ResolveArgs),
+    /// Take exclusive locks on files.
+    Lock(cmd::locks::LockArgs),
+    /// Release locks.
+    Unlock(cmd::locks::UnlockArgs),
+    /// List the locks of this branch.
+    Locks(cmd::locks::LocksArgs),
     /// Group pending changes into named changelists.
     Changelist(cmd::changelist::ChangelistArgs),
     /// Show revision history.
@@ -126,6 +132,9 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Commit(a)) => cmd::commit::commit(&ctx, a).await,
         Some(Command::Update(a)) => cmd::update::update(&ctx, a).await,
         Some(Command::Resolve(a)) => cmd::update::resolve(&ctx, a).await,
+        Some(Command::Lock(a)) => cmd::locks::lock(&ctx, a).await,
+        Some(Command::Unlock(a)) => cmd::locks::unlock(&ctx, a).await,
+        Some(Command::Locks(a)) => cmd::locks::locks(&ctx, a).await,
         Some(Command::Changelist(a)) => cmd::changelist::changelist(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,

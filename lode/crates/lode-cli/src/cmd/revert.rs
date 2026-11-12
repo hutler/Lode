@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use lode_core::DepotPath;
 use lode_workspace::{FileState, Status};
 use serde_json::{json, Value};
 
@@ -81,6 +82,13 @@ pub async fn revert(ctx: &Ctx, args: RevertArgs) -> CliResult<Value> {
         }
         local::clear_conflict(&mut ws, c)?;
     }
+    // A lock-required file back at its base is read-only again, unless it is locked here.
+    let restored: Vec<DepotPath> = report
+        .changed()
+        .filter(|e| reverted.iter().any(|p| p == e.path.as_str()))
+        .map(|e| e.path.clone())
+        .collect();
+    crate::cmd::locks::protect(&ws, &restored)?;
     for p in &reverted {
         ctx.out.line(format!("Reverted {p}"));
     }

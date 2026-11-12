@@ -506,6 +506,8 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
         }
         tx.remove_config(UPDATE_REV)
     })?;
+    crate::cmd::locks::reconcile_after_update(ctx, &mut ws, &client).await?;
+    crate::cmd::locks::protect_all(&ws)?;
 
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for o in run.outcomes.values() {

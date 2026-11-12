@@ -19,12 +19,15 @@ Each line is a status letter, a lock marker, and the depot path:
   M  modified        A  added           D  deleted (lode rm)
   !  missing         C  conflicted      ?  untracked
 
-The second column is L when this workspace holds the file's lock. A copied or moved file
-names its origin. Files in a changelist are listed after the others, under a heading per
+The second column is L when this workspace holds the file's lock. A file that needs a lock
+(`[locks] required` in .lodeconfig) and was changed without one is marked `(needs lock)`:
+the server will refuse to commit it until you `lode lock` it. A copied or moved file names
+its origin. Files in a changelist are listed after the others, under a heading per
 changelist (see `lode changelist`).
 
 With --json: {\"ok\":true,\"files\":[{\"path\",\"status\",\"copy_from\":{\"path\",\"rev\"}|null,
-\"moved\":bool,\"changelist\":name|null,\"locked\":bool}],\"invalid\":[{\"local\",\"reason\"}]}.
+\"moved\":bool,\"changelist\":name|null,\"locked\":bool,\"needs_lock\":bool}],
+\"invalid\":[{\"local\",\"reason\"}]}.
 `status` is one of modified, added, deleted, missing, conflicted, untracked.")]
 pub struct StatusArgs {
     /// Only these files and directories.
@@ -65,6 +68,7 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
         .map(|r| (r.path.as_str().to_owned(), r.state))
         .collect();
     let all_lists = ws.db().changelists()?;
+    let required = crate::cmd::locks::required(&ws);
     let lists: HashMap<i64, String> = all_lists.iter().map(|c| (c.id, c.name.clone())).collect();
 
     let mut files = Vec::new();
@@ -78,6 +82,14 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
             .filter(|id| lists.contains_key(id));
         let list = list_id.and_then(|id| lists.get(&id));
         let locked = row.is_some_and(|r| r.lock_held);
+        // Adds need no lock; changing or deleting a required file does.
+        let needs_lock = !locked
+            && row.is_some_and(|r| r.state != FileState::Added && r.base_id.is_some())
+            && matches!(
+                e.status,
+                Status::Modified | Status::Deleted | Status::Missing
+            )
+            && required.matches(&e.path);
         let mut line = format!(
             "{}{} {}",
             e.status.letter(),
@@ -88,6 +100,9 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
             let verb = if is_move { "moved" } else { "copied" };
             line.push_str(&format!("  ({verb} from {}@r{})", c.path, c.rev));
         }
+        if needs_lock {
+            line.push_str("  (needs lock)");
+        }
         groups.entry(list_id).or_default().push(line);
         files.push(json!({
             "path": e.path.as_str(),
@@ -96,6 +111,7 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
             "moved": is_move,
             "changelist": list,
             "locked": locked,
+            "needs_lock": needs_lock,
         }));
     }
     let default = groups.remove(&None).unwrap_or_default();

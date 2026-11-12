@@ -105,14 +105,26 @@ pub fn place_file(tmp: &Path, target: &Path, executable: bool) -> io::Result<()>
     if let Ok(m) = fs::symlink_metadata(target) {
         if m.file_type().is_symlink() {
             fs::remove_file(target)?;
+        } else {
+            writable(target, &m)?;
         }
     }
     fs::rename(tmp, target)
 }
 
+/// Clears the read-only bit of a file about to be replaced or removed: Windows refuses to
+/// do either to a read-only file, and lock-required files are kept read-only.
+fn writable(file: &Path, meta: &fs::Metadata) -> io::Result<()> {
+    if meta.is_file() && meta.permissions().readonly() {
+        crate::cmd::locks::set_read_only(file, false)?;
+    }
+    Ok(())
+}
+
 /// Creates a symlink at `target` pointing to `link_to`, replacing a file or link there.
 pub fn place_symlink(link_to: &str, target: &Path) -> io::Result<()> {
-    if fs::symlink_metadata(target).is_ok() {
+    if let Ok(m) = fs::symlink_metadata(target) {
+        writable(target, &m)?;
         fs::remove_file(target)?;
     }
     make_symlink(link_to, target)
@@ -144,6 +156,9 @@ fn make_symlink(_link_to: &str, _target: &Path) -> io::Result<()> {
 /// root. A missing file is fine.
 pub fn remove_and_prune(root: &Path, path: &DepotPath) -> io::Result<()> {
     let local = lode_workspace::paths::to_local(root, path);
+    if let Ok(m) = fs::symlink_metadata(&local) {
+        writable(&local, &m)?;
+    }
     match fs::remove_file(&local) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}

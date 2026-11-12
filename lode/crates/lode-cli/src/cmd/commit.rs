@@ -26,6 +26,9 @@ use crate::error::{CliError, CliResult, Exit};
 use crate::local;
 use crate::materialize::PARALLEL_DOWNLOADS;
 
+/// Commit extension asking the locks module to keep the author's locks.
+const KEEP_LOCKS: &str = "locks.keep";
+
 /// Config key holding a commit that was sent but whose answer was not seen.
 pub const PENDING_COMMIT: &str = "pending_commit";
 
@@ -43,6 +46,9 @@ pub struct CommitArgs {
     /// Add untracked files first.
     #[arg(short = 'A', long = "add-all")]
     pub add_all: bool,
+    /// Keep the locks of the committed files (by default the commit releases them).
+    #[arg(long)]
+    pub keep_locks: bool,
     /// Only the files of this changelist; its description is the default message.
     #[arg(short = 'c', long = "changelist")]
     pub changelist: Option<String>,
@@ -217,6 +223,22 @@ fn maybe_committed(e: &lode_client::Error) -> bool {
 /// Brings the rows of a committed request up to date.
 fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> CliResult<()> {
     let now = SystemTime::now();
+    let keep_locks = p
+        .request
+        .extensions
+        .get(KEEP_LOCKS)
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let held: std::collections::HashSet<String> = if keep_locks {
+        ws.db()
+            .files()?
+            .into_iter()
+            .filter(|r| r.lock_held)
+            .map(|r| r.path.as_str().to_owned())
+            .collect()
+    } else {
+        Default::default()
+    };
     ws.db_mut().write(|tx| {
         for c in &p.request.changes {
             match c.action {
@@ -231,6 +253,7 @@ fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> CliResult<()> {
                         c.kind.unwrap_or(EntryKind::File),
                         c.executable,
                     );
+                    row.lock_held = held.contains(c.path.as_str());
                     // The stat at hashing time vouches for the content only if nothing could
                     // have touched the file since (not after a crash and retry).
                     if let (true, Some((size, mtime))) = (trust_stats, p.stats.get(c.path.as_str()))
@@ -250,6 +273,8 @@ fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> CliResult<()> {
         }
         tx.remove_config(PENDING_COMMIT)
     })?;
+    let paths: Vec<DepotPath> = p.request.changes.iter().map(|c| c.path.clone()).collect();
+    crate::cmd::locks::protect(ws, &paths)?;
     Ok(())
 }
 
@@ -517,7 +542,11 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             changes,
             merged_from: vec![],
             provenance: None,
-            extensions: Default::default(),
+            extensions: if args.keep_locks {
+                [(KEEP_LOCKS.to_owned(), Value::Bool(true))].into()
+            } else {
+                Default::default()
+            },
         },
         stats: out
             .iter()
