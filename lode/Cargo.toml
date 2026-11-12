@@ -55,6 +55,7 @@ clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 globset = "0.4"
 hex = "0.4"
+ignore = "0.4"
 rand = "0.8"
 # rustls with the ring provider: aws-lc-rs needs extra build tools on Windows.
 # reqwest 0.12: 0.13 needs Rust 1.85 and defaults to aws-lc-rs. Native roots with ring, no

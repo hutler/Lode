@@ -84,3 +84,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T018 | review | `lode/T018-gc` |  |
 | T019 | review | `lode/T019-fsck-backup` |  |
 | T020 | review | `lode/T020-client` | reqwest 0.12 (rustls, ring, native roots) |
+| T021 | review | `lode/T021-workspace` | status of 200,000 files: 1.8 s (debug build, Linux) |

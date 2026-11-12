@@ -542,7 +542,12 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
 <root>/.lode/workspace.db     SQLite
 <root>/.lode/cache/           blob cache for diff/merge bases, LRU, default cap 1 GiB
 <root>/.lode/tmp/             downloads in progress (same filesystem as the files)
+<root>/.lode/lock             held (an exclusive SQLite lock) by a command that changes the workspace
 ```
+
+A command that changes the workspace takes `.lode/lock` and fails at once with "workspace is
+in use" if another process holds it; the operating system releases it if `lode` is killed.
+Read-only commands such as `status` do not take it.
 
 **Shared download cache (optional).** When `LODE_CACHE_DIR` or the user setting `cache_dir`
 names a directory, checkout, update and switch look there for a blob before downloading and
@@ -576,7 +581,10 @@ prefix) under `<config dir>/lode/credentials/`. On Unix the directory is `0700` 
 Walk the root honouring `.lodeignore` and the view. For each tracked file: if size and mtime
 match the row, it is unchanged; otherwise hash it and compare to `base_id` (and refresh
 size/mtime if the content is in fact unchanged). Untracked files are reported as `?`.
-Hashing runs on a thread pool.
+Hashing runs on a thread pool. An mtime less than 2 s before the scan is stored as 0, so a
+write within the same timestamp tick cannot hide behind a matching stat. A tracked file stays
+tracked even if an ignore pattern matches it. Local names that are not valid depot paths are
+listed and skipped; symlinks are reported as symlinks and never followed.
 
 ### 10.3 Commit
 
