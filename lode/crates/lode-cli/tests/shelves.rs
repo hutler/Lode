@@ -314,3 +314,60 @@ async fn shelving_needs_an_up_to_date_workspace() {
     // Nothing was reverted.
     assert_eq!(a.read("a.txt"), b"ana\n");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn submit_a_reviewed_version() {
+    let t = team().await;
+    let b = checkout(&t.server, &t.bob);
+    b.write("a.txt", "bob's\n");
+    let id = b.json(&["shelve", "-m", "Bob's change"])["shelf"]
+        .as_u64()
+        .unwrap();
+    b.write("a.txt", "bob's, better\n");
+    b.json(&["shelve", "--update", &id.to_string()]);
+
+    let a = checkout(&t.server, &t.ana);
+    // Not interactive: the version must be named.
+    let (code, _) = a.json_status(&["shelf", "submit", &id.to_string()]);
+    assert_eq!(code, 2);
+    let (code, _) = a.json_status(&["shelf", "submit", "x@1"]);
+    assert_eq!(code, 2);
+    let (code, v) = a.json_status(&["shelf", "submit", &format!("{id}@1")]);
+    assert_eq!((code, v["error"]["code"].clone()), (1, json!("conflict")));
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("version 2"),
+        "{v}"
+    );
+
+    let out = a.json(&[
+        "shelf",
+        "submit",
+        &format!("{id}@2"),
+        "-m",
+        "Take bob's change",
+    ]);
+    let rev = out["rev"].as_u64().unwrap();
+    assert_eq!(
+        (out["version"].clone(), out["replayed"].clone()),
+        (json!(2), json!(false))
+    );
+    let again = a.json(&["shelf", "submit", &format!("{id}@2")]);
+    assert_eq!(
+        (again["rev"].as_u64(), again["replayed"].clone()),
+        (Some(rev), json!(true))
+    );
+    a.json(&["update"]);
+    assert_eq!(a.read("a.txt"), b"bob's, better\n");
+    let log = a.json(&["log", "-n", "1"]);
+    let r = &log["revisions"][0];
+    assert_eq!(r["author"]["name"], "bob");
+    assert_eq!(r["submitter"]["name"], "ana");
+    assert_eq!(r["message"], "Take bob's change");
+    assert_eq!(
+        a.json(&["shelf", "show", &id.to_string()])["state"],
+        "submitted"
+    );
+}

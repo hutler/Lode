@@ -176,6 +176,26 @@ pub(crate) fn replace_shelf(
     Ok(true)
 }
 
+/// Marks an open shelf at `version` submitted as `rev`. False if it is not open at that
+/// version.
+pub(crate) fn mark_submitted(
+    conn: &Connection,
+    depot: DepotId,
+    id: i64,
+    version: i64,
+    rev: u64,
+    now: Millis,
+) -> rusqlite::Result<bool> {
+    let n = conn
+        .prepare_cached(
+            "UPDATE mod_shelves_shelf
+             SET state = 'submitted', submitted_rev = ?4, updated_at = ?5
+             WHERE depot_id = ?1 AND id = ?2 AND version = ?3 AND state = 'open'",
+        )?
+        .execute(params![depot.0, id, version, rev as i64, now])?;
+    Ok(n > 0)
+}
+
 /// Marks an open shelf deleted and drops its changes, so their blobs can be collected.
 pub(crate) fn delete_shelf(conn: &Connection, id: i64, now: Millis) -> rusqlite::Result<bool> {
     let n = conn

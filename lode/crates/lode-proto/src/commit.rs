@@ -53,6 +53,10 @@ pub struct Provenance {
     /// Agent details.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentProvenance>,
+    /// The shelf this revision was submitted from. Set by the server on a shelf submit and
+    /// removed from direct commits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_shelf: Option<u64>,
 }
 
 /// `POST /depots/{d}/branches/{b}/commits`.

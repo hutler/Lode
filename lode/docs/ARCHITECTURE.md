@@ -499,6 +499,13 @@ Details of the implementation:
   Deleting keeps the shelf row with state `deleted` and drops its changes, so its blobs are
   collected once the grace period has passed. Deleting a deleted shelf answers its view.
 - For an agent owner, the view carries `agent_owner`, the agent's owning user.
+- Submit answers a `CommitResponse` (`{rev, branch, replayed}`). The commit's request id is
+  unique per attempt; whether a version was submitted is the shelf's state, which `in_commit`
+  sets with `WHERE state = 'open' AND version = …` in the commit transaction, together with
+  `rev_meta shelves.shelf_id` and the `shelf.submitted` event. A submit that loses a race to
+  another of the same version answers that revision (`replayed`); a submitted shelf asked for
+  again at its version does the same. The revision's provenance is the shelf's plus
+  `submitted_shelf`, which the engine drops from direct commits.
 
 ### 9.3 MCP (`lode-mod-mcp`)
 

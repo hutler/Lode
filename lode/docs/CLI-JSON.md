@@ -176,13 +176,18 @@ description defaults to the changelist's (`-c`) or, with `--update`, the shelf's
 "agent_owner"?, "description", "state", "submitted_rev"?, "created_at", "updated_at" } ] }`,
 newest first, open shelves by default.
 
-### `lode shelf show|diff|delete <id>`
+### `lode shelf show|diff|delete|submit <id>`
 
 - `show`: the shelf as above plus `"changes": [ { "path", "action", "base_id", "new_id",
   "kind", "executable", "size", "copy_from" } ]`.
 - `diff`: as `show`, plus `"diff": [ { "path", "patch" } | { "path", "skipped" } ]`
   (`skipped`: `binary`, `symlink`, `too_large`, `missing`).
 - `delete`: `{ "deleted": id }`.
+- `submit <id>@<version> [-m MSG]`: `{ "rev", "branch", "shelf", "version", "replayed": bool }`.
+  The version is the one reviewed; a shelf changed since fails with `conflict` (the message
+  names the current version). Without `@<version>` the shelf is shown and confirmed in a
+  terminal; with `--json` or without a terminal that is a usage error. `replayed` is true when
+  the shelf was already submitted at that version. The author is the shelf's owner.
 
 ### `lode unshelve <id>`
 

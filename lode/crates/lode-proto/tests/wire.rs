@@ -98,6 +98,7 @@ fn provenance() -> Provenance {
             session: Some("s-1".into()),
             tool: Some("create_shelf".into()),
         }),
+        submitted_shelf: None,
     }
 }
 
@@ -275,6 +276,7 @@ fn commit_types() {
                 client: Some("lode-cli/0.1.0".into()),
                 via: None,
                 agent: None,
+                submitted_shelf: None,
             }),
             extensions,
         }

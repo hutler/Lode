@@ -8,22 +8,26 @@
 
 mod db;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use lode_core::{Change, ChangeAction, DepotId, DepotPath, EntryKind, ErrorCode, ObjectId};
-use lode_meta::{BranchId, DepotRow, MetaError, Migration, PrincipalId, PrincipalKind, Reads};
-use lode_proto::commit::{MergedFrom, Provenance};
+use lode_meta::{
+    BranchId, DepotRow, MetaError, Migration, PrincipalId, PrincipalKind, Reads, WriteTx,
+};
+use lode_proto::commit::{CommitRequest, CommitResponse, MergedFrom, Provenance};
 use lode_proto::consts::paths;
 use lode_proto::shelves::{
     CreateShelfRequest, ShelfFileDiff, ShelfList, ShelfState, ShelfView, ShelvesQuery,
-    UpdateShelfRequest,
+    SubmitShelfRequest, UpdateShelfRequest,
 };
 use lode_proto::PrincipalRef;
+use lode_server::auth::SCOPE_WRITE;
+use lode_server::commit::{CommittedCtx, Origin};
 use lode_server::module::{Module, ModuleCtx, ScopeDef, ToolDef};
 use lode_server::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult, Caller, DepotAccess, Level};
 use serde_json::json;
@@ -41,6 +45,11 @@ pub const MAX_DESCRIPTION: usize = 64 * 1024;
 pub const MAX_DIFF_FILE: u64 = 1024 * 1024;
 /// Largest total of patches in one shelf diff, in bytes.
 pub const MAX_DIFF_TOTAL: usize = 4 * 1024 * 1024;
+/// `rev_meta` key naming the shelf a revision was submitted from.
+pub const REV_META_SHELF: &str = "shelves.shelf_id";
+/// Origin attributes of a submit commit.
+const ATTR_ID: &str = "shelf_id";
+const ATTR_VERSION: &str = "shelf_version";
 
 const SCOPES: &[ScopeDef] = &[ScopeDef {
     name: SCOPE_SHELVE,
@@ -458,6 +467,112 @@ async fn replace(
     }
 }
 
+/// The answer for a shelf that `expected` names: `Some` when it was already submitted at that
+/// version, `None` when it is open at that version, `conflict` otherwise.
+fn submitted_already(s: &Loaded, expected: u64) -> ApiResult<Option<CommitResponse>> {
+    let version = s.row.version;
+    match s.row.state.as_str() {
+        SUBMITTED if version == expected => Ok(Some(CommitResponse {
+            rev: s.row.submitted_rev.unwrap_or(0),
+            branch: s.branch.clone(),
+            replayed: true,
+        })),
+        OPEN if version == expected => Ok(None),
+        OPEN => Err(ApiError::new(
+            ErrorCode::Conflict,
+            format!("the shelf is at version {version}, not {expected}; review it again"),
+        )
+        .with_details(json!({ "version": version }))),
+        state => Err(not_open(state)),
+    }
+}
+
+/// `POST …/shelves/{id}/submit`: commits the shelf as its owner, with the caller as submitter.
+async fn submit(
+    State(ctx): State<ModuleCtx>,
+    caller: Caller,
+    ApiPath((depot, id)): ApiPath<(String, String)>,
+    ApiJson(req): ApiJson<SubmitShelfRequest>,
+) -> ApiResult<Json<CommitResponse>> {
+    caller.require_scope(SCOPE_WRITE)?;
+    let id = parse_id(&id)?;
+    Ok(Json(submit_shelf(&ctx, &caller, &depot, id, req).await?))
+}
+
+/// Submits shelf `id` of `depot` (see [`submit`]). Submitting a submitted shelf again answers
+/// its revision.
+pub async fn submit_shelf(
+    ctx: &ModuleCtx,
+    caller: &Caller,
+    depot: &str,
+    id: i64,
+    req: SubmitShelfRequest,
+) -> ApiResult<CommitResponse> {
+    let (d, access) = ctx.depots().resolve(caller, depot).await?;
+    let shelf = visible_shelf(ctx, &access, d.id, id, true).await?;
+    if let Some(done) = submitted_already(&shelf, req.expected_version)? {
+        return Ok(done);
+    }
+    let message = req
+        .message
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| shelf.row.description.clone());
+    let mut provenance: Provenance = shelf
+        .row
+        .provenance
+        .as_deref()
+        .and_then(|p| serde_json::from_str(p).ok())
+        .unwrap_or_default();
+    provenance.submitted_shelf = Some(id as u64);
+    let merged_from: Vec<MergedFrom> = shelf
+        .row
+        .merged_from
+        .as_deref()
+        .and_then(|m| serde_json::from_str(m).ok())
+        .unwrap_or_default();
+    let owner_id = shelf.owner_id;
+    let author = ctx
+        .meta()
+        .read(move |tx| tx.principal(owner_id))
+        .await?
+        .ok_or_else(|| ApiError::not_found("the shelf's owner no longer exists"))?;
+    let version = shelf.row.version;
+    let request = CommitRequest {
+        // Unique per attempt: whether this shelf version was submitted is the shelf's state,
+        // not a request id a client could also send.
+        request_id: format!(
+            "shelves:{id}:v{version}:{}:{}",
+            caller.principal.id.0,
+            ctx.clock().now_ms()
+        ),
+        message,
+        changes: shelf.changes.clone().unwrap_or_default(),
+        merged_from,
+        provenance: Some(provenance),
+        extensions: BTreeMap::new(),
+    };
+    let attrs: BTreeMap<String, String> = [
+        (ATTR_ID.to_owned(), id.to_string()),
+        (ATTR_VERSION.to_owned(), version.to_string()),
+    ]
+    .into();
+    match ctx
+        .commits()
+        .commit(caller, &d, &shelf.branch, request, Some(author), attrs)
+        .await
+    {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            // Another submit of the same version may have won the race.
+            let again = visible_shelf(ctx, &access, d.id, id, false).await?;
+            match submitted_already(&again, req.expected_version) {
+                Ok(Some(done)) => Ok(done),
+                _ => Err(e),
+            }
+        }
+    }
+}
+
 fn not_open(state: &str) -> ApiError {
     ApiError::new(ErrorCode::Conflict, format!("the shelf is {state}"))
         .with_details(json!({ "state": state }))
@@ -754,8 +869,45 @@ impl Module for Shelves {
             Router::new()
                 .route(paths::SHELVES, get(list).post(create))
                 .route(paths::SHELF, get(show).put(replace).delete(remove))
+                .route(paths::SHELF_SUBMIT, post(submit))
                 .with_state(ctx),
         )
+    }
+
+    /// Marks a submitted shelf in the commit's own transaction, so the revision and the
+    /// shelf's state cannot disagree. A shelf no longer open at that version rejects it.
+    fn in_commit(&self, tx: &WriteTx<'_>, ctx: &CommittedCtx<'_>) -> Result<(), ApiError> {
+        let Origin::Module { name, attrs } = ctx.commit.origin else {
+            return Ok(());
+        };
+        if name != NAME {
+            return Ok(());
+        }
+        let num = |k: &str| attrs.get(k).and_then(|v| v.parse::<i64>().ok());
+        let (Some(id), Some(version)) = (num(ATTR_ID), num(ATTR_VERSION)) else {
+            return Err(ApiError::internal());
+        };
+        let depot = ctx.commit.depot;
+        let marked = db::mark_submitted(tx.conn(), depot, id, version, ctx.rev, ctx.created_at)
+            .map_err(sql_error)?;
+        if !marked {
+            return Err(ApiError::new(
+                ErrorCode::Conflict,
+                "the shelf changed or was submitted meanwhile",
+            ));
+        }
+        tx.set_rev_meta(depot, ctx.rev, REV_META_SHELF, &id.to_string())?;
+        let row = db::shelf(tx.conn(), depot, id)
+            .map_err(sql_error)?
+            .ok_or_else(ApiError::internal)?;
+        let loaded = Loader::new(tx).load(row, false)?;
+        tx.append_outbox(
+            Some(depot),
+            "shelf.submitted",
+            &event_data(&loaded, Some(ctx.rev)),
+            ctx.created_at,
+        )?;
+        Ok(())
     }
 
     fn gc_roots(

@@ -143,6 +143,10 @@ async fn branch_config(
 fn provenance_json(req: Option<Provenance>, opts: &CommitOptions) -> ApiResult<String> {
     let mut p = req.unwrap_or_default();
     p.via = Some(opts.via);
+    // Only a module (the shelves module's submit) may say where a revision came from.
+    if opts.origin == Origin::Direct {
+        p.submitted_shelf = None;
+    }
     p.client = opts.client.as_ref().map(|c| {
         let mut c = c.clone();
         if c.len() > MAX_CLIENT_NAME {

@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use lode_client::Client;
@@ -15,7 +16,7 @@ use lode_core::{
     validate_changes, Change, ChangeAction, DepotPath, EntryKind, LodeConfig, ObjectId,
 };
 use lode_proto::shelves::{
-    CreateShelfRequest, ShelfState, ShelfView, ShelvesQuery, UpdateShelfRequest,
+    CreateShelfRequest, ShelfState, ShelfView, ShelvesQuery, SubmitShelfRequest, UpdateShelfRequest,
 };
 use lode_workspace::classify::{class_by_config, class_by_content};
 use lode_workspace::db::keys;
@@ -93,13 +94,22 @@ pub enum ShelfCommand {
         /// Shelf id.
         id: u64,
     },
+    /// Commit a shelf on the server: you are the submitter, its owner the author.
+    Submit {
+        /// `ID@VERSION`, the version you reviewed. Without a version, the shelf is shown and
+        /// confirmed first (in a terminal only).
+        spec: String,
+        /// Commit message (default: the shelf's description).
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+    },
 }
 
 /// `lode shelf` options.
 #[derive(Debug, clap::Args)]
 #[command(long_about = "Look at or delete a shelf.
 \nWith --json: show prints the shelf with \"changes\"; diff adds \"diff\":[{\"path\",\"patch\"|\"skipped\"}];
-delete prints {\"deleted\":id}.")]
+delete prints {\"deleted\":id}; submit prints {\"rev\",\"branch\",\"shelf\",\"version\",\"replayed\":bool}.")]
 pub struct ShelfArgs {
     #[command(subcommand)]
     pub command: ShelfCommand,
@@ -390,6 +400,7 @@ pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> CliResult<Value> {
             }
             to_json(&v)
         }
+        ShelfCommand::Submit { spec, message } => submit(ctx, &t, &spec, message).await,
         ShelfCommand::Delete { id } => {
             if let Err(e) = t.client.delete_shelf(&t.depot, id).await {
                 return Err(refused(&t.client, e).await);
@@ -398,6 +409,92 @@ pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> CliResult<Value> {
             Ok(json!({ "deleted": id }))
         }
     }
+}
+
+/// `ID` or `ID@VERSION`.
+fn parse_spec(spec: &str) -> CliResult<(u64, Option<u64>)> {
+    let bad = || CliError::usage(format!("`{spec}` is not a shelf: use ID or ID@VERSION"));
+    let (id, version) = match spec.split_once('@') {
+        Some((i, v)) => (i, Some(v.parse::<u64>().map_err(|_| bad())?)),
+        None => (spec, None),
+    };
+    Ok((id.parse::<u64>().map_err(|_| bad())?, version))
+}
+
+/// What to do about a refused submit.
+fn submit_refused(e: lode_client::Error) -> CliError {
+    let version = e
+        .api()
+        .and_then(|a| a.details.get("version"))
+        .and_then(Value::as_u64);
+    let mut err = explain(e);
+    match (err.code.as_str(), version) {
+        ("conflict", Some(v)) => {
+            err.message = format!(
+                "the shelf was changed since that version; it is at version {v} now: review it again"
+            );
+        }
+        ("out_of_date", _) => {
+            err.message = format!(
+                "{}; the branch moved under the shelf: unshelve it, update, and shelve it again with `lode shelve --update`",
+                err.message.split("; ").next().unwrap_or_default()
+            );
+        }
+        _ => {}
+    }
+    err
+}
+
+async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> CliResult<Value> {
+    let (id, version) = parse_spec(spec)?;
+    let version = match version {
+        Some(v) => v,
+        None => {
+            let interactive = !ctx.g.json && std::io::stdin().is_terminal();
+            if !interactive {
+                return Err(CliError::usage(
+                    "name the version you reviewed: `lode shelf submit ID@VERSION`",
+                ));
+            }
+            let v = get(t, id, false).await?;
+            print_shelf(ctx, &v);
+            eprint!("Submit version {} of shelf {id}? [y/N] ", v.version);
+            let mut answer = String::new();
+            std::io::stdin().read_line(&mut answer)?;
+            if !matches!(answer.trim(), "y" | "Y" | "yes") {
+                return Err(CliError::failed("aborted", "nothing was submitted"));
+            }
+            v.version
+        }
+    };
+    let req = SubmitShelfRequest {
+        expected_version: version,
+        message: message.filter(|m| !m.trim().is_empty()),
+    };
+    let resp = match t.client.submit_shelf(&t.depot, id, &req).await {
+        Ok(r) => r,
+        Err(e) if e.is_code(lode_core::ErrorCode::NotFound) => {
+            return Err(refused(&t.client, e).await)
+        }
+        Err(e) => return Err(submit_refused(e)),
+    };
+    ctx.out.line(format!(
+        "{} shelf {id} version {version} as r{} on {}.",
+        if resp.replayed {
+            "Already submitted"
+        } else {
+            "Submitted"
+        },
+        resp.rev,
+        resp.branch
+    ));
+    Ok(json!({
+        "rev": resp.rev,
+        "branch": resp.branch,
+        "shelf": id,
+        "version": version,
+        "replayed": resp.replayed,
+    }))
 }
 
 async fn get(t: &Target, id: u64, diff: bool) -> CliResult<ShelfView> {

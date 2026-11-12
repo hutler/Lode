@@ -605,3 +605,265 @@ async fn open_shelves_keep_their_blobs_through_gc() {
     // Committed content is untouched.
     assert!(h.has_blob(b"b1\n").await);
 }
+
+impl H {
+    async fn submit(&self, token: &str, shelf: u64, body: Value) -> (StatusCode, Value) {
+        self.send(
+            "POST",
+            &format!("/api/v1/depots/game/shelves/{shelf}/submit"),
+            token,
+            body,
+        )
+        .await
+    }
+
+    async fn revision(&self, rev: u64) -> Value {
+        let (s, body) = self
+            .send(
+                "GET",
+                &format!("/api/v1/depots/game/revisions/{rev}"),
+                &self.admin,
+                Value::Null,
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        body
+    }
+
+    async fn file(&self, rev: u64, path: &str) -> Vec<u8> {
+        let req = Request::get(format!("/api/v1/depots/game/files?rev={rev}&path={path}"))
+            .header("authorization", format!("Bearer {}", self.admin))
+            .body(Body::empty())
+            .unwrap();
+        let resp = lode_server::router(self.state.clone())
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        resp.into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec()
+    }
+
+    async fn head(&self) -> u64 {
+        let (_, body) = self
+            .send(
+                "GET",
+                "/api/v1/depots/game/branches/main",
+                &self.admin,
+                Value::Null,
+            )
+            .await;
+        body["head_rev"].as_u64().unwrap()
+    }
+}
+
+#[tokio::test]
+async fn submit_commits_as_the_owner() {
+    let h = setup().await;
+    let bot = h.principal("bot", "agent", &["read", "shelve"]).await;
+    let (s, body) = h
+        .create(
+            &bot,
+            2,
+            &[
+                ("a.txt", Some(b"one\ntwo\n"), Some(b"one\n2\n")),
+                ("c.txt", None, Some(b"c\n")),
+            ],
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    let shelf = body["id"].as_u64().unwrap();
+
+    // Submitting needs scope `write` and the version that was reviewed.
+    let (s, body) = h
+        .submit(&h.bob, shelf, json!({ "expected_version": 1 }))
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    let (s, body) = h.submit(&h.ana, shelf, json!({})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    let (s, body) = h
+        .submit(&h.ana, shelf, json!({ "expected_version": 2 }))
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        (body["code"].clone(), body["details"]["version"].clone()),
+        (json!("conflict"), json!(1))
+    );
+    assert_eq!(h.head().await, 2);
+
+    let (s, body) = h
+        .submit(&h.ana, shelf, json!({ "expected_version": 1 }))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body, json!({ "rev": 3, "branch": "main" }));
+    let rev = h.revision(3).await;
+    assert_eq!(rev["author"], json!({ "name": "bot", "kind": "agent" }));
+    assert_eq!(rev["submitter"], json!({ "name": "ana", "kind": "user" }));
+    assert_eq!(rev["message"], "Fix the door");
+    assert_eq!(rev["provenance"]["submitted_shelf"], shelf);
+    assert_eq!(rev["provenance"]["agent"]["model"], "m");
+    let meta = h
+        .state
+        .meta()
+        .read(|tx| {
+            let d = tx.depot_by_name("game")?.unwrap();
+            tx.rev_meta(d.id, 3)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        meta,
+        vec![("shelves.shelf_id".to_owned(), shelf.to_string())]
+    );
+    let (_, view) = h.get(&h.bob, shelf, "").await;
+    assert_eq!(
+        (view["state"].clone(), view["submitted_rev"].clone()),
+        (json!("submitted"), json!(3))
+    );
+    let events = h.events("shelf.submitted").await;
+    assert_eq!((events.len(), events[0]["rev"].clone()), (1, json!(3)));
+    let created = h.events("revision.created").await;
+    assert_eq!(created.last().unwrap()["origin"], "shelves");
+    // The contents are the shelf's.
+    assert_eq!(h.file(3, "a.txt").await, b"one\n2\n");
+    assert_eq!(h.file(3, "c.txt").await, b"c\n");
+
+    // A second submit of the same version answers the same revision; another version is a
+    // conflict, and so is changing a submitted shelf.
+    let (s, body) = h
+        .submit(
+            &h.ana,
+            shelf,
+            json!({ "expected_version": 1, "message": "again" }),
+        )
+        .await;
+    assert_eq!(
+        (s, body),
+        (
+            StatusCode::OK,
+            json!({ "rev": 3, "branch": "main", "replayed": true })
+        )
+    );
+    let (s, body) = h
+        .submit(&h.ana, shelf, json!({ "expected_version": 2 }))
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["details"]["state"], "submitted");
+    assert_eq!(h.head().await, 3);
+    // A direct commit cannot claim to come from a shelf.
+    let changes = h.changes(&[("d.txt", None, Some(b"d\n"))], true).await;
+    let (s, body) = h
+        .send(
+            "POST",
+            "/api/v1/depots/game/branches/main/commits",
+            &h.ana,
+            json!({ "request_id": "claim", "message": "m", "changes": changes,
+                    "provenance": { "submitted_shelf": shelf } }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    assert!(h.revision(4).await["provenance"]
+        .get("submitted_shelf")
+        .is_none());
+}
+
+#[tokio::test]
+async fn refused_submits_leave_the_shelf_open() {
+    let h = setup().await;
+    let (s, body) = h
+        .create(&h.bob, 2, &[("a.txt", Some(b"one\ntwo\n"), Some(b"bob\n"))])
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    let shelf = body["id"].as_u64().unwrap();
+
+    // Updated after review: the reviewed version cannot be submitted.
+    let (s, body) = h
+        .replace(
+            &h.bob,
+            shelf,
+            2,
+            &[("a.txt", Some(b"one\ntwo\n"), Some(b"bob 2\n"))],
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (s, body) = h
+        .submit(&h.ana, shelf, json!({ "expected_version": 1 }))
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["details"]["version"], 2);
+    assert_eq!(h.head().await, 2);
+
+    // A submitter who may not write a path of the shelf.
+    let wes = h.principal("wes", "user", &["read", "write"]).await;
+    h.acl(
+        json!({ "depot": "game", "subject": { "kind": "user", "name": "wes" },
+                  "branch": "*", "path": "b.txt", "effect": "allow", "level": "write" }),
+    )
+    .await;
+    let (s, body) = h
+        .submit(&wes, shelf, json!({ "expected_version": 2 }))
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "permission_denied");
+
+    // The branch moved on a touched file.
+    h.commit(&[("a.txt", Some(b"one\ntwo\n"), Some(b"ana\n"))])
+        .await;
+    let (s, body) = h
+        .submit(&h.ana, shelf, json!({ "expected_version": 2 }))
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "out_of_date");
+    let (_, view) = h.get(&h.bob, shelf, "").await;
+    assert_eq!(view["state"], "open");
+    assert!(h.events("shelf.submitted").await.is_empty());
+}
+
+#[tokio::test]
+async fn a_merge_shelf_submits_its_merge_record() {
+    let h = setup().await;
+    let (s, body) = h
+        .send(
+            "POST",
+            "/api/v1/depots/game/branches",
+            &h.admin,
+            json!({ "name": "feature", "from_branch": "main" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    let changes = h.changes(&[("f.txt", None, Some(b"f\n"))], true).await;
+    let (s, body) = h
+        .send(
+            "POST",
+            "/api/v1/depots/game/branches/feature/commits",
+            &h.admin,
+            json!({ "request_id": "feature-1", "message": "f", "changes": changes }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    let feature_rev = body["rev"].as_u64().unwrap();
+    let merged = json!([{ "branch": "feature", "from_rev": feature_rev, "to_rev": feature_rev }]);
+    let changes = h.changes(&[("f.txt", None, Some(b"f\n"))], true).await;
+    let (s, body) = h
+        .send(
+            "POST",
+            "/api/v1/depots/game/shelves",
+            &h.ana,
+            json!({ "branch": "main", "base_rev": 2, "description": "Merge feature",
+                    "changes": changes, "merged_from": merged }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    let shelf = body["id"].as_u64().unwrap();
+    let (s, body) = h
+        .submit(&h.ana, shelf, json!({ "expected_version": 1 }))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let rev = h.revision(body["rev"].as_u64().unwrap()).await;
+    assert_eq!(rev["merged_from"], merged);
+    assert_eq!(rev["message"], "Merge feature");
+}
