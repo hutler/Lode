@@ -179,7 +179,12 @@ impl Target {
 }
 
 fn when(r: &RevisionView) -> String {
-    let t = r.created_at.to_offset(time::UtcOffset::UTC);
+    format_time(r.created_at)
+}
+
+/// A time as `2026-11-12 10:30:05Z`.
+pub(crate) fn format_time(t: time::OffsetDateTime) -> String {
+    let t = t.to_offset(time::UtcOffset::UTC);
     let text = t.format(&Rfc3339).unwrap_or_default();
     // `2026-11-12T10:30:05Z` → `2026-11-12 10:30:05Z`, without fractions.
     let text = text.replacen('T', " ", 1);
@@ -189,7 +194,7 @@ fn when(r: &RevisionView) -> String {
     }
 }
 
-fn who(name: &str, kind: PrincipalKind) -> String {
+pub(crate) fn who(name: &str, kind: PrincipalKind) -> String {
     match kind {
         PrincipalKind::Agent => format!("{name} [agent]"),
         PrincipalKind::User => name.to_owned(),

@@ -96,3 +96,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T032 | review | `lode/T032-shelves` | `Commits::check` in `ModuleCtx` (commit checks against a base revision); `ShelfView.agent_owner` and `diff` |
 | T034 | review | `lode/T034-changelists` | status lists changelists under headings; `shelve -c` comes with T033 |
 | T031 | review | `lode/T031-locks-client` | `module_disabled` error code (exit 1); `revert` also restores the read-only bit; read-only bits checked on Linux only so far |
+| T033 | review | `lode/T033-shelves-client` | base_rev is the branch head; `shelve -c` (T034 follow-up) done; `merged_from` waits for T051; error codes `nothing_to_shelve`, `update_incomplete` |

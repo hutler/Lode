@@ -27,7 +27,7 @@ Failure:
 | Exit | Meaning | Typical codes |
 | --- | --- | --- |
 | 0 | success | |
-| 1 | operation failed | `not_found`, `out_of_date`, `conflict`, `conflicted`, `locked`, `lock_required`, `local_changes`, `nothing_to_commit`, `missing`, `aborted`, `module_disabled`, `not_a_workspace`, `already_a_workspace`, `not_empty`, `workspace_in_use`, `checkout_incomplete`, `pending_commit`, `ignored`, `outside_view`, `unsafe_path`, `changed_during_commit` |
+| 1 | operation failed | `not_found`, `out_of_date`, `conflict`, `conflicted`, `locked`, `lock_required`, `local_changes`, `nothing_to_commit`, `nothing_to_shelve`, `update_incomplete`, `missing`, `aborted`, `module_disabled`, `not_a_workspace`, `already_a_workspace`, `not_empty`, `workspace_in_use`, `checkout_incomplete`, `pending_commit`, `ignored`, `outside_view`, `unsafe_path`, `changed_during_commit` |
 | 2 | usage error | `usage`, `invalid_path`, `invalid_pattern`, `invalid_url`, `insecure_url` |
 | 3 | authentication or permission | `unauthenticated`, `permission_denied` |
 | 4 | network or server | `network`, `internal`, `protocol`, `hash_mismatch`, any 5xx |
@@ -162,6 +162,42 @@ workspace.
 `default` for files in none) and takes the changelist's description as the message when
 neither `-m` nor `-F` is given.
 
+### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
+
+`{ "shelf": id, "version": n, "files": n, "uploaded": n, "kept": bool, "updated": bool }`
+
+The changes are uploaded and checked against the branch head like a commit (`out_of_date`
+means: run `lode update` first), then reverted in the workspace unless `--keep`. The
+description defaults to the changelist's (`-c`) or, with `--update`, the shelf's.
+
+### `lode shelves [--mine | --user U] [--branch B] [--state open|submitted|deleted]`
+
+`{ "shelves": [ { "id", "version", "branch", "base_rev", "owner": { "name", "kind" },
+"agent_owner"?, "description", "state", "submitted_rev"?, "created_at", "updated_at" } ] }`,
+newest first, open shelves by default.
+
+### `lode shelf show|diff|delete <id>`
+
+- `show`: the shelf as above plus `"changes": [ { "path", "action", "base_id", "new_id",
+  "kind", "executable", "size", "copy_from" } ]`.
+- `diff`: as `show`, plus `"diff": [ { "path", "patch" } | { "path", "skipped" } ]`
+  (`skipped`: `binary`, `symlink`, `too_large`, `missing`).
+- `delete`: `{ "deleted": id }`.
+
+### `lode unshelve <id>`
+
+```json
+{
+  "shelf": 7, "version": 2,
+  "files": [ { "path": "a.txt", "outcome": "merged" } ],
+  "counts": { "merged": 1 }
+}
+```
+
+Outcomes: `applied`, `merged`, `conflicted`, `unchanged` (already as on the shelf), `skipped`
+(outside the view). A conflict is settled with `lode resolve`; `--theirs` takes the shelf's
+side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
+
 ### `lode update [-r REV]`
 
 ```json
@@ -180,6 +216,9 @@ access epoch changed and the whole manifest was compared.
 ### `lode resolve <paths> --mine|--theirs|--merged`
 
 `{ "resolved": [paths], "using": "mine"|"theirs"|"merged" }`
+
+For a conflict left by `unshelve`, `--theirs` writes the shelf's content (or deletes the file)
+over the workspace's base, so the file shows as modified (or deleted).
 
 ### `lode log [path]`
 

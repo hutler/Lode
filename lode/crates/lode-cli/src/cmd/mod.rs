@@ -9,6 +9,7 @@ pub mod history;
 pub mod locks;
 pub mod login;
 pub mod revert;
+pub mod shelve;
 pub mod status;
 pub mod update;
 pub mod view;

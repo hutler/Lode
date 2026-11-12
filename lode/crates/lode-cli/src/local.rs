@@ -100,10 +100,19 @@ pub fn synced_rev(ws: &Workspace) -> CliResult<u64> {
     })
 }
 
-/// The local file holding the incoming side of a binary conflict.
+/// `theirs_rev` of a conflict left by `unshelve`. Revision 0 holds no files, so no update
+/// conflicts with it.
+pub const FROM_SHELF: u64 = 0;
+
+/// The local file holding the incoming side of a binary conflict: `.theirs-r<N>`, or
+/// `.theirs-shelf` for a conflict left by `unshelve`.
 pub fn theirs_path(local: &Path, rev: u64) -> PathBuf {
     let mut name = local.as_os_str().to_owned();
-    name.push(format!(".theirs-r{rev}"));
+    if rev == FROM_SHELF {
+        name.push(".theirs-shelf");
+    } else {
+        name.push(format!(".theirs-r{rev}"));
+    }
     PathBuf::from(name)
 }
 
@@ -201,29 +210,45 @@ impl<'a> Bases<'a> {
         Ok(tmp)
     }
 
+    /// Writes the content `id` to `path` in the workspace at `root`, as a file or a symlink,
+    /// and returns the local path.
+    pub async fn place(
+        &mut self,
+        root: &Path,
+        path: &DepotPath,
+        id: &ObjectId,
+        kind: EntryKind,
+        executable: bool,
+    ) -> CliResult<PathBuf> {
+        let target = prepare_target(root, path)?;
+        if kind == EntryKind::Symlink {
+            let bytes = self.read(id).await?;
+            if bytes.len() > MAX_SYMLINK {
+                return Err(CliError::failed(
+                    "protocol",
+                    format!("symlink {path} is too long"),
+                ));
+            }
+            let text = String::from_utf8(bytes).map_err(|_| {
+                CliError::failed("protocol", format!("symlink {path} is not UTF-8"))
+            })?;
+            place_symlink(&text, &target)?;
+        } else {
+            let tmp = self.fetch_tmp(id).await?;
+            place_file(&tmp, &target, executable)?;
+        }
+        Ok(target)
+    }
+
     /// Puts `row`'s base content and mode back on disk and marks the row unchanged.
     pub async fn restore(&mut self, ws: &mut Workspace, row: &FileRow) -> CliResult<()> {
         let id = row.base_id.ok_or_else(|| {
             CliError::failed("internal", format!("{} has no base to restore", row.path))
         })?;
         let root = ws.root().to_path_buf();
-        let target = prepare_target(&root, &row.path)?;
-        if row.kind == EntryKind::Symlink {
-            let bytes = self.read(&id).await?;
-            if bytes.len() > MAX_SYMLINK {
-                return Err(CliError::failed(
-                    "protocol",
-                    format!("symlink {} is too long", row.path),
-                ));
-            }
-            let text = String::from_utf8(bytes).map_err(|_| {
-                CliError::failed("protocol", format!("symlink {} is not UTF-8", row.path))
-            })?;
-            place_symlink(&text, &target)?;
-        } else {
-            let tmp = self.fetch_tmp(&id).await?;
-            place_file(&tmp, &target, row.executable)?;
-        }
+        let target = self
+            .place(&root, &row.path, &id, row.kind, row.executable)
+            .await?;
         let (size, mtime) = stat_for_row(&target, SystemTime::now())?;
         let mut fresh = row.clone();
         fresh.state = FileState::Normal;

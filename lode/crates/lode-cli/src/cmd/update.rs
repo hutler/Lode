@@ -99,7 +99,7 @@ impl Incoming {
 }
 
 /// The content id of what is on disk at `e` now.
-fn disk_id(ws: &Workspace, e: &ScanEntry) -> CliResult<Option<ObjectId>> {
+pub(crate) fn disk_id(ws: &Workspace, e: &ScanEntry) -> CliResult<Option<ObjectId>> {
     let Some(d) = &e.disk else { return Ok(None) };
     if let Some(id) = d.id {
         return Ok(Some(id));
@@ -112,12 +112,17 @@ fn disk_id(ws: &Workspace, e: &ScanEntry) -> CliResult<Option<ObjectId>> {
     }))
 }
 
-fn local_config(ws: &Workspace) -> Option<LodeConfig> {
+pub(crate) fn local_config(ws: &Workspace) -> Option<LodeConfig> {
     LodeConfig::parse(&fs::read(ws.root().join(".lodeconfig")).ok()?).ok()
 }
 
 /// Writes `bytes` to `path` through `.lode/tmp`.
-fn write_through_tmp(ws: &Workspace, path: &DepotPath, bytes: &[u8], exec: bool) -> CliResult<()> {
+pub(crate) fn write_through_tmp(
+    ws: &Workspace,
+    path: &DepotPath,
+    bytes: &[u8],
+    exec: bool,
+) -> CliResult<()> {
     let tmp_dir = ws.layout().tmp();
     fs::create_dir_all(&tmp_dir)?;
     let tmp = tmp_dir.join(format!("merge-{}", std::process::id()));
@@ -127,16 +132,14 @@ fn write_through_tmp(ws: &Workspace, path: &DepotPath, bytes: &[u8], exec: bool)
     Ok(())
 }
 
-/// Conflict markers with the names SPEC users see.
-fn relabel(merged: Vec<u8>, rev: u64) -> Vec<u8> {
+/// Conflict markers with the names SPEC users see: `mine` and `theirs` (`theirs r<N>`, say).
+pub(crate) fn relabel(merged: Vec<u8>, theirs: &str) -> Vec<u8> {
     let text = String::from_utf8_lossy(&merged).into_owned();
     let mut out = String::with_capacity(text.len() + 32);
     for line in text.split_inclusive('\n') {
         match line.trim_end_matches(['\r', '\n']) {
             "<<<<<<< ours" => out.push_str(&line.replacen("ours", "mine", 1)),
-            ">>>>>>> theirs" => {
-                out.push_str(&line.replacen("theirs", &format!("theirs r{rev}"), 1))
-            }
+            ">>>>>>> theirs" => out.push_str(&line.replacen("theirs", theirs, 1)),
             _ => out.push_str(line),
         }
     }
@@ -255,7 +258,12 @@ impl Run<'_> {
                             if !keep.exists() {
                                 fs::write(&keep, &mine)?;
                             }
-                            write_through_tmp(ws, &e.path, &relabel(conflicted, self.rev), exec)?;
+                            write_through_tmp(
+                                ws,
+                                &e.path,
+                                &relabel(conflicted, &format!("theirs r{}", self.rev)),
+                                exec,
+                            )?;
                             self.conflict(
                                 ws,
                                 row.clone(),
@@ -574,7 +582,34 @@ pub async fn resolve(ctx: &Ctx, args: ResolveArgs) -> CliResult<Value> {
             continue;
         };
         let local_path = ws.local_path(&c.path);
-        if args.theirs {
+        if args.theirs && c.theirs_id != row.base_id {
+            // Left by `unshelve`: the shelf's side goes over the workspace's base, which stays.
+            let mut r = row.clone();
+            r.mtime_ns = 0;
+            match c.theirs_id {
+                Some(id) => {
+                    let root = ws.root().to_path_buf();
+                    bases
+                        .place(&root, &c.path, &id, row.kind, row.executable)
+                        .await?;
+                    r.state = if row.base_id.is_some() {
+                        FileState::Normal
+                    } else {
+                        FileState::Added
+                    };
+                    ws.db_mut().write(|tx| tx.put_file(&r))?;
+                }
+                None => {
+                    remove_and_prune(ws.root(), &c.path)?;
+                    if row.base_id.is_some() {
+                        r.state = FileState::Deleted;
+                        ws.db_mut().write(|tx| tx.put_file(&r))?;
+                    } else {
+                        ws.db_mut().write(|tx| tx.remove_file(&c.path))?;
+                    }
+                }
+            }
+        } else if args.theirs {
             match row.base_id {
                 Some(_) => bases.restore(&mut ws, &row).await?,
                 None => {

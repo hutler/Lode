@@ -40,6 +40,10 @@ use lode_proto::locks::{LockList, LockRequest, LocksQuery, UnlockRequest, Unlock
 use lode_proto::read::{
     ManifestDelta, ManifestEntry, RevisionList, RevisionListQuery, RevisionView, TreeListing,
 };
+use lode_proto::shelves::{
+    CreateShelfRequest, ShelfList, ShelfState, ShelfView, ShelvesQuery, SubmitShelfRequest,
+    UpdateShelfRequest,
+};
 use reqwest::header::RETRY_AFTER;
 use reqwest::{Method, RequestBuilder, Response, StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -523,6 +527,96 @@ impl Client {
             }
         }
         self.json(Retry::Yes, Method::GET, url).await
+    }
+
+    // ---- shelves module ----
+
+    /// `GET /depots/{d}/shelves`: open shelves unless `q.state` says otherwise.
+    pub async fn shelves(&self, depot: &str, q: &ShelvesQuery) -> Result<ShelfList> {
+        let mut url = self.url(&["depots", depot, "shelves"])?;
+        {
+            let mut p = url.query_pairs_mut();
+            if let Some(o) = &q.owner {
+                p.append_pair("owner", o);
+            }
+            if let Some(b) = &q.branch {
+                p.append_pair("branch", b);
+            }
+            if let Some(s) = q.state {
+                p.append_pair(
+                    "state",
+                    match s {
+                        ShelfState::Open => "open",
+                        ShelfState::Submitted => "submitted",
+                        ShelfState::Deleted => "deleted",
+                    },
+                );
+            }
+        }
+        self.json(Retry::Yes, Method::GET, url).await
+    }
+
+    /// `GET /depots/{d}/shelves/{id}`, with a diff per file when `diff` is set.
+    pub async fn shelf(&self, depot: &str, id: u64, diff: bool) -> Result<ShelfView> {
+        let mut url = self.url(&["depots", depot, "shelves", &id.to_string()])?;
+        if diff {
+            url.query_pairs_mut().append_pair("diff", "true");
+        }
+        self.json(Retry::Yes, Method::GET, url).await
+    }
+
+    /// `POST /depots/{d}/shelves`. Not retried: a repeat would make a second shelf.
+    pub async fn create_shelf(&self, depot: &str, req: &CreateShelfRequest) -> Result<ShelfView> {
+        self.json_body(
+            Retry::No,
+            Method::POST,
+            self.url(&["depots", depot, "shelves"])?,
+            req,
+        )
+        .await
+    }
+
+    /// `PUT /depots/{d}/shelves/{id}`: replaces the shelf's content and raises its version.
+    pub async fn update_shelf(
+        &self,
+        depot: &str,
+        id: u64,
+        req: &UpdateShelfRequest,
+    ) -> Result<ShelfView> {
+        self.json_body(
+            Retry::No,
+            Method::PUT,
+            self.url(&["depots", depot, "shelves", &id.to_string()])?,
+            req,
+        )
+        .await
+    }
+
+    /// `DELETE /depots/{d}/shelves/{id}`.
+    pub async fn delete_shelf(&self, depot: &str, id: u64) -> Result<ShelfView> {
+        self.json(
+            Retry::Yes,
+            Method::DELETE,
+            self.url(&["depots", depot, "shelves", &id.to_string()])?,
+        )
+        .await
+    }
+
+    /// `POST /depots/{d}/shelves/{id}/submit`. Retried: a submitted shelf answers with its
+    /// revision.
+    pub async fn submit_shelf(
+        &self,
+        depot: &str,
+        id: u64,
+        req: &SubmitShelfRequest,
+    ) -> Result<CommitResponse> {
+        self.json_body(
+            Retry::Yes,
+            Method::POST,
+            self.url(&["depots", depot, "shelves", &id.to_string(), "submit"])?,
+            req,
+        )
+        .await
     }
 
     // ---- history and trees ----

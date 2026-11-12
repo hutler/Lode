@@ -66,11 +66,11 @@ struct Pending {
 }
 
 /// One file to send: the change and where its content is.
-struct Outgoing {
-    change: Change,
-    local: PathBuf,
+pub(crate) struct Outgoing {
+    pub change: Change,
+    pub local: PathBuf,
     /// Size and mtime when hashed.
-    stat: Option<(u64, i64)>,
+    pub stat: Option<(u64, i64)>,
 }
 
 fn mtime_ns(meta: &fs::Metadata) -> i64 {
@@ -197,7 +197,7 @@ fn advice(code: &str) -> Option<&'static str> {
 }
 
 /// A server refusal with the affected paths and what to do next.
-fn explain(e: lode_client::Error) -> CliError {
+pub(crate) fn explain(e: lode_client::Error) -> CliError {
     let paths: Vec<String> = e
         .api()
         .map(|a| a.paths().iter().map(|p| p.to_string()).collect())
@@ -319,55 +319,15 @@ async fn finish_pending(
     }
 }
 
-/// Runs `lode commit`.
-pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
-    let mut ws = local::open(ctx)?;
-    let _lock = ws.lock()?;
-    let depot = ws
-        .db()
-        .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
-    let branch = ws
-        .db()
-        .config(keys::BRANCH)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
-    let server = ctx.server_url(Some(&ws))?;
-    let client = ctx.client(&server)?;
-
-    if let Some(text) = ws.db().config(PENDING_COMMIT)? {
-        let pending: Pending = serde_json::from_str(&text)
-            .map_err(|e| CliError::failed("workspace", format!("stored commit: {e}")))?;
-        return finish_pending(ctx, &mut ws, &client, &depot, &branch, pending).await;
-    }
-
-    let paths = local::depot_paths(ctx, &ws, &args.paths)?;
-    // `Some(None)` is `-c default`: files in no changelist.
-    let list = args
-        .changelist
-        .as_deref()
-        .map(|n| local::changelist(&ws, n))
-        .transpose()?;
-    let list_id = list.as_ref().map(|l| l.as_ref().map(|c| c.id));
-    if args.add_all {
-        let report = local::scan(ctx, &mut ws, &paths, false)?;
-        let mut rows = Vec::new();
-        for e in report
-            .entries
-            .iter()
-            .filter(|e| e.status == Status::Untracked)
-        {
-            let mut row = crate::cmd::files::added_row(&ws.local_path(&e.path), e.path.clone())?;
-            row.changelist_id = list_id.flatten();
-            rows.push(row);
-        }
-        ws.db_mut().write(|tx| {
-            for r in &rows {
-                tx.put_file(r)?;
-            }
-            Ok(())
-        })?;
-    }
-    let report = local::scan(ctx, &mut ws, &paths, false)?;
+/// The changed files under `paths` (of one changelist when `list` is set) as changes to send,
+/// with the changelists they were in. Refuses conflicted and missing files.
+pub(crate) fn gather(
+    ctx: &Ctx,
+    ws: &mut Workspace,
+    paths: &[DepotPath],
+    list_id: Option<Option<i64>>,
+) -> CliResult<(Vec<Outgoing>, Vec<i64>)> {
+    let report = local::scan(ctx, ws, paths, false)?;
 
     let mut conflicted = Vec::new();
     let mut missing = Vec::new();
@@ -450,46 +410,30 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
         )
         .with_details(json!({ "paths": missing })));
     }
-    if out.is_empty() {
-        let msg = match &args.changelist {
-            Some(n) => format!("nothing to commit in changelist {n}"),
-            None => "nothing to commit".to_owned(),
-        };
-        return Err(CliError::failed("nothing_to_commit", msg));
-    }
-    let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
-    validate_changes(&changes).map_err(|e| CliError::failed("invalid_change", e.to_string()))?;
-    let summary: Vec<String> = changes
-        .iter()
-        .map(|c| {
-            let l = match c.action {
-                ChangeAction::Add => 'A',
-                ChangeAction::Modify => 'M',
-                ChangeAction::Delete => 'D',
-            };
-            format!("{l} {}", c.path)
-        })
-        .collect();
-    let default_msg = list
-        .as_ref()
-        .and_then(|l| l.as_ref())
-        .map(|c| c.description.clone());
-    let msg = message(ctx, &ws, &args, &summary, default_msg.as_deref())?;
+    Ok((out, lists))
+}
 
-    // Upload what the server lacks.
+/// Uploads the content the server lacks and checks that no file changed meanwhile. Returns
+/// the number of blobs uploaded.
+pub(crate) async fn upload(
+    ctx: &Ctx,
+    client: &Client,
+    depot: &str,
+    out: &[Outgoing],
+) -> CliResult<usize> {
     let mut by_id: HashMap<ObjectId, &Outgoing> = HashMap::new();
-    for o in &out {
+    for o in out {
         if let Some(id) = o.change.new_id {
             by_id.entry(id).or_insert(o);
         }
     }
     let ids: Vec<ObjectId> = by_id.keys().copied().collect();
-    let lacking = client.missing_objects(&depot, &ids).await?;
+    let lacking = client.missing_objects(depot, &ids).await?;
     let mut progress = ctx.out.progress("Uploading", lacking.len() as u64);
     let uploads = futures::stream::iter(lacking.iter().map(|id| {
         let o = by_id[id];
         let client = client.clone();
-        let depot = depot.clone();
+        let depot = depot.to_owned();
         let id = *id;
         let path = o.change.path.clone();
         let local_path = o.local.clone();
@@ -524,7 +468,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
     progress.finish();
 
     // Files edited during the upload would make the revision lie about them.
-    for o in &out {
+    for o in out {
         if let Some((size, mtime)) = o.stat {
             let meta = fs::symlink_metadata(&o.local)
                 .map_err(|_| changed_while_committing(&o.change.path))?;
@@ -534,6 +478,85 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             }
         }
     }
+    Ok(lacking.len())
+}
+
+/// Runs `lode commit`.
+pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
+    let mut ws = local::open(ctx)?;
+    let _lock = ws.lock()?;
+    let depot = ws
+        .db()
+        .config(keys::DEPOT)?
+        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+    let branch = ws
+        .db()
+        .config(keys::BRANCH)?
+        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
+    let server = ctx.server_url(Some(&ws))?;
+    let client = ctx.client(&server)?;
+
+    if let Some(text) = ws.db().config(PENDING_COMMIT)? {
+        let pending: Pending = serde_json::from_str(&text)
+            .map_err(|e| CliError::failed("workspace", format!("stored commit: {e}")))?;
+        return finish_pending(ctx, &mut ws, &client, &depot, &branch, pending).await;
+    }
+
+    let paths = local::depot_paths(ctx, &ws, &args.paths)?;
+    // `Some(None)` is `-c default`: files in no changelist.
+    let list = args
+        .changelist
+        .as_deref()
+        .map(|n| local::changelist(&ws, n))
+        .transpose()?;
+    let list_id = list.as_ref().map(|l| l.as_ref().map(|c| c.id));
+    if args.add_all {
+        let report = local::scan(ctx, &mut ws, &paths, false)?;
+        let mut rows = Vec::new();
+        for e in report
+            .entries
+            .iter()
+            .filter(|e| e.status == Status::Untracked)
+        {
+            let mut row = crate::cmd::files::added_row(&ws.local_path(&e.path), e.path.clone())?;
+            row.changelist_id = list_id.flatten();
+            rows.push(row);
+        }
+        ws.db_mut().write(|tx| {
+            for r in &rows {
+                tx.put_file(r)?;
+            }
+            Ok(())
+        })?;
+    }
+    let (out, lists) = gather(ctx, &mut ws, &paths, list_id)?;
+    if out.is_empty() {
+        let msg = match &args.changelist {
+            Some(n) => format!("nothing to commit in changelist {n}"),
+            None => "nothing to commit".to_owned(),
+        };
+        return Err(CliError::failed("nothing_to_commit", msg));
+    }
+    let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
+    validate_changes(&changes).map_err(|e| CliError::failed("invalid_change", e.to_string()))?;
+    let summary: Vec<String> = changes
+        .iter()
+        .map(|c| {
+            let l = match c.action {
+                ChangeAction::Add => 'A',
+                ChangeAction::Modify => 'M',
+                ChangeAction::Delete => 'D',
+            };
+            format!("{l} {}", c.path)
+        })
+        .collect();
+    let default_msg = list
+        .as_ref()
+        .and_then(|l| l.as_ref())
+        .map(|c| c.description.clone());
+    let msg = message(ctx, &ws, &args, &summary, default_msg.as_deref())?;
+
+    let uploaded = upload(ctx, &client, &depot, &out).await?;
 
     let pending = Pending {
         request: CommitRequest {
@@ -586,7 +609,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
         "rev": resp.rev,
         "branch": resp.branch,
         "files": n,
-        "uploaded": lacking.len(),
+        "uploaded": uploaded,
         "replayed": resp.replayed,
         "resumed": false,
     }))

@@ -91,6 +91,14 @@ enum Command {
     Locks(cmd::locks::LocksArgs),
     /// Group pending changes into named changelists.
     Changelist(cmd::changelist::ChangelistArgs),
+    /// Put pending changes on a shelf on the server.
+    Shelve(cmd::shelve::ShelveArgs),
+    /// List the shelves of this depot.
+    Shelves(cmd::shelve::ShelvesArgs),
+    /// Show, diff or delete a shelf.
+    Shelf(cmd::shelve::ShelfArgs),
+    /// Apply a shelf's changes to the workspace.
+    Unshelve(cmd::shelve::UnshelveArgs),
     /// Show revision history.
     Log(cmd::history::LogArgs),
     /// Print a file as of a revision.
@@ -136,6 +144,10 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Unlock(a)) => cmd::locks::unlock(&ctx, a).await,
         Some(Command::Locks(a)) => cmd::locks::locks(&ctx, a).await,
         Some(Command::Changelist(a)) => cmd::changelist::changelist(&ctx, a).await,
+        Some(Command::Shelve(a)) => cmd::shelve::shelve(&ctx, a).await,
+        Some(Command::Shelves(a)) => cmd::shelve::shelves(&ctx, a).await,
+        Some(Command::Shelf(a)) => cmd::shelve::shelf(&ctx, a).await,
+        Some(Command::Unshelve(a)) => cmd::shelve::unshelve(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,

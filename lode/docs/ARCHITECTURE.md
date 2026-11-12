@@ -693,6 +693,16 @@ that had no files in the commit stays). `revert` takes a file out of its changel
 puts both halves of a move into the same changelist, and `changelist move` moves them
 together, so `commit -c` sends a rename whole.
 
+**Shelves in the workspace.** `lode shelve` gathers and uploads changes as `commit` does and
+sends them to the shelves module with the branch head as `base_rev`, so the touched files must
+be up to date. Without `--keep` it then reverts them (adds are removed from disk). `unshelve`
+applies each change against the workspace's current state: unchanged since the shelf's base →
+written; changed here → three-way text merge with the shelf's `base_id` as ancestor, or a
+conflict. An unshelve conflict keeps the workspace's base in the row and records the shelf's
+side in `conflict.theirs_id` with `theirs_rev = 0`, so `resolve --theirs` writes that side
+without moving the base, and a binary conflict puts it in `<file>.theirs-shelf`. Pending merge
+state (`merged_from`) is not carried yet (T051).
+
 **Locks in the workspace.** `file.lock_held` records which files this workspace has locked;
 `lock`, `unlock`, commit and `locks` set it, and `update` reconciles it with the server and
 warns about a lock that was broken. Files that match `[locks].required` in the workspace's
