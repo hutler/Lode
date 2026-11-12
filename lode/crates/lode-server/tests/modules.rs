@@ -174,11 +174,15 @@ impl Module for Example {
 
     fn on_event<'a>(&'a self, event: &'a Event) -> BoxFuture<'a, Result<(), BoxError>> {
         Box::pin(async move {
-            let fail = self
-                .seen
-                .fail_events
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                .is_ok();
+            // A plain compare-exchange: `fetch_update` is deprecated on newer toolchains and its
+            // replacement is newer than the minimum supported Rust version.
+            let n = self.seen.fail_events.load(Ordering::SeqCst);
+            let fail = n > 0
+                && self
+                    .seen
+                    .fail_events
+                    .compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok();
             if fail {
                 return Err("not now".into());
             }
