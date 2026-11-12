@@ -7,10 +7,12 @@
 pub mod auth;
 pub mod blobs;
 pub mod clock;
+pub mod commit;
 pub mod config;
 pub mod depots;
 pub mod error;
 pub mod extract;
+pub mod lru;
 pub mod perm;
 pub mod routes;
 pub mod server;

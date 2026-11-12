@@ -1015,6 +1015,7 @@ name = "lode-server"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "blake3",
@@ -1025,6 +1026,7 @@ dependencies = [
  "lode-meta",
  "lode-proto",
  "lode-store",
+ "proptest",
  "rand 0.8.8",
  "rcgen",
  "rustls",

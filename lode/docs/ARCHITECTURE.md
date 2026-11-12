@@ -250,6 +250,8 @@ and `branch.created` to the outbox. Archiving a branch appends `branch.archived`
 ## 6. HTTP API
 
 Base path `/api/v1`. JSON unless stated. Auth: `Authorization: Bearer <token>`.
+Path parameters are single URL segments: a branch name that contains `/` is sent with each `/`
+percent-encoded (`release%2F1.0`).
 
 | Method and path | Purpose |
 | --- | --- |
