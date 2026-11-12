@@ -20,7 +20,7 @@ pub use change::{validate_changes, Change, ChangeAction, ChangeSetError, CopyFro
 pub use config::{CheckRequirement, ConfigError, LodeConfig};
 pub use error::ErrorCode;
 pub use glob::{GlobError, PathGlobSet};
-pub use id::{blob_id, tree_id, IdParseError, ObjectId};
+pub use id::{blob_id, tree_id, DepotId, IdParseError, ObjectId, TREE_ID_CONTEXT};
 pub use object::{Codec, HeaderError, ObjectHeader, ObjectKind};
 pub use path::{DepotPath, PathError};
 pub use tree::{EntryKind, Tree, TreeEntry, TreeError};

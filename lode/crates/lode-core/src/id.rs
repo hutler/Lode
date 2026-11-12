@@ -8,6 +8,19 @@ use std::str::FromStr;
 /// never have the same id as a blob with identical bytes.
 pub const TREE_ID_CONTEXT: &str = "lode 2026 tree v1";
 
+/// Numeric id of a depot, as stored in the metadata database.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct DepotId(pub i64);
+
+impl fmt::Display for DepotId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A 32-byte content address, shown as 64 lower-case hex characters.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ObjectId([u8; 32]);

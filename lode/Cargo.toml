@@ -79,3 +79,10 @@ panic = "warn"
 
 [profile.release]
 lto = "thin"
+
+# Hashing and compression dominate test time; build them optimized even in debug.
+[profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.zstd-sys]
+opt-level = 3
