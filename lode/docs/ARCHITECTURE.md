@@ -686,6 +686,13 @@ made, so a retry never makes a second revision. The message comes from `-m`, `-F
 `$VISUAL`/`$EDITOR` (only in a terminal, never with `--json`); `#` lines are dropped and an
 empty message aborts.
 
+**Changelists.** A changelist is the `changelist_id` of `file` rows; files in none are in
+`default`. `lode commit -c` selects the changed files of one changelist. Committed files
+leave their changelist, and a changelist that the commit left without files is deleted (one
+that had no files in the commit stays). `revert` takes a file out of its changelist. `mv`
+puts both halves of a move into the same changelist, and `changelist move` moves them
+together, so `commit -c` sends a rename whole.
+
 ### 10.4 Update
 
 `GET manifest?rev=target&base=synced_rev` (full manifest when switching branch, changing the

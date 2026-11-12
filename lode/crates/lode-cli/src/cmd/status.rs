@@ -20,7 +20,8 @@ Each line is a status letter, a lock marker, and the depot path:
   !  missing         C  conflicted      ?  untracked
 
 The second column is L when this workspace holds the file's lock. A copied or moved file
-names its origin, and a file in a changelist shows the changelist in brackets.
+names its origin. Files in a changelist are listed after the others, under a heading per
+changelist (see `lode changelist`).
 
 With --json: {\"ok\":true,\"files\":[{\"path\",\"status\",\"copy_from\":{\"path\",\"rev\"}|null,
 \"moved\":bool,\"changelist\":name|null,\"locked\":bool}],\"invalid\":[{\"local\",\"reason\"}]}.
@@ -63,21 +64,19 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
         .into_iter()
         .map(|r| (r.path.as_str().to_owned(), r.state))
         .collect();
-    let lists: HashMap<i64, String> = ws
-        .db()
-        .changelists()?
-        .into_iter()
-        .map(|c| (c.id, c.name))
-        .collect();
+    let all_lists = ws.db().changelists()?;
+    let lists: HashMap<i64, String> = all_lists.iter().map(|c| (c.id, c.name.clone())).collect();
 
     let mut files = Vec::new();
+    let mut groups: HashMap<Option<i64>, Vec<String>> = HashMap::new();
     for e in report.changed() {
         let row = e.row.as_ref();
         let copy_from = row.and_then(|r| r.copy_from.as_ref());
         let is_move = moved(e, &states);
-        let list = row
+        let list_id = row
             .and_then(|r| r.changelist_id)
-            .and_then(|id| lists.get(&id));
+            .filter(|id| lists.contains_key(id));
+        let list = list_id.and_then(|id| lists.get(&id));
         let locked = row.is_some_and(|r| r.lock_held);
         let mut line = format!(
             "{}{} {}",
@@ -89,10 +88,7 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
             let verb = if is_move { "moved" } else { "copied" };
             line.push_str(&format!("  ({verb} from {}@r{})", c.path, c.rev));
         }
-        if let Some(l) = list {
-            line.push_str(&format!("  [{l}]"));
-        }
-        ctx.out.line(line);
+        groups.entry(list_id).or_default().push(line);
         files.push(json!({
             "path": e.path.as_str(),
             "status": status_name(e.status),
@@ -101,6 +97,28 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
             "changelist": list,
             "locked": locked,
         }));
+    }
+    let default = groups.remove(&None).unwrap_or_default();
+    let mut printed = !default.is_empty();
+    for line in default {
+        ctx.out.line(line);
+    }
+    for c in &all_lists {
+        let Some(lines) = groups.remove(&Some(c.id)) else {
+            continue;
+        };
+        if std::mem::replace(&mut printed, true) {
+            ctx.out.line("");
+        }
+        let desc = c.description.lines().next().unwrap_or_default();
+        if desc.is_empty() {
+            ctx.out.line(format!("Changelist {}:", c.name));
+        } else {
+            ctx.out.line(format!("Changelist {}: {desc}", c.name));
+        }
+        for line in lines {
+            ctx.out.line(line);
+        }
     }
     let invalid: Vec<Value> = report
         .invalid

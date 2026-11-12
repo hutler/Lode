@@ -130,6 +130,19 @@ Only changed paths are listed. `moved` is true when the origin is deleted in the
 `resumed` is true when the command finished an earlier commit whose answer was lost
 (`replayed` then tells whether the server had already made the revision).
 
+### `lode changelist new|list|move|delete`
+
+- `new <name> [-m DESC]`: `{ "changelist" }`
+- `list`: `{ "changelists": [ { "name", "description", "files": [paths] } ] }`, `default`
+  first. `files` are the changed files of each changelist.
+- `move <name> <paths…>`: `{ "changelist", "moved": [paths] }`. Moving one half of a move
+  (`lode mv`) takes the other half along.
+- `delete <name>`: `{ "deleted", "files": n }`; the files return to `default`.
+
+`add`, `rm`, `mv`, `cp` take `-c NAME`; `commit -c NAME` commits only that changelist (use
+`default` for files in none) and takes the changelist's description as the message when
+neither `-m` nor `-F` is given.
+
 ### `lode update [-r REV]`
 
 ```json

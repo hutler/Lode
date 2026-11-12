@@ -43,6 +43,9 @@ pub struct CommitArgs {
     /// Add untracked files first.
     #[arg(short = 'A', long = "add-all")]
     pub add_all: bool,
+    /// Only the files of this changelist; its description is the default message.
+    #[arg(short = 'c', long = "changelist")]
+    pub changelist: Option<String>,
 }
 
 /// A commit in flight, as stored under [`PENDING_COMMIT`].
@@ -51,6 +54,9 @@ struct Pending {
     request: CommitRequest,
     /// Size and mtime of each sent file when it was hashed.
     stats: HashMap<String, (u64, i64)>,
+    /// Changelists the sent files were in; those left empty are deleted afterwards.
+    #[serde(default)]
+    changelists: Vec<i64>,
 }
 
 /// One file to send: the change and where its content is.
@@ -95,7 +101,13 @@ fn changed_while_committing(path: &DepotPath) -> CliError {
 }
 
 /// The commit message from `-m`, `-F` or the editor, without `#` comment lines.
-fn message(ctx: &Ctx, ws: &Workspace, args: &CommitArgs, summary: &[String]) -> CliResult<String> {
+fn message(
+    ctx: &Ctx,
+    ws: &Workspace,
+    args: &CommitArgs,
+    summary: &[String],
+    default: Option<&str>,
+) -> CliResult<String> {
     let raw = if let Some(m) = &args.message {
         m.clone()
     } else if let Some(f) = &args.file {
@@ -104,6 +116,8 @@ fn message(ctx: &Ctx, ws: &Workspace, args: &CommitArgs, summary: &[String]) -> 
         } else {
             fs::read_to_string(ctx.local(f))?
         }
+    } else if let Some(d) = default.filter(|d| !d.trim().is_empty()) {
+        d.to_owned()
     } else {
         let editor = std::env::var("VISUAL")
             .ok()
@@ -228,6 +242,12 @@ fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> CliResult<()> {
                 }
             }
         }
+        // Committed files left their changelist; one left empty has served its purpose.
+        for id in &p.changelists {
+            if tx.changelist_size(*id)? == 0 {
+                tx.delete_changelist(*id)?;
+            }
+        }
         tx.remove_config(PENDING_COMMIT)
     })?;
     Ok(())
@@ -296,6 +316,13 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
     }
 
     let paths = local::depot_paths(ctx, &ws, &args.paths)?;
+    // `Some(None)` is `-c default`: files in no changelist.
+    let list = args
+        .changelist
+        .as_deref()
+        .map(|n| local::changelist(&ws, n))
+        .transpose()?;
+    let list_id = list.as_ref().map(|l| l.as_ref().map(|c| c.id));
     if args.add_all {
         let report = local::scan(ctx, &mut ws, &paths, false)?;
         let mut rows = Vec::new();
@@ -304,10 +331,9 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             .iter()
             .filter(|e| e.status == Status::Untracked)
         {
-            rows.push(crate::cmd::files::added_row(
-                &ws.local_path(&e.path),
-                e.path.clone(),
-            )?);
+            let mut row = crate::cmd::files::added_row(&ws.local_path(&e.path), e.path.clone())?;
+            row.changelist_id = list_id.flatten();
+            rows.push(row);
         }
         ws.db_mut().write(|tx| {
             for r in &rows {
@@ -321,8 +347,17 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
     let mut conflicted = Vec::new();
     let mut missing = Vec::new();
     let mut out: Vec<Outgoing> = Vec::new();
+    let mut lists: Vec<i64> = Vec::new();
     for e in report.changed() {
         let Some(row) = &e.row else { continue };
+        if list_id.is_some_and(|l| l != row.changelist_id) {
+            continue;
+        }
+        if let Some(id) = row.changelist_id {
+            if !lists.contains(&id) {
+                lists.push(id);
+            }
+        }
         let local_path = ws.local_path(&e.path);
         match e.status {
             Status::Conflicted => conflicted.push(e.path.as_str().to_owned()),
@@ -391,7 +426,11 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
         .with_details(json!({ "paths": missing })));
     }
     if out.is_empty() {
-        return Err(CliError::failed("nothing_to_commit", "nothing to commit"));
+        let msg = match &args.changelist {
+            Some(n) => format!("nothing to commit in changelist {n}"),
+            None => "nothing to commit".to_owned(),
+        };
+        return Err(CliError::failed("nothing_to_commit", msg));
     }
     let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
     validate_changes(&changes).map_err(|e| CliError::failed("invalid_change", e.to_string()))?;
@@ -406,7 +445,11 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             format!("{l} {}", c.path)
         })
         .collect();
-    let msg = message(ctx, &ws, &args, &summary)?;
+    let default_msg = list
+        .as_ref()
+        .and_then(|l| l.as_ref())
+        .map(|c| c.description.clone());
+    let msg = message(ctx, &ws, &args, &summary, default_msg.as_deref())?;
 
     // Upload what the server lacks.
     let mut by_id: HashMap<ObjectId, &Outgoing> = HashMap::new();
@@ -480,6 +523,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             .iter()
             .filter_map(|o| o.stat.map(|s| (o.change.path.as_str().to_owned(), s)))
             .collect(),
+        changelists: lists,
     };
     let stored =
         serde_json::to_string(&pending).map_err(|e| CliError::failed("internal", e.to_string()))?;

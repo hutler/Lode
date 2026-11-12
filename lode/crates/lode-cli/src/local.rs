@@ -227,6 +227,8 @@ impl<'a> Bases<'a> {
         let (size, mtime) = stat_for_row(&target, SystemTime::now())?;
         let mut fresh = row.clone();
         fresh.state = FileState::Normal;
+        // A file without changes belongs to no changelist.
+        fresh.changelist_id = None;
         fresh.size = size;
         fresh.mtime_ns = mtime;
         ws.db_mut().write(|tx| tx.put_file(&fresh))?;
@@ -238,4 +240,25 @@ impl<'a> Bases<'a> {
 pub fn not_found(what: &str, paths: &[String]) -> CliError {
     CliError::failed("not_found", format!("{what}: {}", paths.join(", ")))
         .with_details(json!({ "paths": paths }))
+}
+
+/// Name of the changelist of files that are in no other.
+pub const DEFAULT_CHANGELIST: &str = "default";
+
+/// The changelist called `name`: `None` for `default`, `not_found` when there is none.
+pub fn changelist(ws: &Workspace, name: &str) -> CliResult<Option<lode_workspace::ChangelistRow>> {
+    if name == DEFAULT_CHANGELIST {
+        return Ok(None);
+    }
+    ws.db()
+        .changelists()?
+        .into_iter()
+        .find(|c| c.name == name)
+        .map(Some)
+        .ok_or_else(|| {
+            CliError::failed(
+                "not_found",
+                format!("no changelist `{name}`; create it with `lode changelist new {name}`"),
+            )
+        })
 }

@@ -24,6 +24,9 @@ pub struct AddArgs {
     /// Also add ignored files.
     #[arg(long, short = 'f')]
     pub force: bool,
+    /// Put the added files into this changelist.
+    #[arg(short = 'c', long = "changelist")]
+    pub changelist: Option<String>,
 }
 
 /// `lode rm` options.
@@ -38,6 +41,9 @@ pub struct RmArgs {
     /// Also remove files with local changes or that were only added.
     #[arg(long, short = 'f')]
     pub force: bool,
+    /// Put the deletions into this changelist.
+    #[arg(short = 'c', long = "changelist")]
+    pub changelist: Option<String>,
 }
 
 /// `lode mv` and `lode cp` options.
@@ -49,6 +55,15 @@ pub struct MoveArgs {
     /// Only record a move or copy already done on disk.
     #[arg(long)]
     pub after: bool,
+    /// Put the result into this changelist (by default it stays in the source's).
+    #[arg(short = 'c', long = "changelist")]
+    pub changelist: Option<String>,
+}
+
+/// The changelist id `-c NAME` names, or the default one when `-c` is absent.
+fn changelist_arg(ws: &Workspace, name: Option<&str>) -> CliResult<Option<Option<i64>>> {
+    name.map(|n| local::changelist(ws, n).map(|c| c.map(|c| c.id)))
+        .transpose()
 }
 
 /// An `added` row for the file at `local`, with its kind, executable bit, size and mtime.
@@ -95,6 +110,7 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let named = local::depot_paths(ctx, &ws, &args.paths)?;
+    let list = changelist_arg(&ws, args.changelist.as_deref())?;
     let report = local::scan(ctx, &mut ws, &named, true)?;
     let view = ws.view_spec()?.compile()?;
 
@@ -155,7 +171,9 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
             }
             _ => continue,
         }
-        rows.push(added_row(&ws.local_path(&e.path), e.path.clone())?);
+        let mut row = added_row(&ws.local_path(&e.path), e.path.clone())?;
+        row.changelist_id = list.flatten();
+        rows.push(row);
     }
     ws.db_mut().write(|tx| {
         for r in &rows {
@@ -165,6 +183,9 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
             let mut r = r.clone();
             r.state = FileState::Normal;
             r.mtime_ns = 0;
+            if let Some(l) = list {
+                r.changelist_id = l;
+            }
             tx.put_file(&r)?;
         }
         Ok(())
@@ -186,6 +207,7 @@ pub async fn rm(ctx: &Ctx, args: RmArgs) -> CliResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let named = local::depot_paths(ctx, &ws, &args.paths)?;
+    let list = changelist_arg(&ws, args.changelist.as_deref())?;
     let report = local::scan(ctx, &mut ws, &named, false)?;
     let tracked: Vec<_> = report.entries.iter().filter(|e| e.row.is_some()).collect();
     let untracked_named: Vec<String> = named
@@ -239,6 +261,9 @@ pub async fn rm(ctx: &Ctx, args: RmArgs) -> CliResult<Value> {
             } else {
                 let mut r = row.clone();
                 r.state = FileState::Deleted;
+                if let Some(l) = list {
+                    r.changelist_id = l;
+                }
                 tx.put_file(&r)?;
             }
             Ok(())
@@ -407,6 +432,7 @@ async fn move_or_copy(ctx: &Ctx, args: MoveArgs, is_move: bool) -> CliResult<Val
     let _lock = ws.lock()?;
     let pairs = plan(ctx, &ws, &args, verb)?;
     check(&ws, &pairs, args.after, is_move)?;
+    let list = changelist_arg(&ws, args.changelist.as_deref())?;
     let rev = local::synced_rev(&ws)?;
     let root = ws.root().to_path_buf();
     let mut done = Vec::new();
@@ -449,15 +475,17 @@ async fn move_or_copy(ctx: &Ctx, args: MoveArgs, is_move: bool) -> CliResult<Val
             let (size, _) = stat_for_row(&to_local, SystemTime::now())?;
             new_row.size = size;
         }
-        new_row.changelist_id = p.from.changelist_id;
+        new_row.changelist_id = list.unwrap_or(p.from.changelist_id);
         ws.db_mut().write(|tx| {
             tx.put_file(&new_row)?;
             if is_move {
                 if p.from.state == FileState::Added {
                     tx.remove_file(&p.from.path)?;
                 } else {
+                    // Both halves of a move go into the same changelist.
                     let mut old = p.from.clone();
                     old.state = FileState::Deleted;
+                    old.changelist_id = new_row.changelist_id;
                     tx.put_file(&old)?;
                 }
             }

@@ -94,3 +94,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T028 | review | `lode/T028-json-contract` | `docs/CLI-JSON.md`; a failed checkout no longer leaves a workspace behind |
 | T030 | review | `lode/T030-locks` | server admins may grant module scopes; `CommittedCtx.created_at`; `UnlockResponse` in lode-proto |
 | T032 | review | `lode/T032-shelves` | `Commits::check` in `ModuleCtx` (commit checks against a base revision); `ShelfView.agent_owner` and `diff` |
+| T034 | review | `lode/T034-changelists` | status lists changelists under headings; `shelve -c` comes with T033 |

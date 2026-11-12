@@ -524,6 +524,25 @@ impl DbTx<'_> {
             .execute("DELETE FROM changelist WHERE id = ?1", [id])?
             > 0)
     }
+
+    /// Puts a tracked file into a changelist (`None`: the default one). False if the path
+    /// is not tracked.
+    pub fn set_changelist(&self, path: &DepotPath, id: Option<i64>) -> Result<bool> {
+        Ok(self.tx.execute(
+            "UPDATE file SET changelist_id = ?2 WHERE path = ?1",
+            params![path.as_str(), id],
+        )? > 0)
+    }
+
+    /// Number of tracked files in a changelist.
+    pub fn changelist_size(&self, id: i64) -> Result<u64> {
+        let n: i64 = self.tx.query_row(
+            "SELECT count(*) FROM file WHERE changelist_id = ?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        Ok(n.max(0) as u64)
+    }
 }
 
 #[cfg(test)]

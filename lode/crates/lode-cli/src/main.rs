@@ -83,6 +83,8 @@ enum Command {
     Update(cmd::update::UpdateArgs),
     /// Settle a conflict left by an update.
     Resolve(cmd::update::ResolveArgs),
+    /// Group pending changes into named changelists.
+    Changelist(cmd::changelist::ChangelistArgs),
     /// Show revision history.
     Log(cmd::history::LogArgs),
     /// Print a file as of a revision.
@@ -124,6 +126,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Commit(a)) => cmd::commit::commit(&ctx, a).await,
         Some(Command::Update(a)) => cmd::update::update(&ctx, a).await,
         Some(Command::Resolve(a)) => cmd::update::resolve(&ctx, a).await,
+        Some(Command::Changelist(a)) => cmd::changelist::changelist(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
