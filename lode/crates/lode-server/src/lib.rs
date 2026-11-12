@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod blobs;
+pub mod branches;
 pub mod clock;
 pub mod commit;
 pub mod config;

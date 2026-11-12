@@ -13,8 +13,8 @@ use lode_core::{
     LodeConfig, ObjectId, ObjectKind, TreeEntry,
 };
 use lode_meta::{
-    BranchRow, BranchState, ChangeRow, DepotRow, MergeRow, MetaError, PrincipalKind, PrincipalRow,
-    Reads, RevisionRow,
+    BranchRow, BranchState, ChangeRow, DepotRow, MergeRow, MetaError, PrincipalRow, Reads,
+    RevisionRow,
 };
 use lode_proto::commit::{CommitRequest, CommitResponse, Provenance, Via};
 use lode_proto::consts::MAX_PROVENANCE_BYTES;
@@ -525,15 +525,14 @@ pub async fn commit(
                     return Err(MetaError::NotFound(format!("rejected by {}", h.name())));
                 }
             }
-            let data = json!({
-                "rev": num,
-                "branch": b.name,
-                "author": author.name,
-                "author_kind": kind_label(author.kind),
-                "submitter": submitter.name,
-                "origin": origin.label(),
-            });
-            tx.append_outbox(Some(d), "revision.created", &data.to_string(), now)?;
+            let data = crate::branches::revision_created(
+                num,
+                &b.name,
+                &author,
+                &submitter,
+                origin.label(),
+            );
+            tx.append_outbox(Some(d), "revision.created", &data, now)?;
             Ok(TxOutcome::Done(num))
         })
         .await;
@@ -570,13 +569,6 @@ pub async fn commit(
             replayed: true,
         }),
         TxOutcome::Rejected(e) => Err(e),
-    }
-}
-
-fn kind_label(k: PrincipalKind) -> &'static str {
-    match k {
-        PrincipalKind::User => "user",
-        PrincipalKind::Agent => "agent",
     }
 }
 

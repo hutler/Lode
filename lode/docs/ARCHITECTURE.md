@@ -247,6 +247,12 @@ with no changes: a new revision on the new branch whose `parent_num` is the sour
 whose `root_tree` is the source's root tree. The same transaction appends `revision.created`
 and `branch.created` to the outbox. Archiving a branch appends `branch.archived`.
 
+Branch names use `[A-Za-z0-9._/-]`, at most 200 characters, and are unique per depot ignoring
+case. Every `/`-separated segment is non-empty and not `.` or `..`, which rules out a leading,
+trailing or doubled `/`. Creating needs scope `write`, a `write` allow rule on the new name and
+read access to the source; archiving (`PATCH {"state":"archived"}`) needs scope `admin` and
+admin on the depot. `GET …/branches` leaves archived branches out unless `all=true`.
+
 ## 6. HTTP API
 
 Base path `/api/v1`. JSON unless stated. Auth: `Authorization: Bearer <token>`.

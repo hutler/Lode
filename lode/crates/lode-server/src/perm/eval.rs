@@ -323,11 +323,12 @@ impl BranchAccess {
     /// Whether any path may be readable: an administrator, or at least one allow rule of
     /// level read or above applies to the branch. A branch without one is hidden entirely.
     pub fn reads_anything(&self) -> bool {
-        self.bypass
-            || self
-                .grants
-                .iter()
-                .any(|(allow, level)| *allow && *level >= Level::Read)
+        self.grants_somewhere(Level::Read)
+    }
+
+    /// Whether some allow rule of at least `level` applies to the branch, on any path.
+    pub fn grants_somewhere(&self, level: Level) -> bool {
+        self.bypass || self.grants.iter().any(|(allow, l)| *allow && *l >= level)
     }
 
     /// Whether every path is readable without checking (administrators, or no deny rule
