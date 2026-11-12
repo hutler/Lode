@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lode User Guide</title>
+<style>
+  @page { size: A4; margin: 22mm 18mm 20mm 18mm;
+          @bottom-center { content: counter(page); font: 9pt "Segoe UI", Arial, sans-serif; color: #667; }
+          @top-right { content: "Lode User Guide — draft v0.1"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
+  @page :first { @bottom-center { content: none; } @top-right { content: none; } }
+  :root { --ink:#1c2530; --muted:#5a6675; --accent:#0b5cad; --rule:#d5dbe3; --code-bg:#f3f5f8; --note-bg:#eef5fc; --warn-bg:#fff6e5; }
+  html { font: 10.5pt/1.5 "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
+  body { margin: 0; }
+  h1, h2, h3 { line-height: 1.25; break-after: avoid; }
+  h1 { font-size: 22pt; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 4pt; margin: 26pt 0 12pt; }
+  h1#intro { break-before: page; margin-top: 0; }
+  .part + h1 { margin-top: 0; }
+  h2 { font-size: 14pt; margin: 20pt 0 6pt; }
+  h3 { font-size: 11.5pt; margin: 14pt 0 4pt; color: #2b3b4f; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
+  li { margin-bottom: 2.5pt; }
+  code, pre { font-family: Consolas, "Cascadia Mono", "Courier New", monospace; font-size: 9pt; }
+  code { background: var(--code-bg); padding: 0.5pt 3pt; border-radius: 2pt; }
+  pre { background: var(--code-bg); border: 1px solid var(--rule); border-radius: 3pt; padding: 7pt 9pt; margin: 0 0 9pt;
+        white-space: pre-wrap; overflow-wrap: anywhere; break-inside: avoid; line-height: 1.4; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 10pt; font-size: 9.5pt; break-inside: auto; }
+  tr { break-inside: avoid; }
+  th, td { border: 1px solid var(--rule); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #e9eef4; }
+  .note, .warn { border-left: 3pt solid var(--accent); background: var(--note-bg); padding: 6pt 9pt; margin: 0 0 9pt; break-inside: avoid; }
+  .warn { border-left-color: #c77700; background: var(--warn-bg); }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; }
+  .cover .title { font-size: 44pt; font-weight: 700; color: var(--accent); letter-spacing: -1pt; margin: 0; }
+  .cover .sub { font-size: 18pt; color: var(--muted); margin: 6pt 0 40pt; }
+  .cover .meta { font-size: 11pt; color: var(--muted); line-height: 1.7; }
+  .part { break-before: page; height: 230mm; display: flex; flex-direction: column; justify-content: center; }
+  .part .num { font-size: 13pt; color: var(--muted); text-transform: uppercase; letter-spacing: 2pt; }
+  .part .name { font-size: 34pt; font-weight: 700; color: var(--accent); margin: 4pt 0 10pt; }
+  .part p { font-size: 12pt; color: var(--muted); max-width: 120mm; }
+  .toc { break-before: page; }
+  .toc h1 { break-before: auto; }
+  .toc ol { list-style: none; padding: 0; }
+  .toc > ol > li { font-weight: 600; margin-top: 10pt; }
+  .toc ol ol { font-weight: 400; padding-left: 14pt; margin-top: 3pt; columns: 2; column-gap: 18pt; }
+  .toc a { color: inherit; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <p class="title">Lode</p>
+  <p class="sub">User Guide for Client and Server</p>
+  <p class="meta">
+    Draft v0.1 · November 2026<br>
+    Open source, Apache-2.0<br>
+    Describes the planned behaviour of version 1. The software is not yet released;<br>
+    details may change during implementation.
+  </p>
+</section>
+
+<section class="toc">
+  <h1>Contents</h1>
+  <ol>
+    <li><a href="#intro">Introduction</a>
+      <ol><li>What Lode is</li><li>Concepts</li></ol></li>
+    <li><a href="#client">Part I — Client</a>
+      <ol>
+        <li>Installing the client</li><li>Signing in</li><li>Getting a workspace</li>
+        <li>The daily cycle</li><li>Conflicts</li><li>Moving, copying, deleting</li>
+        <li>Ignoring files</li><li>History</li><li>Locks</li><li>Shelves</li>
+        <li>Changelists</li><li>Branches and merging</li><li>Partial workspaces</li>
+        <li>Scripting</li><li>AI agents on your machine</li><li>Troubleshooting</li>
+        <li>Command reference</li>
+      </ol></li>
+    <li><a href="#server">Part II — Server</a>
+      <ol>
+        <li>Requirements</li><li>Installing and first start</li><li>Configuration</li>
+        <li>TLS</li><li>Running as a service</li><li>Depots</li>
+        <li>Users, groups and tokens</li><li>Permissions</li><li>Agents</li>
+        <li>Lock rules</li><li>Modules</li><li>The MCP endpoint</li>
+        <li>Backup and restore</li><li>Maintenance</li><li>Upgrading</li>
+        <li>Security checklist</li><li>Troubleshooting</li>
+      </ol></li>
+  </ol>
+</section>
+
+<h1 id="intro">Introduction</h1>
+
+<h2>What Lode is</h2>
+<p>Lode is a centralized version control system for small teams, up to about 100 people, who work with source code and large binary files together. One server holds the history. Everyone works in a local folder called a workspace and sends changes to the server.</p>
+<ul>
+  <li><strong>Simple model.</strong> Every commit gets the next revision number: <code>r1</code>, <code>r2</code>, <code>r3</code>.</li>
+  <li><strong>Built for binaries.</strong> Identical content is stored once, and files that cannot be merged can be locked.</li>
+  <li><strong>Shelves.</strong> Unfinished work can be parked on the server for others to see.</li>
+  <li><strong>AI agents are users.</strong> Agents have their own accounts and limits, and by default a person approves their work.</li>
+</ul>
+<p>There are two programs: <code>lode</code>, the client everyone uses, and <code>loded</code>, the server an administrator runs.</p>
+
+<h2>Concepts</h2>
+<table>
+  <tr><th style="width:24%">Term</th><th>Meaning</th></tr>
+  <tr><td>Depot</td><td>One repository on a server. A server can host several.</td></tr>
+  <tr><td>Revision</td><td>One commit. Numbered per depot across all branches. Written <code>r42</code> or <code>@42</code>.</td></tr>
+  <tr><td>Branch</td><td>A named line of revisions. Every depot starts with <code>main</code>.</td></tr>
+  <tr><td>Workspace</td><td>Your local copy of one branch. It may hold only part of the depot.</td></tr>
+  <tr><td>Lock</td><td>An exclusive claim on a file. Only the holder can commit changes to it.</td></tr>
+  <tr><td>Shelf</td><td>Uncommitted changes stored on the server, visible to others.</td></tr>
+  <tr><td>Changelist</td><td>A named group of pending changes inside your workspace.</td></tr>
+  <tr><td>Principal</td><td>An account: a user (a person) or an agent (an automated tool owned by a person).</td></tr>
+  <tr><td>Token</td><td>The secret a client uses to prove who it is. Each token has scopes that limit what it may do.</td></tr>
+</table>
+<p>Only files and symbolic links are versioned. A directory exists while it contains files; empty directories are not stored.</p>
+
+<!-- ======================================================= CLIENT -->
+<section class="part" id="client">
+  <p class="num">Part I</p>
+  <p class="name">Client</p>
+  <p>Everything a team member needs: getting files, committing, locking, shelving, branching, and letting an AI agent work in a workspace.</p>
+</section>
+
+<h1>1. Installing the client</h1>
+<p>The client is a single executable named <code>lode</code> (<code>lode.exe</code> on Windows). Download the archive for your platform from the project's releases page, unpack it, and put the executable somewhere on your <code>PATH</code>.</p>
+<pre><code>lode --version</code></pre>
+<p>Supported platforms are Windows, macOS and Linux. There is nothing else to install.</p>
+
+<h1>2. Signing in</h1>
+<p>Your administrator gives you a server address and an account name.</p>
+<pre><code>lode login https://lode.example.com
+Name: alice
+Password: ********
+Signed in as alice.</code></pre>
+<p>The client stores a token for that server in your user profile, readable only by you. It never stores your password. To check or end the session:</p>
+<pre><code>lode whoami
+lode logout</code></pre>
+<p>For automation, pass a token on standard input instead of typing a password:</p>
+<pre><code>lode login https://lode.example.com --token-stdin &lt; token.txt</code></pre>
+<div class="note">The client refuses plain <code>http://</code> addresses, except for a server on your own machine. This protects your token on the network.</div>
+
+<h1>3. Getting a workspace</h1>
+<pre><code>lode checkout https://lode.example.com/game  mygame
+cd mygame</code></pre>
+<p>This creates the folder <code>mygame</code>, downloads the head of branch <code>main</code> from the depot <code>game</code>, and creates a hidden <code>.lode</code> folder that holds the workspace state. Do not edit or delete <code>.lode</code>.</p>
+<table>
+  <tr><th style="width:38%">Option</th><th>Effect</th></tr>
+  <tr><td><code>--branch release-1</code></td><td>Check out a branch other than <code>main</code>.</td></tr>
+  <tr><td><code>--include "src/**"</code></td><td>Download only matching paths. May be repeated.</td></tr>
+  <tr><td><code>--exclude "art/raw/**"</code></td><td>Leave matching paths out. May be repeated.</td></tr>
+</table>
+<p>If a checkout is interrupted, run the same command again. It continues where it stopped.</p>
+
+<h1>4. The daily cycle</h1>
+<p>Most work is four commands: update, edit, review, commit.</p>
+
+<h2>Update</h2>
+<pre><code>lode update</code></pre>
+<p>Brings your workspace to the newest revision of its branch. Your own uncommitted edits are kept and merged with incoming changes. To go to a specific revision, use <code>lode update -r 120</code>.</p>
+
+<h2>Edit</h2>
+<p>Edit files with any tool. You do not need to tell Lode before changing a file, except for files that require a lock (chapter 9).</p>
+<p>New files are not tracked until you add them:</p>
+<pre><code>lode add src/new_module.rs
+lode add textures/          # a whole folder</code></pre>
+
+<h2>Review</h2>
+<pre><code>lode status
+M  src/main.rs
+A  src/new_module.rs
+D  docs/old.md
+?  notes.txt</code></pre>
+<table>
+  <tr><th style="width:12%">Letter</th><th>Meaning</th></tr>
+  <tr><td><code>M</code></td><td>Modified</td></tr>
+  <tr><td><code>A</code></td><td>Added (a <code>+</code> after it means added with history, from a move or copy)</td></tr>
+  <tr><td><code>D</code></td><td>Deleted</td></tr>
+  <tr><td><code>!</code></td><td>Missing: tracked but removed from disk without <code>lode rm</code></td></tr>
+  <tr><td><code>?</code></td><td>Untracked: on disk but not added</td></tr>
+  <tr><td><code>C</code></td><td>Conflicted: must be resolved before committing</td></tr>
+  <tr><td><code>L</code></td><td>You hold a lock on this file</td></tr>
+</table>
+<p>See exactly what changed in text files:</p>
+<pre><code>lode diff                 # everything
+lode diff src/main.rs     # one file
+lode diff --stat          # summary only</code></pre>
+<p>Throw away a change and restore the file as it was:</p>
+<pre><code>lode revert src/main.rs</code></pre>
+<p>To return the whole workspace to a clean state, discard every pending change and then remove files Lode does not track:</p>
+<pre><code>lode revert --all
+lode clean --dry-run      # show what would be deleted
+lode clean                # delete untracked files; add --ignored to delete ignored files too</code></pre>
+<p>Reverting a file you had added leaves it on disk as an untracked file. <code>lode clean</code> deletes files permanently, so check with <code>--dry-run</code> first.</p>
+
+<h2>Commit</h2>
+<pre><code>lode commit -m "Fix crash when the save file is empty"
+Committed r214.</code></pre>
+<ul>
+  <li>Without <code>-m</code>, your editor opens for the message. An empty message cancels the commit.</li>
+  <li>Name paths to commit only some changes: <code>lode commit -m "…" src/</code>.</li>
+  <li><code>-A</code> adds all untracked files first.</li>
+</ul>
+<p>A commit is all-or-nothing. If someone else changed one of the same files since you last updated, the commit is refused as <em>out of date</em> and nothing is sent. Run <code>lode update</code>, check the result, and commit again. Changes by others to files you did not touch never block you.</p>
+
+<h1>5. Conflicts</h1>
+<p>A conflict happens during <code>update</code>, <code>unshelve</code>, <code>switch</code> or <code>merge</code> when you and someone else changed the same thing.</p>
+<h3>Text files</h3>
+<p>Lode merges changes to different parts of a file automatically. When both sides changed the same lines, it marks the file as conflicted and writes both versions into it:</p>
+<pre><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; mine
+let limit = 20;
+=======
+let limit = 50;
+&gt;&gt;&gt;&gt;&gt;&gt;&gt; theirs r215</code></pre>
+<p>Edit the file to the result you want, remove the marker lines, then tell Lode it is settled:</p>
+<pre><code>lode resolve src/config.rs --merged</code></pre>
+<h3>Binary files</h3>
+<p>Binary files cannot be merged. Lode keeps your version in place and saves the incoming one beside it as <code>name.theirs-r215</code>. Choose one:</p>
+<pre><code>lode resolve art/hero.psd --mine      # keep your version
+lode resolve art/hero.psd --theirs    # take the incoming version</code></pre>
+<p>You cannot commit while any file is conflicted. Locks (chapter 9) are the way to avoid binary conflicts in the first place.</p>
+
+<h1>6. Moving, copying, deleting</h1>
+<p>Use Lode's commands so that history follows the file:</p>
+<pre><code>lode mv src/util.rs src/common/util.rs
+lode cp config/default.toml config/staging.toml
+lode rm docs/old.md</code></pre>
+<ul>
+  <li>If you already moved or copied a file with another tool, add <code>--after</code> to record it without touching the disk.</li>
+  <li><code>lode rm --keep</code> stops tracking a file but leaves it on disk.</li>
+  <li>Folders work the same way as files.</li>
+</ul>
+<div class="warn">If you rename a file outside Lode and do not record it, Lode sees an unrelated delete and add, and the new file starts with no history.</div>
+
+<h1>7. Ignoring files</h1>
+<p>Put a file named <code>.lodeignore</code> in the workspace root, or in any folder, to keep build output and local files out of <code>status</code>. The syntax is the same as <code>.gitignore</code>:</p>
+<pre><code>target/
+*.tmp
+/local-settings.json
+!keep-this.tmp</code></pre>
+<p>Commit <code>.lodeignore</code> so the whole team shares it. To add a file that matches an ignore rule, use <code>lode add --force</code>.</p>
+
+<h1>8. History</h1>
+<pre><code>lode log                      # recent revisions on this branch
+lode log -n 20 src/main.rs    # history of one file
+lode log -v                   # include the list of changed files
+lode log --follow src/a.rs    # continue through renames</code></pre>
+<p>Each entry shows the revision, author, time and message. When a change was written by one account and committed by another, for example an agent's shelf submitted by a person, both are shown. Agent authors are marked.</p>
+<pre><code>lode cat src/main.rs@180      # print a file as it was at r180
+lode ls art/@180              # list a folder at r180
+lode blame src/main.rs        # who last changed each line</code></pre>
+
+<h1>9. Locks</h1>
+<p>A lock gives you the exclusive right to change a file until you commit or release it. Use locks for files that cannot be merged: images, models, audio, binary project files.</p>
+<pre><code>lode lock art/hero.psd -m "Reworking the armour"
+lode locks                    # all locks in this branch
+lode locks --mine
+lode unlock art/hero.psd      # release without committing</code></pre>
+<ul>
+  <li>You can only lock a file you have at its newest version. If it is out of date, run <code>lode update</code> first.</li>
+  <li>Locking several files at once is all-or-nothing.</li>
+  <li>Committing releases your locks on the committed files. Add <code>--keep-locks</code> to keep them.</li>
+  <li>A lock applies to one branch.</li>
+</ul>
+<h3>Files that require a lock</h3>
+<p>Your team can declare that certain file types must be locked before editing (see Part II, chapter 10). Those files are read-only on disk until you lock them, which stops most tools from saving changes by accident. A commit that changes such a file without holding its lock is refused.</p>
+<h3>When someone else holds the lock</h3>
+<p><code>lode lock</code> tells you who holds it, since when, and their comment. Ask them to commit or unlock. An administrator can break a lock with <code>lode unlock --force</code> if the holder is unavailable.</p>
+
+<h1>10. Shelves</h1>
+<p>A shelf stores your uncommitted changes on the server without committing them. Use it to hand work to a colleague, ask for a review, switch tasks, or back up work in progress.</p>
+<pre><code>lode shelve -m "Half-done inventory refactor"
+Created shelf 37. Local changes reverted.</code></pre>
+<p>By default your workspace is clean afterwards. Add <code>--keep</code> to shelve and keep your local changes too.</p>
+<table>
+  <tr><th style="width:42%">Command</th><th>Effect</th></tr>
+  <tr><td><code>lode shelves</code></td><td>List open shelves. <code>--mine</code> or <code>--user bob</code> to filter.</td></tr>
+  <tr><td><code>lode shelf show 37</code></td><td>Description, owner and file list.</td></tr>
+  <tr><td><code>lode shelf diff 37</code></td><td>The changes as a diff.</td></tr>
+  <tr><td><code>lode unshelve 37</code></td><td>Apply the shelf to your workspace. Works for other people's shelves. Merges with your local edits like an update.</td></tr>
+  <tr><td><code>lode shelve --update 37</code></td><td>Replace the shelf's contents with your current changes.</td></tr>
+  <tr><td><code>lode shelf submit 37</code></td><td>Commit the shelf directly on the server, without unshelving it. Shows the shelf and asks you to confirm.</td></tr>
+  <tr><td><code>lode shelf submit 37@3</code></td><td>Commit exactly version 3 of the shelf, without asking. Required in scripts.</td></tr>
+  <tr><td><code>lode shelf delete 37</code></td><td>Remove the shelf.</td></tr>
+</table>
+<p>Every time a shelf's contents change, its version number goes up; <code>shelf show</code> and <code>shelf diff</code> display it. A submit always commits one specific version. If the owner changed the shelf after you looked at it, the submit is refused and you are told the new version, so you never commit something you did not review.</p>
+<p><code>shelf submit</code> records the shelf's owner as author and you as submitter. This is how a person approves work proposed by an AI agent. If the branch has changed under the shelf, the submit is refused; unshelve it, update, and commit normally.</p>
+
+<h1>11. Changelists</h1>
+<p>Changelists let you keep several unrelated sets of changes in one workspace and commit them separately. They exist only in your workspace.</p>
+<pre><code>lode changelist new ui-fix -m "Fix button alignment"
+lode changelist move ui-fix src/ui/button.rs src/ui/layout.rs
+lode status                       # grouped by changelist
+lode commit -c ui-fix             # commits only those files
+lode shelve -c ui-fix -m "For review"</code></pre>
+<p>Files you have not assigned belong to the <code>default</code> changelist. A changelist's description is offered as the commit message.</p>
+
+<h1>12. Branches and merging</h1>
+<h2>Branches</h2>
+<pre><code>lode branch list
+lode branch create feature-inventory          # from the current branch head
+lode branch create hotfix --from release-1@200
+lode switch feature-inventory</code></pre>
+<p>Creating a branch is instant and uses no extra storage. <code>lode switch</code> changes your workspace to another branch, carrying your uncommitted edits along and merging them if needed. Finished branches can be archived by an administrator; they are hidden and become read-only, but are never deleted.</p>
+
+<h2>Merging</h2>
+<p>To bring a branch's changes into the branch your workspace is on:</p>
+<pre><code>lode switch main
+lode update
+lode merge feature-inventory
+lode status                      # review, resolve conflicts if any
+lode commit -m "Merge feature-inventory"</code></pre>
+<p>The commit records which revisions were merged, so the next <code>lode merge feature-inventory</code> brings only what is new since then.</p>
+<p>To take a single revision from another branch:</p>
+<pre><code>lode merge release-1 -r 231</code></pre>
+<p>To abandon a merge before committing, run <code>lode revert --merge</code>.</p>
+<div class="note"><strong>Known limit in version 1.</strong> After picking a single revision, a later full merge of the same branch applies that change again. Usually this merges cleanly as a no-op; occasionally it produces a conflict you resolve by keeping your version.</div>
+
+<h1>13. Partial workspaces</h1>
+<p>A view selects which part of the depot your workspace holds. Set it at checkout or change it later:</p>
+<pre><code>lode view show
+lode view exclude "art/raw/**"
+lode view include "art/raw/characters/**"</code></pre>
+<p>Changing the view downloads or removes files to match. Lode refuses to remove files that have uncommitted changes unless you add <code>--force</code>.</p>
+
+<h1>14. Scripting</h1>
+<p>Every command accepts <code>--json</code>. It then prints exactly one JSON document, shows no progress output and never prompts.</p>
+<pre><code>lode status --json
+{"ok":true,"branch":"main","changes":[{"path":"src/main.rs","status":"modified"}]}
+
+lode commit -m "x" --json
+{"ok":false,"error":{"code":"out_of_date","message":"…","details":{"paths":["src/main.rs"]}}}</code></pre>
+<table>
+  <tr><th style="width:16%">Exit code</th><th>Meaning</th></tr>
+  <tr><td>0</td><td>Success</td></tr>
+  <tr><td>1</td><td>The operation failed: conflict, refused, not found</td></tr>
+  <tr><td>2</td><td>Wrong usage</td></tr>
+  <tr><td>3</td><td>Not signed in, or not permitted</td></tr>
+  <tr><td>4</td><td>Network or server error</td></tr>
+</table>
+<p>Useful global options: <code>-C &lt;dir&gt;</code> runs as if started in that folder; <code>--server</code> and <code>--depot</code> let <code>log</code>, <code>cat</code> and <code>ls</code> work without a workspace.</p>
+<h3>Unattended machines</h3>
+<p>On build machines and in scripts, sign in without a stored login by setting two environment variables: <code>LODE_SERVER</code> (the server address) and <code>LODE_TOKEN_FILE</code> (the path of a file containing a token). Keep that file outside the workspace and readable only by the account that runs <code>lode</code>.</p>
+<p>To bring a reused workspace exactly to a known revision, whatever state the last job left it in:</p>
+<pre><code>lode revert --all
+lode clean
+lode switch main -r 214</code></pre>
+<p>If several workspaces of the same depot live on one machine, set <code>LODE_CACHE_DIR</code> to a shared folder so each file is downloaded once.</p>
+<p>You can add your own commands: an executable named <code>lode-foo</code> on your <code>PATH</code> runs when you type <code>lode foo</code>.</p>
+
+<h1>15. AI agents on your machine</h1>
+<p>Lode includes a Model Context Protocol (MCP) server so that an AI coding tool can work with your workspace directly. Add this to your tool's MCP configuration:</p>
+<pre><code>{ "mcpServers": {
+    "lode": { "command": "lode", "args": ["mcp", "-C", "/path/to/workspace"] } } }</code></pre>
+<p>The agent can then check status, read diffs, add, move and revert files, update, lock, shelve and unshelve. It can only touch files inside the workspace.</p>
+<h3>Keeping a person in control</h3>
+<ul>
+  <li>Sign the agent in with its own agent account, not yours. Ask your administrator to create one.</li>
+  <li>Agent accounts cannot commit by default. The agent shelves its work; you review it with <code>lode shelf diff</code> and approve it with <code>lode shelf submit</code>.</li>
+  <li>History then shows the agent as author and you as submitter.</li>
+</ul>
+<p>Agents that do not need a workspace can use the server's MCP endpoint instead (Part II, chapter 12).</p>
+
+<h1>16. Troubleshooting</h1>
+<table>
+  <tr><th style="width:26%">Message</th><th>What it means and what to do</th></tr>
+  <tr><td><code>out_of_date</code></td><td>Someone committed a change to a file you are committing or locking. Run <code>lode update</code>, review, try again.</td></tr>
+  <tr><td><code>locked</code></td><td>Someone else holds a lock on the file. <code>lode locks</code> shows who.</td></tr>
+  <tr><td><code>lock_required</code></td><td>This file type needs a lock before it can be changed. Run <code>lode lock</code> on it, then commit.</td></tr>
+  <tr><td><code>checks_required</code></td><td>The branch requires passing checks before a shelf is submitted. <code>lode checks &lt;shelf&gt;</code> shows which are missing or failing.</td></tr>
+  <tr><td><code>permission_denied</code></td><td>Your account or token may not do this here. Ask your administrator.</td></tr>
+  <tr><td><code>unauthenticated</code></td><td>You are not signed in or the token expired. Run <code>lode login</code>.</td></tr>
+  <tr><td><code>invalid_path</code></td><td>The file name is not allowed (see below), or differs from an existing name only by letter case.</td></tr>
+  <tr><td>"workspace is in use"</td><td>Another <code>lode</code> command is changing this workspace. Wait for it to finish.</td></tr>
+  <tr><td>Interrupted command</td><td>Run it again. Checkout, update and commit are safe to repeat and never commit twice.</td></tr>
+</table>
+<h3>File names that are not allowed</h3>
+<p>So that a depot works on every operating system, Lode refuses names containing a backslash or control characters, names ending in a dot or space, Windows device names such as <code>CON</code> or <code>NUL</code>, and two names in one folder that differ only by upper and lower case.</p>
+
+<h1>17. Command reference</h1>
+<table>
+  <tr><th style="width:44%">Command</th><th>Purpose</th></tr>
+  <tr><td><code>lode login</code> · <code>logout</code> · <code>whoami</code></td><td>Sign in and out; show the current account</td></tr>
+  <tr><td><code>lode checkout URL/DEPOT [DIR]</code></td><td>Create a workspace</td></tr>
+  <tr><td><code>lode status [PATHS]</code></td><td>Show pending changes</td></tr>
+  <tr><td><code>lode add</code> · <code>rm</code> · <code>mv</code> · <code>cp</code></td><td>Track, remove, move, copy</td></tr>
+  <tr><td><code>lode diff [PATHS]</code></td><td>Show changes to text files</td></tr>
+  <tr><td><code>lode revert PATHS</code> · <code>revert --all</code></td><td>Discard local changes</td></tr>
+  <tr><td><code>lode clean [--ignored] [--dry-run]</code></td><td>Delete untracked files</td></tr>
+  <tr><td><code>lode commit -m MSG [PATHS]</code></td><td>Send changes to the server</td></tr>
+  <tr><td><code>lode update [-r REV]</code></td><td>Bring the workspace up to date</td></tr>
+  <tr><td><code>lode resolve PATH --mine|--theirs|--merged</code></td><td>Settle a conflict</td></tr>
+  <tr><td><code>lode log</code> · <code>cat</code> · <code>ls</code> · <code>blame</code></td><td>Inspect history</td></tr>
+  <tr><td><code>lode lock</code> · <code>unlock</code> · <code>locks</code></td><td>Exclusive locks</td></tr>
+  <tr><td><code>lode shelve</code> · <code>unshelve</code> · <code>shelves</code> · <code>shelf …</code></td><td>Shelves</td></tr>
+  <tr><td><code>lode changelist new|list|move|delete</code></td><td>Changelists</td></tr>
+  <tr><td><code>lode branch list|create|archive</code> · <code>switch</code></td><td>Branches</td></tr>
+  <tr><td><code>lode merge BRANCH [-r REV]</code></td><td>Merge from another branch</td></tr>
+  <tr><td><code>lode view show|include|exclude</code></td><td>Change what the workspace holds</td></tr>
+  <tr><td><code>lode checks rN</code> · <code>lode checks SHELF[@VERSION]</code></td><td>Show check results (if the server has checks enabled)</td></tr>
+  <tr><td><code>lode mcp</code></td><td>MCP server for AI tools</td></tr>
+  <tr><td><code>lode admin …</code></td><td>Administration (Part II)</td></tr>
+</table>
+<p>Run <code>lode help &lt;command&gt;</code> for all options of a command.</p>
+
+<!-- ======================================================= SERVER -->
+<section class="part" id="server">
+  <p class="num">Part II</p>
+  <p class="name">Server</p>
+  <p>For the person who installs and looks after a Lode server: setup, accounts, permissions, agents, backup and maintenance.</p>
+</section>
+
+<h1>1. Requirements</h1>
+<ul>
+  <li><strong>Operating system:</strong> Linux, Windows or macOS. Linux is recommended for a shared server.</li>
+  <li><strong>Software:</strong> none. <code>loded</code> is one executable with its database built in.</li>
+  <li><strong>Disk:</strong> the data directory holds everything. Plan for the size of your content plus history; identical content is stored once and compressed. Use a local filesystem, not a network share.</li>
+  <li><strong>Memory and CPU:</strong> modest. Memory use does not grow with file size. A small virtual machine serves a team of 100.</li>
+  <li><strong>Network:</strong> one TCP port, reachable by all clients.</li>
+</ul>
+
+<h1>2. Installing and first start</h1>
+<pre><code>loded init /var/lib/lode
+Created data directory /var/lib/lode
+Wrote /var/lib/lode/loded.toml
+Admin token (shown once): lode_3q…</code></pre>
+<p><code>init</code> creates the data directory, a commented configuration file, and an administrator account named <code>admin</code>. It prints the admin token once. Store it in your password manager.</p>
+<pre><code>loded serve --config /var/lib/lode/loded.toml</code></pre>
+<p>From your own machine, sign in with the token and set the server up:</p>
+<pre><code>lode login https://lode.example.com --token-stdin
+lode admin depot create game
+lode admin user create alice
+lode admin acl add --depot game --user alice --level write</code></pre>
+
+<h1>3. Configuration</h1>
+<p>All settings are in <code>loded.toml</code>. An unknown key is an error, so typing mistakes are caught at start.</p>
+<pre><code>data_dir = "/var/lib/lode"
+
+[listen]
+address = "0.0.0.0:8443"
+
+[tls]                              # omit this section to serve plain HTTP
+cert = "/etc/lode/fullchain.pem"
+key  = "/etc/lode/privkey.pem"
+
+[limits]
+max_blob_bytes     = 68719476736   # 64 GiB, largest single file
+max_request_bytes  = 67108864      # 64 MiB, largest JSON request
+max_commit_changes = 500000
+
+[gc]
+grace_hours = 24                   # minimum age before unused data is removed
+
+[modules]
+locks   = true
+shelves = true
+mcp     = true
+webhooks = false
+checks   = false</code></pre>
+<div class="note">The setting names above are the proposed defaults for version 1 and will be confirmed when the server is implemented. The file that <code>loded init</code> writes is always the authority.</div>
+
+<h1>4. TLS</h1>
+<p>Clients refuse unencrypted connections to remote servers, so one of these is required:</p>
+<ul>
+  <li><strong>Built-in.</strong> Fill in the <code>[tls]</code> section with a certificate and key in PEM format. Restart the server after renewing the certificate.</li>
+  <li><strong>Reverse proxy.</strong> Leave <code>[tls]</code> out, set <code>address = "127.0.0.1:8080"</code>, and put a web server such as Caddy or nginx in front. The proxy must allow large uploads, must not buffer request bodies, and must pass the <code>Authorization</code> header through.</li>
+</ul>
+
+<h1>5. Running as a service</h1>
+<h3>Linux (systemd)</h3>
+<pre><code>[Unit]
+Description=Lode server
+After=network.target
+
+[Service]
+User=lode
+ExecStart=/usr/local/bin/loded serve --config /var/lib/lode/loded.toml
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+<h3>Container</h3>
+<pre><code>docker run -d --name lode -p 8443:8443 -v lode-data:/data &lt;image&gt; serve --config /data/loded.toml</code></pre>
+<p>Run the server as a dedicated account that owns the data directory and nothing else. The server shuts down cleanly on a stop signal and finishes requests in progress.</p>
+
+<h1>6. Depots</h1>
+<pre><code>lode admin depot create game
+lode admin depot list</code></pre>
+<p>A new depot has one branch, <code>main</code>, at revision <code>r1</code> with no files. Depots are independent: each has its own revision numbers, storage and permissions. Use separate depots for unrelated projects, and one depot for things that change together.</p>
+
+<h1>7. Users, groups and tokens</h1>
+<pre><code>lode admin user create bob            # prompts for an initial password
+lode admin user passwd bob
+lode admin user disable bob           # blocks sign-in, keeps history
+lode admin group create artists
+lode admin group add artists bob carol</code></pre>
+<p>Accounts are never deleted, because history refers to them. Disable them instead.</p>
+<h3>Tokens</h3>
+<p>Signing in creates a token. Users can also create named tokens for scripts, and administrators can create them for anyone:</p>
+<pre><code>lode admin token create --for buildbot --name ci --scopes read --expires 90d
+lode admin token list --for buildbot
+lode admin token revoke 12</code></pre>
+<table>
+  <tr><th style="width:16%">Scope</th><th>Allows</th></tr>
+  <tr><td><code>read</code></td><td>Reading files, history, locks and shelves</td></tr>
+  <tr><td><code>write</code></td><td>Committing, creating branches, submitting shelves</td></tr>
+  <tr><td><code>shelve</code></td><td>Creating and changing shelves</td></tr>
+  <tr><td><code>lock</code></td><td>Taking and releasing locks</td></tr>
+  <tr><td><code>admin</code></td><td>Administration commands</td></tr>
+  <tr><td><code>checks</code></td><td>Reporting check results (only with the checks module). Grants nothing else.</td></tr>
+</table>
+<p>A token value is shown once, when created. The server stores only a hash, so a lost token cannot be recovered; revoke it and create another.</p>
+
+<h1>8. Permissions</h1>
+<p>Scopes limit what a token can do at all. Permissions decide where. A new account has no access until you grant some.</p>
+<p>A rule grants or denies a level on a depot, a branch pattern and a path pattern, to a user, a group or everyone:</p>
+<pre><code># Everyone signed in can read the whole depot
+lode admin acl add --depot game --all --level read
+
+# Artists can commit under art/ on any branch
+lode admin acl add --depot game --group artists --path "art/**" --level write
+
+# Programmers can commit anywhere on main and feature branches
+lode admin acl add --depot game --group programmers --branch "main" --level write
+lode admin acl add --depot game --group programmers --branch "feature-*" --level write
+
+# Only the release group can commit to release branches
+lode admin acl add --depot game --group release --branch "release-*" --level write
+
+# Contractors must not see the licensed SDK, whatever else they are granted
+lode admin acl add --depot game --group contractors --path "sdk/**" --deny --level read
+
+lode admin acl list --depot game</code></pre>
+<h3>How rules combine</h3>
+<ol>
+  <li>With no matching rule, access is refused.</li>
+  <li>The levels are <code>read</code>, <code>write</code> (includes read) and <code>admin</code> (includes write).</li>
+  <li>A matching <code>deny</code> refuses its level and every higher one, whatever other rules say. <code>deny write</code> still permits reading; <code>deny read</code> blocks everything.</li>
+  <li>Otherwise the highest matching <code>allow</code> applies.</li>
+</ol>
+<div class="warn">A deny cannot be overridden by a more specific allow. To restrict an area, grant <code>write</code> narrowly in the first place, as in the release example, and keep <code>deny</code> for true exceptions. Check the outcome of a rule before relying on it:<br><code>lode admin acl add … --check carol release-2 src/main.rs</code></div>
+<h3>Known limit in version 1</h3>
+<p>File content is authorized per depot, not per path. Someone with any read access to a depot who knows the exact content hash of a file can download it, even from a path hidden from them. Listings and history never reveal hidden paths or their hashes. Put truly confidential material in a separate depot.</p>
+
+<h1>9. Agents</h1>
+<p>An agent is an account for an automated tool. It belongs to a user, has its own tokens and its own permissions, and never inherits its owner's access.</p>
+<pre><code>lode admin agent create review-bot --owner alice
+lode admin token create --for review-bot --name default
+lode admin acl add --depot game --user review-bot --level read</code></pre>
+<ul>
+  <li>New agent tokens get the scopes <code>read</code>, <code>shelve</code> and <code>lock</code>. An agent can therefore propose changes as shelves but cannot commit.</li>
+  <li>To let an agent commit directly, an administrator must create its token with <code>--scopes read,write,…</code> and grant it <code>write</code> permission. Do this deliberately and narrowly.</li>
+  <li>Disabling a user disables the agents they own.</li>
+  <li>Every revision and shelf records who authored it, who submitted it, which client was used and, for agents, the model and session it reported. Find agent work with <code>lode log</code>, where agent authors are marked.</li>
+</ul>
+<p>The recommended arrangement is: agents shelve, people submit. The person who submits needs <code>write</code> permission on every path in the shelf.</p>
+
+<h1>10. Lock rules</h1>
+<p>Which files require a lock is decided in the depot itself, in a file named <code>.lodeconfig</code> at the root of a branch. It is versioned like any other file, so changes to the rules are reviewed and recorded.</p>
+<pre><code>[locks]
+required = ["**/*.psd", "**/*.fbx", "Content/**/*.uasset"]
+
+[files]
+binary = ["**/*.dat"]        # never try to merge these as text
+text   = ["**/*.shader"]     # always treat these as text</code></pre>
+<p>Commit this file to <code>main</code> before the team starts adding assets. Each branch uses its own copy. Restrict who may change it with a permission rule on the path <code>.lodeconfig</code>.</p>
+<p>To release a lock whose holder is unavailable:</p>
+<pre><code>lode unlock art/hero.psd --force</code></pre>
+
+<h1>11. Modules</h1>
+<p>Features beyond the core are modules, switched on and off in the <code>[modules]</code> section of the configuration. Restart the server after a change.</p>
+<table>
+  <tr><th style="width:18%">Module</th><th>Provides</th><th style="width:34%">If switched off</th></tr>
+  <tr><td><code>locks</code></td><td>Exclusive locks and lock-required files</td><td>Lock commands report that locks are unavailable; <code>[locks]</code> rules are ignored</td></tr>
+  <tr><td><code>shelves</code></td><td>Shelves and shelf submit</td><td>Shelf commands are unavailable; existing shelves are kept but hidden</td></tr>
+  <tr><td><code>mcp</code></td><td>The server MCP endpoint for agents</td><td>The <code>/mcp</code> address does not exist</td></tr>
+  <tr><td><code>webhooks</code></td><td>Notifications to other systems when something happens</td><td>Off by default. Nothing is sent</td></tr>
+  <tr><td><code>checks</code></td><td>Results reported by other systems, and required checks before shelf submit</td><td>Off by default. <code>[checks]</code> rules are ignored</td></tr>
+</table>
+<p><code>lode admin</code> and the server's <code>/api/v1/info</code> address show which modules are active.</p>
+
+<h2>Webhooks</h2>
+<p>A webhook tells another system, such as a build server, that something happened in a depot, so it does not have to keep asking.</p>
+<pre><code>lode admin webhook add game https://ci.example.com/hooks/lode --events revision.created,shelf.created,shelf.updated --branch "main"
+Created webhook 4. Secret (shown once): 9f2c…
+lode admin webhook list game
+lode admin webhook ping 4
+lode admin webhook deliveries 4
+lode admin webhook remove 4</code></pre>
+<ul>
+  <li>Events: <code>revision.created</code>, <code>branch.created</code>, <code>branch.archived</code>, <code>shelf.created</code>, <code>shelf.updated</code>, <code>shelf.submitted</code>, <code>shelf.deleted</code>, <code>lock.acquired</code>, <code>lock.released</code>, <code>check.updated</code>.</li>
+  <li>Each request is signed with the secret in the <code>X-Lode-Signature</code> header. The receiver must verify it.</li>
+  <li>Events contain identifiers only, never file names or content. The receiver reads details with its own token.</li>
+  <li>A failed delivery is retried for up to 24 hours. The same event can arrive twice; the <code>X-Lode-Delivery</code> header identifies repeats.</li>
+  <li>Addresses must use <code>https://</code> unless you set <code>allow_http = true</code> under <code>[webhooks]</code> in the configuration.</li>
+</ul>
+
+<h2>Checks</h2>
+<p>A check is a named result, for example "ci/build: success", that another system attaches to a revision or to one version of a shelf. Lode stores and shows checks; it does not run builds.</p>
+<p>Give the reporting system its own account and a token with the <code>checks</code> scope:</p>
+<pre><code>lode admin user create ci
+lode admin token create --for ci --name reporter --scopes read,checks</code></pre>
+<p>Anyone with read access can see the results:</p>
+<pre><code>lode checks r214        # checks on a revision
+lode checks 37          # checks on the current version of shelf 37</code></pre>
+<h3>Requiring checks before a shelf is submitted</h3>
+<p>Add a <code>[checks]</code> section to <code>.lodeconfig</code> on the branch:</p>
+<pre><code>[checks]
+branches = ["main", "release/*"]
+required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
+<ul>
+  <li><code>lode shelf submit</code> to a matching branch is refused unless every required check is <code>success</code> for that exact shelf version and was reported by the named account.</li>
+  <li>Changing a shelf raises its version, so it must pass again.</li>
+  <li>The rule is taken from the branch, not from the shelf, so a shelf cannot remove the rule it has to meet.</li>
+  <li>Direct commits are not affected. Keep the reporting token on the build server only, never on machines that run untrusted code.</li>
+</ul>
+
+<h1>12. The MCP endpoint</h1>
+<p>With the <code>mcp</code> module on, the server offers a Model Context Protocol endpoint at <code>https://&lt;server&gt;/mcp</code>. An AI tool connects to it with an agent token and needs no workspace.</p>
+<pre><code>{ "mcpServers": {
+    "lode": { "type": "http", "url": "https://lode.example.com/mcp",
+              "headers": { "Authorization": "Bearer lode_…" } } } }</code></pre>
+<table>
+  <tr><th style="width:30%">What the agent can do</th><th>Tools</th></tr>
+  <tr><td>Look around</td><td><code>whoami</code>, <code>list_depots</code>, <code>list_branches</code>, <code>list_dir</code>, <code>read_file</code></td></tr>
+  <tr><td>Study history</td><td><code>log</code>, <code>show_revision</code>, <code>diff</code>, <code>blame</code>, <code>search_history</code></td></tr>
+  <tr><td>See team activity</td><td><code>list_locks</code>, <code>list_shelves</code>, <code>get_shelf</code></td></tr>
+  <tr><td>Propose changes</td><td><code>create_shelf</code>, <code>update_shelf</code></td></tr>
+  <tr><td>Commit (only with scope <code>write</code>)</td><td><code>submit_shelf</code></td></tr>
+</table>
+<p>The same scopes and permissions apply as everywhere else: an agent sees only what its account may read, and tools it may not use are not offered to it. Large files and diffs are cut off at a size limit and marked as truncated.</p>
+
+<h1>13. Backup and restore</h1>
+<p>Everything is in the data directory: a database file (<code>meta.db</code>) and the stored content (<code>depots/</code>).</p>
+<h3>Backup while running</h3>
+<pre><code>loded backup /backups/lode-2026-11-12 --config /var/lib/lode/loded.toml</code></pre>
+<p>This makes a consistent copy without stopping the server. Stored content never changes once written, so repeated backups to the same destination with a tool such as <code>rsync</code> copy only what is new.</p>
+<div class="warn">Do not copy <code>meta.db</code> with an ordinary file copy while the server is running; the copy may be unusable. Use <code>loded backup</code>, or stop the server first.</div>
+<h3>Restore</h3>
+<ol>
+  <li>Stop the server.</li>
+  <li>Replace the data directory with the backup.</li>
+  <li>Run <code>loded fsck --config …</code> and confirm it reports no problems.</li>
+  <li>Start the server.</li>
+</ol>
+<p>Workspaces that had committed revisions newer than the backup will be ahead of the server. Their owners should check out fresh workspaces and re-apply their work.</p>
+<p>Test a restore on a spare machine before you need one.</p>
+
+<h1>14. Maintenance</h1>
+<h3>Reclaiming space</h3>
+<p>Content that nothing refers to any more, such as uploads from abandoned commits or deleted shelves, is removed by garbage collection:</p>
+<pre><code>lode admin gc --depot game --dry-run     # report only
+lode admin gc --depot game</code></pre>
+<p>It is safe to run while the team works. Data newer than the grace period (24 hours by default) is never removed. Running it weekly from a scheduler is enough. Garbage collection never removes committed history; version 1 has no way to delete old revisions.</p>
+<h3>Checking integrity</h3>
+<pre><code>lode admin fsck --depot game             # quick: structure and presence
+lode admin fsck --depot game --full      # also re-reads and verifies all content</code></pre>
+<p>Run the quick check after any unclean shutdown or restore, and the full check occasionally, for example monthly. A reported problem names the revision, path and content affected; restore that content from a backup.</p>
+<h3>Logs</h3>
+<p>The server writes structured logs to standard output. Each request has an id, also returned to the client, which you can use to find the matching log line when a user reports an error. Tokens, passwords and file content are never logged.</p>
+
+<h1>15. Upgrading</h1>
+<ol>
+  <li>Take a backup.</li>
+  <li>Stop the server, replace the <code>loded</code> executable, start it. The database is upgraded automatically on start.</li>
+  <li>A server refuses to start on a database written by a newer version, so to go back, restore the backup taken in step 1.</li>
+</ol>
+<p>Clients and servers of the same major version work together. Upgrade the server first, then clients.</p>
+
+<h1>16. Security checklist</h1>
+<ul>
+  <li>Serve only over TLS.</li>
+  <li>Keep the admin token in a password manager. Create a personal administrator account for daily use and keep <code>admin</code> for emergencies.</li>
+  <li>Grant <code>read</code> broadly and <code>write</code> narrowly. Use groups, not per-user rules.</li>
+  <li>Give every script and agent its own account and token, with the fewest scopes that work and an expiry date.</li>
+  <li>Leave agents without <code>write</code> unless there is a clear reason.</li>
+  <li>Restrict changes to <code>.lodeconfig</code>.</li>
+  <li>Disable accounts promptly when people leave; this also disables their agents.</li>
+  <li>Back up daily, keep copies off the server, and rehearse a restore.</li>
+  <li>Keep the data directory readable only by the server's account.</li>
+</ul>
+
+<h1>17. Troubleshooting</h1>
+<table>
+  <tr><th style="width:34%">Symptom</th><th>Likely cause and remedy</th></tr>
+  <tr><td>Server will not start: "uninitialized data directory"</td><td>Wrong <code>data_dir</code>, or <code>loded init</code> was never run there.</td></tr>
+  <tr><td>Server will not start: "unknown key"</td><td>A typing mistake in <code>loded.toml</code>. The message names the key.</td></tr>
+  <tr><td>Server will not start: "newer schema"</td><td>The data was written by a newer <code>loded</code>. Use that version or restore a backup.</td></tr>
+  <tr><td>Clients report certificate errors</td><td>Expired or mismatched certificate. Renew it and restart.</td></tr>
+  <tr><td>Large uploads fail behind a proxy</td><td>The proxy limits body size or buffers uploads. Raise the limit and turn buffering off.</td></tr>
+  <tr><td>A user gets <code>permission_denied</code> unexpectedly</td><td>A <code>deny</code> rule matches, or their token lacks the scope. Check with <code>lode admin acl add … --check</code> and <code>lode admin token list</code>.</td></tr>
+  <tr><td>A file stays locked</td><td>The holder has not committed. Ask them, or release it with <code>lode unlock --force</code>.</td></tr>
+  <tr><td>Disk filling up</td><td>Run garbage collection. If history itself is the cause, add disk; version 1 cannot remove history.</td></tr>
+  <tr><td>Lost admin token</td><td>Stop the server and run <code>loded reset-admin --config …</code> on the server machine to issue a new one.</td></tr>
+</table>
+
+</body>
+</html>

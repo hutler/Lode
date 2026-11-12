@@ -1,0 +1,18 @@
+# Rust (lode/)
+target/
+# Go (umpalumpa/)
+umpalumpa/bin/
+umpalumpa/dist/
+umpalumpa/web/node_modules/
+umpalumpa/web/dist/
+# Unreal (unreal/)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+# Editors and OS
+.vs/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
