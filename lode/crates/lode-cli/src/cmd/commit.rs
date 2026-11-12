@@ -261,6 +261,7 @@ async fn finish_pending(
                 "rev": resp.rev,
                 "branch": resp.branch,
                 "files": pending.request.changes.len(),
+                "uploaded": 0,
                 "replayed": resp.replayed,
                 "resumed": true,
             }))

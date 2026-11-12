@@ -107,7 +107,9 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
                 format!("{} exists and is not empty", dir.display()),
             ));
         }
-        Workspace::create(
+        // Ask the server first, so a wrong depot or branch leaves nothing behind.
+        let head = client.branch(&depot, &args.branch).await?.head_rev;
+        let mut ws = Workspace::create(
             &dir,
             &WorkspaceInit {
                 server_url: server.to_string(),
@@ -115,7 +117,10 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
                 branch: args.branch.clone(),
                 view: view.clone(),
             },
-        )?
+        )?;
+        ws.db_mut()
+            .write(|tx| tx.set_config(CHECKOUT_REV, &head.to_string()))?;
+        ws
     };
     let _lock = ws.lock()?;
 

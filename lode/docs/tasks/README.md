@@ -91,3 +91,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T026 | review | `lode/T026-history` | snapshot tests use `insta`; `--depot` is an option of `log`/`cat`/`ls` |
 | T024 | review | `lode/T024-commit` | missing files stop a commit (use `rm` or `revert`) |
 | T025 | review | `lode/T025-update` | workspace schema 2: `conflict.mine_id` for `resolve --mine` |
+| T028 | review | `lode/T028-json-contract` | `docs/CLI-JSON.md`; a failed checkout no longer leaves a workspace behind |

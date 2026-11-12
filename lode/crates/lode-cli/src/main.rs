@@ -10,10 +10,12 @@
 mod cmd;
 mod context;
 mod error;
+mod external;
 mod local;
 mod materialize;
 mod output;
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -87,6 +89,9 @@ enum Command {
     Cat(cmd::history::CatArgs),
     /// List a directory as of a revision.
     Ls(cmd::history::LsArgs),
+    /// Any other command runs `lode-<command>` from PATH.
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }
 
 async fn run(cli: Cli) -> CliResult<Value> {
@@ -122,6 +127,11 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
+        Some(Command::External(args)) => {
+            // The child owns stdout; `lode` adds nothing to it and passes its exit code on.
+            let code = external::run(&ctx, &args)?;
+            std::process::exit(code);
+        }
     }
 }
 
