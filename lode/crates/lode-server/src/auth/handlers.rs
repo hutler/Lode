@@ -262,7 +262,15 @@ fn check_token_request(
             return Err(ApiError::invalid_request(format!("unknown scope `{s}`")));
         }
     }
-    if let Some(missing) = req.scopes.iter().find(|s| !caller.has_scope(s)) {
+    // A server administrator may grant any registered scope. The token `loded init` prints
+    // carries only the core scopes, because modules are not known yet at that point; without
+    // this nobody could ever hold a module scope such as `lock` except through `login`.
+    let unbounded = state.permissions().is_server_admin(caller);
+    if let Some(missing) = req
+        .scopes
+        .iter()
+        .find(|s| !unbounded && !caller.has_scope(s))
+    {
         return Err(ApiError::new(
             ErrorCode::PermissionDenied,
             format!("cannot grant `{missing}`: the token making this request lacks it"),

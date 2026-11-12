@@ -73,6 +73,12 @@ async fn record(log: RequestLog, req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
+/// Every module `loded` is built with; `[modules]` in the configuration picks the enabled
+/// ones, as in `loded`.
+pub fn available_modules() -> lode_server::module::Modules {
+    vec![lode_mod_locks::Locks::module()]
+}
+
 /// Options for [`TestServer::start_with`].
 pub struct TestServerOptions {
     /// Changes to the configuration before the server starts.
@@ -136,8 +142,9 @@ impl TestServer {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let clock = ManualClock::new(now);
+        let modules = lode_server::module::select_enabled(&config.modules, available_modules());
         let state = must(
-            open_state(config.clone(), Arc::new(clock.clone()), vec![]).await,
+            open_state(config.clone(), Arc::new(clock.clone()), modules).await,
             "open server state",
         );
         let requests = RequestLog::default();

@@ -1,0 +1,9 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "released": [
+    "Content/Door.uasset"
+  ]
+}

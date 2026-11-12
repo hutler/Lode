@@ -79,3 +79,10 @@ pub struct LockList {
     /// Locks.
     pub locks: Vec<LockView>,
 }
+
+/// Answer to `DELETE /depots/{d}/locks`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnlockResponse {
+    /// Paths whose lock was removed. Paths that were not locked are left out.
+    pub released: Vec<DepotPath>,
+}

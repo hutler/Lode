@@ -84,4 +84,6 @@ pub struct CommittedCtx<'a> {
     pub commit: &'a CommitCtx<'a>,
     /// The new revision number.
     pub rev: u64,
+    /// The revision's time, for rows and events the module writes.
+    pub created_at: lode_meta::Millis,
 }

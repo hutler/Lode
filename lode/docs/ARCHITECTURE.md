@@ -316,6 +316,9 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
   operations, `admin`. These three are the core scopes. Modules declare their own (`lock`,
   `shelve`, `checks`) through `Module::scopes()`. A token may be given any core scope and any
   scope of an enabled module; a scope whose module is disabled is kept but has no effect.
+  A token may grant only scopes its maker's token carries, except that a server administrator
+  may grant any registered scope: the token `loded init` prints carries only the core scopes,
+  because modules are not known at that point.
 - **Client materialization.** Every path from the server is re-validated on the client
   (`DepotPath` rules, and a first segment of `.lode` in any case is refused). Before a file is
   written, each directory component is checked with `lstat`: a symlink or non-directory there
@@ -364,6 +367,8 @@ pub trait Module: Send + Sync + 'static {
   configuration (§5.2 step 2) with `config_section(name)` for a module's own `[name]` table,
   the message, and `head_entry(path)`, the head-tree entry of each changed path. `extensions`
   comes from the request body and must never be treated as proof of anything.
+  `CommittedCtx` adds the new revision number and its time (`created_at`), for rows and
+  events a module writes in `in_commit`.
 - `CommitCtx.origin` says how the commit reached the engine and is set only by server code:
   `Direct` for a commit request from a client, or `Module { name, attrs }` when a module
   calls `Commits` (shelf submit passes `name = "shelves"`,
@@ -423,6 +428,27 @@ mod_locks_lock (depot_id, branch_id, path TEXT, owner_id, workspace TEXT, commen
 - `in_commit`: delete the author's locks on committed paths unless `extensions["locks.keep"]`.
 - `mcp_tools`: `list_locks`.
 - `scopes`: `lock` (agent default).
+
+Details of the implementation:
+
+- A lock request names 1 to 10,000 paths; each must be a file or symlink at the branch head
+  (`not_found` otherwise, also for paths the caller cannot read) and the caller needs `write`
+  on it. The paths are looked up outside the database transaction; the transaction checks
+  that the branch head is still the one looked at and starts over if a commit moved it.
+- A path already locked by the caller from the same workspace stays as it is, so a repeated
+  request is harmless. The answer is `LockList` with the locks of the requested paths.
+- `locked` carries `details.paths` and `details.locks` (holder, workspace, comment, time).
+  It names only paths the caller sent, and for commits paths in the commit.
+- `DELETE` releases the caller's own locks; any other lock on a named path refuses the whole
+  request with `locked`, unless `force` is set, which needs admin on the depot. Paths that
+  are not locked are skipped. The answer is `{ released: [paths] }`.
+- `GET` filters by `branch` (`not_found` if the caller cannot read it), `owner` (principal
+  name) and `prefix`, a plain string prefix of the path (`Content/` for a directory). It
+  lists only locks on paths the caller can read and needs scope `read`.
+- Events are written in the same transaction: `lock.acquired` once per request that took new
+  locks, `lock.released` once per owner whose locks were released (by `DELETE` or a commit).
+- `pre_commit` reads the branch's locks once when there are no more of them than changed
+  paths, and looks up each changed path otherwise.
 
 ### 9.2 Shelves (`lode-mod-shelves`)
 

@@ -92,3 +92,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T024 | review | `lode/T024-commit` | missing files stop a commit (use `rm` or `revert`) |
 | T025 | review | `lode/T025-update` | workspace schema 2: `conflict.mine_id` for `resolve --mine` |
 | T028 | review | `lode/T028-json-contract` | `docs/CLI-JSON.md`; a failed checkout no longer leaves a workspace behind |
+| T030 | review | `lode/T030-locks` | server admins may grant module scopes; `CommittedCtx.created_at`; `UnlockResponse` in lode-proto |

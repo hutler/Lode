@@ -180,8 +180,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
-/// Every module compiled into this build. `[modules]` decides which are enabled. The real
-/// modules arrive with their tasks (M3, M4, M6).
+/// Every module compiled into this build. `[modules]` decides which are enabled. Keep in step
+/// with `lode_testkit::available_modules`.
 fn available_modules() -> lode_server::module::Modules {
-    Vec::new()
+    vec![lode_mod_locks::Locks::module()]
 }

@@ -525,6 +525,7 @@ pub async fn commit(
             let committed = CommittedCtx {
                 commit: &ctx,
                 rev: num,
+                created_at: now,
             };
             for h in &hooks {
                 if let Err(e) = h.in_commit(tx, &committed) {

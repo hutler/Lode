@@ -503,6 +503,12 @@ fn locks_types() {
         }
     );
     snap!(
+        "unlock_response",
+        UnlockResponse {
+            released: vec![p("Content/Door.uasset")],
+        }
+    );
+    snap!(
         "locks_query",
         LocksQuery {
             branch: Some("main".into()),
