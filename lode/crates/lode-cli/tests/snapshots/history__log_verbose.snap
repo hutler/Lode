@@ -1,0 +1,27 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "text(&ws, &remote(&server, &[\"log\", \"-v\"]))"
+---
+r4  2026-01-02 04:05:35Z  bot [agent]
+    Rename main
+
+    A src/app.rs  (from src/main.rs@r3)
+    D src/main.rs
+
+r3  2026-01-02 03:05:35Z  dana
+    Say more
+
+    M README.md
+
+r2  2026-01-02 03:04:05Z  admin
+    Initial import
+
+    With a second paragraph.
+
+    A README.md
+    A assets/blob.bin
+    A src/main.rs
+    A tool.sh
+
+r1  2026-01-02 03:04:05Z  admin
+    Create depot

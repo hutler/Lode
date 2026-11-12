@@ -75,6 +75,12 @@ enum Command {
     Diff(cmd::diff::DiffArgs),
     /// Delete untracked files.
     Clean(cmd::revert::CleanArgs),
+    /// Show revision history.
+    Log(cmd::history::LogArgs),
+    /// Print a file as of a revision.
+    Cat(cmd::history::CatArgs),
+    /// List a directory as of a revision.
+    Ls(cmd::history::LsArgs),
 }
 
 async fn run(cli: Cli) -> CliResult<Value> {
@@ -104,6 +110,9 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Revert(a)) => cmd::revert::revert(&ctx, a).await,
         Some(Command::Diff(a)) => cmd::diff::diff(&ctx, a).await,
         Some(Command::Clean(a)) => cmd::revert::clean(&ctx, a).await,
+        Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
+        Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
+        Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
     }
 }
 

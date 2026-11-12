@@ -1,0 +1,5 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "text(&ws, &remote(&server, &[\"ls\", \"src@r2\"]))"
+---
+main.rs

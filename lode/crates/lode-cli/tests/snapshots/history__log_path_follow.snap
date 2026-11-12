@@ -1,0 +1,11 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "text(&ws, &remote(&server, &[\"log\", \"--follow\", \"src/app.rs\"]))"
+---
+r4  2026-01-02 04:05:35Z  bot [agent]
+    Rename main
+
+r2  2026-01-02 03:04:05Z  admin
+    Initial import
+
+    With a second paragraph.

@@ -1218,10 +1218,12 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "axum",
+ "base64 0.22.1",
  "clap",
  "diffy",
  "directories",
  "futures",
+ "insta",
  "lode-client",
  "lode-core",
  "lode-proto",
@@ -1232,6 +1234,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "time",
  "tokio",
  "toml",
 ]

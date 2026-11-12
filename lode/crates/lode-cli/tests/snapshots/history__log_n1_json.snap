@@ -1,0 +1,32 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "json(&ws, &remote(&server, &[\"log\", \"-n\", \"1\"]))"
+---
+{
+  "branch": "main",
+  "depot": "game",
+  "more": true,
+  "ok": true,
+  "revisions": [
+    {
+      "author": {
+        "kind": "agent",
+        "name": "bot"
+      },
+      "branch": "main",
+      "created_at": "2026-01-02T04:05:35Z",
+      "message": "Rename main",
+      "parent": 3,
+      "provenance": {
+        "client": "lode-client/[version]",
+        "via": "api"
+      },
+      "rev": 4,
+      "root_tree": "e3cdb96bb53959943b80573e7ec32a8eebd259ae419bfcd62d51c8afa17bc081",
+      "submitter": {
+        "kind": "agent",
+        "name": "bot"
+      }
+    }
+  ]
+}

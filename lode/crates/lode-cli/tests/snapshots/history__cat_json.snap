@@ -1,0 +1,14 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "json(&ws, &remote(&server, &[\"cat\", \"README.md@r3\"]))"
+---
+{
+  "content": "hello\nworld\n",
+  "executable": false,
+  "id": "e55980c788fb1801601cc1aca0af926bf091d52cf906c60ef5b341d108e881a9",
+  "kind": "file",
+  "ok": true,
+  "path": "README.md",
+  "rev": 3,
+  "size": 12
+}

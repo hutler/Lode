@@ -16,6 +16,7 @@ name = "lode"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 clap.workspace = true
 directories.workspace = true
 diffy.workspace = true
@@ -28,11 +29,13 @@ rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
 toml.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
 axum.workspace = true
+insta.workspace = true
 lode-server.workspace = true
 lode-testkit.workspace = true

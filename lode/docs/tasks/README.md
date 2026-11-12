@@ -88,3 +88,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T027 | review | `lode/T027-testkit` | adds commit failpoints to `lode-server` |
 | T022 | review | `lode/T022-checkout` | `rpassword` for the no-echo prompt; `cache_dir` setting not read yet, only `LODE_CACHE_DIR` |
 | T023 | review | `lode/T023-local-changes` | diff and merge crate: `diffy` 0.5 (needs Rust 1.85) |
+| T026 | review | `lode/T026-history` | snapshot tests use `insta`; `--depot` is an option of `log`/`cat`/`ls` |

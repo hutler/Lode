@@ -1,0 +1,8 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "text(&ws, &remote(&server, &[\"ls\", \"-l\"]))"
+---
+file  12  e55980c788fb  README.md
+dir    0  56305aedd4d5  assets/
+dir    0  9e1e7cf49981  src/
+exec  10  bc1f407a11c9  tool.sh

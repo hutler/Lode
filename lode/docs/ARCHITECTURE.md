@@ -614,6 +614,12 @@ cached; `revert` restores from the cache or downloads straight into `.lode/tmp`,
 filling the cache with large files. `lode clean` removes untracked (and with `--ignored`,
 ignored) files in the view and then the directories left empty, never `.lode/`.
 
+**History commands.** `lode log`, `cat` and `ls` read from the server. In a workspace, paths
+are local (relative to the working directory) and `cat`/`ls` default to the workspace's
+`synced_rev` on its own branch; with `--depot` (and `--server` or `LODE_SERVER`) they work
+anywhere, with depot paths and the branch head. A revision is written `path@12` or
+`path@r12`.
+
 **Diff and merge library: `diffy` 0.5.** It produces unified patches and does three-way text
 merges with conflict markers, which `lode update` needs (§10.4). `imara-diff` is faster on
 very large inputs but has no three-way merge, so it would mean a second crate.

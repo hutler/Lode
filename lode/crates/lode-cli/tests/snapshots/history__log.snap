@@ -1,0 +1,17 @@
+---
+source: crates/lode-cli/tests/history.rs
+expression: "text(&ws, &remote(&server, &[\"log\"]))"
+---
+r4  2026-01-02 04:05:35Z  bot [agent]
+    Rename main
+
+r3  2026-01-02 03:05:35Z  dana
+    Say more
+
+r2  2026-01-02 03:04:05Z  admin
+    Initial import
+
+    With a second paragraph.
+
+r1  2026-01-02 03:04:05Z  admin
+    Create depot
