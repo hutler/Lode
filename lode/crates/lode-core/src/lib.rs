@@ -1,5 +1,26 @@
-//! Core types of Lode: object ids, depot paths, trees, changes, error codes
+//! Core types of Lode: object ids, depot paths, trees, stored-object headers, changes,
+//! error codes, glob matching and `.lodeconfig` parsing.
 //!
-//! Scaffold only; see `docs/tasks/` for the task that fills this crate.
+//! This crate does no I/O beyond reading from a caller-supplied `std::io::Read` when
+//! hashing, and has no async code. Every other crate builds on it.
 
 #![forbid(unsafe_code)]
+
+pub mod change;
+pub mod config;
+pub mod error;
+pub mod glob;
+pub mod id;
+pub mod object;
+pub mod path;
+pub mod tree;
+mod varint;
+
+pub use change::{validate_changes, Change, ChangeAction, ChangeSetError, CopyFrom};
+pub use config::{CheckRequirement, ConfigError, LodeConfig};
+pub use error::ErrorCode;
+pub use glob::{GlobError, PathGlobSet};
+pub use id::{blob_id, tree_id, IdParseError, ObjectId};
+pub use object::{Codec, HeaderError, ObjectHeader, ObjectKind};
+pub use path::{DepotPath, PathError};
+pub use tree::{EntryKind, Tree, TreeEntry, TreeError};
