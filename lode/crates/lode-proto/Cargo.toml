@@ -1,0 +1,12 @@
+[package]
+name = "lode-proto"
+description = "Request and response types of the Lode HTTP API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

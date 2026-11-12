@@ -1,0 +1,23 @@
+[package]
+name = "loded"
+description = "The Lode server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "loded"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2"

@@ -1,0 +1,12 @@
+[package]
+name = "lode-server"
+description = "Lode server: auth, permissions, commit engine, HTTP routes, module framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

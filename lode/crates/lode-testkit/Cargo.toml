@@ -1,0 +1,12 @@
+[package]
+name = "lode-testkit"
+description = "Test helpers: in-process Lode server and CLI workspaces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

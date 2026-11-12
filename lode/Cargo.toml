@@ -1,0 +1,81 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lode-core",
+    "crates/lode-proto",
+    "crates/lode-store",
+    "crates/lode-meta",
+    "crates/lode-server",
+    "crates/lode-mod-locks",
+    "crates/lode-mod-shelves",
+    "crates/lode-mod-mcp",
+    "crates/lode-mod-webhooks",
+    "crates/lode-mod-checks",
+    "crates/lode-client",
+    "crates/lode-workspace",
+    "crates/lode-cli",
+    "crates/loded",
+    "crates/lode-testkit",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.80"
+repository = "https://github.com/hutler/simpledevops"
+publish = false
+
+[workspace.dependencies]
+# Internal crates
+lode-core = { path = "crates/lode-core" }
+lode-proto = { path = "crates/lode-proto" }
+lode-store = { path = "crates/lode-store" }
+lode-meta = { path = "crates/lode-meta" }
+lode-server = { path = "crates/lode-server" }
+lode-mod-locks = { path = "crates/lode-mod-locks" }
+lode-mod-shelves = { path = "crates/lode-mod-shelves" }
+lode-mod-mcp = { path = "crates/lode-mod-mcp" }
+lode-mod-webhooks = { path = "crates/lode-mod-webhooks" }
+lode-mod-checks = { path = "crates/lode-mod-checks" }
+lode-client = { path = "crates/lode-client" }
+lode-workspace = { path = "crates/lode-workspace" }
+lode-testkit = { path = "crates/lode-testkit" }
+
+# Third-party crates (allow-list in AGENTS.md)
+anyhow = "1"
+async-trait = "0.1"
+blake3 = "1"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+globset = "0.4"
+hex = "0.4"
+rand = "0.8"
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time"] }
+toml = "0.8"
+tracing = "0.1"
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+zstd = "0.13"
+
+# Test-only
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[profile.release]
+lto = "thin"
