@@ -24,6 +24,8 @@ pub struct Globals {
     pub dir: Option<PathBuf>,
     /// `--insecure`.
     pub insecure: bool,
+    /// Self-reported agent provenance for commits and shelves (`lode mcp --agent-…`).
+    pub agent: Option<lode_proto::commit::AgentProvenance>,
 }
 
 /// `<config>/settings.toml`.
@@ -45,6 +47,18 @@ pub struct Ctx {
     pub config_dir: PathBuf,
     /// Output.
     pub out: Out,
+}
+
+impl Globals {
+    /// The provenance a commit or shelf made with these options sends.
+    pub fn provenance(&self) -> Option<lode_proto::commit::Provenance> {
+        self.agent
+            .clone()
+            .map(|agent| lode_proto::commit::Provenance {
+                agent: Some(agent),
+                ..Default::default()
+            })
+    }
 }
 
 impl Ctx {

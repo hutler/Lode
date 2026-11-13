@@ -105,6 +105,8 @@ enum Command {
     Cat(cmd::history::CatArgs),
     /// List a directory as of a revision.
     Ls(cmd::history::LsArgs),
+    /// Serve this workspace to a coding agent over MCP (stdio).
+    Mcp(cmd::mcp::McpArgs),
     /// Any other command runs `lode-<command>` from PATH.
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -116,6 +118,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         server: cli.server,
         dir: cli.chdir,
         insecure: cli.insecure,
+        agent: None,
     })?;
     if cli.version {
         let v = env!("CARGO_PKG_VERSION");
@@ -151,6 +154,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
+        Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {
             // The child owns stdout; `lode` adds nothing to it and passes its exit code on.
             let code = external::run(&ctx, &args)?;

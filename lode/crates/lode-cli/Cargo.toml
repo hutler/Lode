@@ -25,6 +25,7 @@ lode-client.workspace = true
 lode-core.workspace = true
 lode-proto.workspace = true
 lode-workspace.workspace = true
+rmcp = { workspace = true, features = ["server", "transport-io"] }
 rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -40,3 +41,4 @@ axum.workspace = true
 insta.workspace = true
 lode-server.workspace = true
 lode-testkit.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }

@@ -247,6 +247,12 @@ raw bytes go to stdout.
 
 `executable` appears only when true. Listing a file gives its directory with that one entry.
 
+### `lode mcp [--agent-model M] [--agent-session S] [--agent-tool T]`
+
+Serves the workspace over MCP on stdin and stdout until stdin closes; prints nothing else to
+stdout. Each tool's result is the JSON above for the matching command, without `ok`; a
+failure is a tool error carrying `{code, message, details?}`. See `docs/MCP.md`.
+
 ### External commands
 
 `lode foo …` runs `lode-foo …` from `PATH` when `foo` is not a built-in command. It inherits

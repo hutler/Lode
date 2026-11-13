@@ -556,6 +556,13 @@ and reports truncation; binary content is returned as a summary (size, id), not 
   `agent` object is stored as provenance. At most `[limits] mcp_max_edits` (500) edits and
   `mcp_max_inline_bytes` (16 MiB) of content per call, else `too_large`. `submit_shelf`
   (scope `write`) needs `expected_version`.
+- `lode mcp` (in `lode-cli`) serves one workspace over stdio. Each tool builds the matching
+  command's arguments and runs the same function with `--json`, on a worker thread of its
+  own (one call at a time; the workspace database handle cannot cross threads). Paths are
+  normalized against the workspace root and refused (`outside_workspace`) if they leave
+  it, including through a link. `commit` is listed only if `whoami` reports `write`.
+  `--agent-*` flags fill `Globals.agent`, which commit and shelve send as provenance. Setup
+  snippets: `docs/MCP.md`.
 - A shelf's provenance gets `via` from the server, like a commit's. A submitted shelf's
   revision records the submitter's `via`; the shelf keeps the one it was made with.
 

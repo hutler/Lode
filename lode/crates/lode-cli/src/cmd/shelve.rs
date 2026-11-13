@@ -255,7 +255,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
                     description,
                     changes,
                     merged_from: vec![],
-                    provenance: None,
+                    provenance: ctx.g.provenance(),
                 },
             )
             .await
@@ -271,7 +271,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
                         description,
                         changes,
                         merged_from: vec![],
-                        provenance: None,
+                        provenance: ctx.g.provenance(),
                     },
                 )
                 .await;

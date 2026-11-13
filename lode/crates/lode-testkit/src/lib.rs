@@ -451,7 +451,13 @@ impl TestWorkspace {
 
     /// A `lode` command with the isolated environment, run in [`TestWorkspace::root`].
     pub fn cmd(&self) -> assert_cmd::Command {
-        let mut c = assert_cmd::Command::new(&self.bin);
+        assert_cmd::Command::from_std(self.std_cmd())
+    }
+
+    /// [`TestWorkspace::cmd`] as a plain process command, for running `lode` as a child
+    /// with pipes (such as `lode mcp`).
+    pub fn std_cmd(&self) -> std::process::Command {
+        let mut c = std::process::Command::new(&self.bin);
         let home = self.home.path();
         c.current_dir(&self.root)
             .env_remove("LODE_SERVER")

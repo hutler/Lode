@@ -8,6 +8,7 @@ pub mod files;
 pub mod history;
 pub mod locks;
 pub mod login;
+pub mod mcp;
 pub mod revert;
 pub mod shelve;
 pub mod status;

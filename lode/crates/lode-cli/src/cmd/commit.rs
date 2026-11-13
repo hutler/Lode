@@ -564,7 +564,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             message: msg,
             changes,
             merged_from: vec![],
-            provenance: None,
+            provenance: ctx.g.provenance(),
             extensions: if args.keep_locks {
                 [(KEEP_LOCKS.to_owned(), Value::Bool(true))].into()
             } else {
