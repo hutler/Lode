@@ -21,7 +21,7 @@ use lode_proto::consts::paths;
 use lode_proto::PrincipalRef;
 use lode_server::auth::{ms_to_time, SCOPE_READ};
 use lode_server::commit::{CommitCtx, Origin};
-use lode_server::module::{Module, ModuleCtx, ScopeDef};
+use lode_server::module::{Module, ModuleCtx, ScopeDef, ToolDef};
 use lode_server::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult, Caller};
 use rusqlite::params;
 use serde_json::json;
@@ -476,5 +476,45 @@ impl Module for Checks {
 
     fn pre_commit(&self, tx: &dyn Reads, ctx: &CommitCtx<'_>) -> Result<(), ApiError> {
         gate(tx, ctx)
+    }
+
+    fn mcp_tools(&self, ctx: ModuleCtx) -> Vec<ToolDef> {
+        vec![ToolDef {
+            name: "list_checks".into(),
+            description: "List the checks (build and test results reported by outside systems) \
+                          on a revision, or on one version of a shelf: name, state (pending, \
+                          success, failure, error, cancelled), reporter, time, summary and link. \
+                          Checks belong to an exact shelf version; get it from get_shelf."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "depot": { "type": "string", "description": "Depot name" },
+                    "target_kind": { "type": "string", "enum": ["revision", "shelf"] },
+                    "target_id": { "type": "integer", "minimum": 1,
+                                   "description": "Revision number or shelf id" },
+                    "target_version": { "type": "integer", "minimum": 1,
+                                        "description": "Shelf version; required for a shelf" }
+                },
+                "required": ["depot", "target_kind", "target_id"],
+                "additionalProperties": false
+            }),
+            scope: SCOPE_READ.into(),
+            handler: Arc::new(move |caller, input| {
+                let ctx = ctx.clone();
+                Box::pin(async move {
+                    #[derive(serde::Deserialize)]
+                    struct Input {
+                        depot: String,
+                        #[serde(flatten)]
+                        query: ChecksQuery,
+                    }
+                    let input: Input = serde_json::from_value(input)
+                        .map_err(|e| ApiError::invalid_request(format!("bad input: {e}")))?;
+                    let list = list_checks(&ctx, &caller, &input.depot, input.query).await?;
+                    serde_json::to_value(list).map_err(|_| ApiError::internal())
+                })
+            }),
+        }]
     }
 }

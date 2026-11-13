@@ -1,0 +1,42 @@
+---
+source: crates/lode-cli/tests/checks.rs
+expression: pretty(&bare.json(&args))
+---
+{
+  "checks": [
+    {
+      "name": "ci/test",
+      "reporter": {
+        "kind": "user",
+        "name": "ci"
+      },
+      "state": "failure",
+      "summary": "2 failed\nmore",
+      "target": {
+        "id": 2,
+        "kind": "revision"
+      },
+      "updated_at": "2026-11-12T10:31:00Z"
+    },
+    {
+      "name": "ci/build",
+      "reporter": {
+        "kind": "user",
+        "name": "ci"
+      },
+      "state": "success",
+      "summary": "built in 41 s",
+      "target": {
+        "id": 2,
+        "kind": "revision"
+      },
+      "updated_at": "2026-11-12T10:30:00Z",
+      "url": "https://ci.example/b/7"
+    }
+  ],
+  "ok": true,
+  "target": {
+    "id": 2,
+    "kind": "revision"
+  }
+}

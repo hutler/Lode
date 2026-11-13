@@ -1,0 +1,6 @@
+---
+source: crates/lode-cli/tests/checks.rs
+expression: "text(&ws, &[\"checks\", &ids])"
+---
+Checks on shelf 1 version 1:
+pending   ci/build                 ci               2026-11-12 10:32:00Z

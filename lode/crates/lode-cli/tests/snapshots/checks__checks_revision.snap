@@ -1,0 +1,7 @@
+---
+source: crates/lode-cli/tests/checks.rs
+expression: "text(&bare, &args)"
+---
+Checks on r2:
+failure   ci/test                  ci               2026-11-12 10:31:00Z  2 failed
+success   ci/build                 ci               2026-11-12 10:30:00Z  built in 41 s  https://ci.example/b/7

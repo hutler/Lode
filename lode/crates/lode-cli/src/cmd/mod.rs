@@ -5,6 +5,7 @@ pub mod apply;
 pub mod branch;
 pub mod changelist;
 pub mod checkout;
+pub mod checks;
 pub mod commit;
 pub mod diff;
 pub mod files;

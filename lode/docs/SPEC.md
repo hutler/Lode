@@ -188,7 +188,8 @@ Two MCP servers, both speaking the standard Model Context Protocol:
 - **Server endpoint** (`/mcp`, streamable HTTP, bearer token). Works without a workspace. Tools:
   `whoami`, `list_depots`, `list_branches`, `log`, `show_revision`, `list_dir`, `read_file`,
   `diff`, `blame`, `search_history`, `list_locks`, `list_shelves`, `get_shelf`, `create_shelf`,
-  `update_shelf`, and `submit_shelf` for tokens with `write`.
+  `update_shelf`, `list_checks` (with the checks module), and `submit_shelf` for tokens with
+  `write`.
 - **Local endpoint** (`lode mcp`, stdio). Operates on a workspace. Tools: `status`, `diff`,
   `add`, `remove`, `move`, `revert`, `update`, `lock`, `unlock`, `shelve`, `unshelve`, `commit`.
 
@@ -289,7 +290,7 @@ lode shelve | unshelve <id>          lode shelves | shelf show|diff|delete <id>
 lode shelf submit <id>[@version]
 lode changelist new|list|move|delete
 lode view show|include|exclude
-lode checks <rN | shelf-id[@version]>          (planned, with the checks module)
+lode checks <rN | shelf-id[@version]>          (with the checks module)
 lode mcp
 lode admin depot|user|agent|group|token|acl|gc|fsck …
 lode admin webhook add|list|remove|deliveries|ping …   (with the webhooks module)
@@ -320,7 +321,6 @@ Everything else in sections 5–7 and 9 is covered by the scenario suite
 
 | Section | Deviation |
 | --- | --- |
-| 6.6 Checks | Reports, listing over HTTP and the submit gate work; `lode checks` and the MCP tool `list_checks` are not built yet (T063). |
 | 5.4 Merge | After a single-revision pick (`-r`), a later full merge starts again from the merge base before the gap and re-applies the picked change. Usually `unchanged`; a conflict if the file changed since. Follows from the v1 base rule. |
 | 6.1 Locks | `lode switch` leaves this workspace's locks on the old branch (they are per branch) and reports them; it does not release them. |
 | 6.4 MCP | The server endpoint also offers `list_depots`, and `submit_shelf` to tokens with `write`. Large files, diffs and blame are cut off at fixed sizes (`truncated`, `next_line`). |

@@ -426,6 +426,37 @@ fn parse_spec(spec: &str) -> CliResult<(u64, Option<u64>)> {
     Ok((id.parse::<u64>().map_err(|_| bad())?, version))
 }
 
+/// The unmet checks of a `checks_required` refusal, one per line.
+fn unmet_checks(details: &Value) -> Option<String> {
+    let missing = details.get("missing")?.as_array()?;
+    let mut text = format!(
+        "shelf {} version {} cannot be submitted until these checks pass:",
+        details
+            .get("shelf_id")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        details
+            .get("shelf_version")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+    );
+    for m in missing {
+        let name = m.get("name").and_then(Value::as_str).unwrap_or("?");
+        let reporter = m.get("reporter").and_then(Value::as_str).unwrap_or("?");
+        let state = m.get("state").and_then(Value::as_str).unwrap_or("?");
+        let why = match m.get("reason").and_then(Value::as_str) {
+            Some("absent") => format!("not reported yet (expected from {reporter})"),
+            Some("wrong_reporter") => format!(
+                "{state}, but reported by {}, not {reporter}",
+                m.get("reported_by").and_then(Value::as_str).unwrap_or("?")
+            ),
+            _ => state.to_owned(),
+        };
+        text.push_str(&format!("\n  {name}: {why}"));
+    }
+    Some(text)
+}
+
 /// What to do about a refused submit.
 fn submit_refused(e: lode_client::Error) -> CliError {
     let version = e
@@ -438,6 +469,11 @@ fn submit_refused(e: lode_client::Error) -> CliError {
             err.message = format!(
                 "the shelf was changed since that version; it is at version {v} now: review it again"
             );
+        }
+        ("checks_required", _) => {
+            if let Some(text) = unmet_checks(&err.details) {
+                err.message = text;
+            }
         }
         ("out_of_date", _) => {
             err.message = format!(

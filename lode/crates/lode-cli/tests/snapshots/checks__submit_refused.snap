@@ -1,0 +1,7 @@
+---
+source: crates/lode-cli/tests/checks.rs
+expression: "stderr.replace(&format!(\"shelf {id} \"), \"shelf [id] \")"
+---
+error: shelf [id] version 1 cannot be submitted until these checks pass:
+  ci/build: not reported yet (expected from ci)
+  ci/test: failure

@@ -405,8 +405,64 @@ async fn tokens_and_modules_decide_the_tool_list() {
     let c = connect(&server, server.admin_token()).await;
     let names = tool_names(&c).await;
     assert!(names.contains(&"read_file".to_owned()), "{names:?}");
-    for t in ["list_locks", "list_shelves", "get_shelf"] {
+    for t in ["list_locks", "list_shelves", "get_shelf", "list_checks"] {
         assert!(!names.contains(&t.to_owned()), "{t} in {names:?}");
     }
+    c.cancel().await.unwrap();
+}
+
+/// T063: `list_checks` is there only with the checks module, and lists what was reported.
+#[tokio::test]
+async fn list_checks_comes_with_the_checks_module() {
+    let server = TestServer::start_with(TestServerOptions {
+        configure: Box::new(|c| c.modules.checks = true),
+    })
+    .await;
+    server.create_depot("game").await;
+    let rev = server
+        .commit_files("game", "main", &[("a.txt", b"a\n")])
+        .await;
+    let ci = server.create_user("ci", &["read", "checks"]).await;
+    server
+        .acl("game", "ci", "*", "**", AclEffect::Allow, AccessLevel::Read)
+        .await;
+    server
+        .client(&ci)
+        .report_check(
+            "game",
+            &lode_proto::checks::ReportCheckRequest {
+                target: lode_proto::checks::CheckTarget {
+                    kind: lode_proto::checks::CheckTargetKind::Revision,
+                    id: rev,
+                    version: None,
+                },
+                name: "ci/build".into(),
+                state: lode_proto::checks::CheckState::Success,
+                summary: Some("ok".into()),
+                url: None,
+            },
+        )
+        .await
+        .unwrap();
+    let c = connect(&server, server.admin_token()).await;
+    assert!(tool_names(&c).await.contains(&"list_checks".to_owned()));
+    let list = call(
+        &c,
+        "list_checks",
+        json!({ "depot": "game", "target_kind": "revision", "target_id": rev }),
+    )
+    .await;
+    assert_eq!(list["checks"][0]["name"], "ci/build");
+    assert_eq!(list["checks"][0]["state"], "success");
+    assert_eq!(list["checks"][0]["reporter"]["name"], "ci");
+    assert_eq!(
+        call_err(
+            &c,
+            "list_checks",
+            json!({ "depot": "game", "target_kind": "shelf", "target_id": 1 })
+        )
+        .await,
+        "invalid_request"
+    );
     c.cancel().await.unwrap();
 }

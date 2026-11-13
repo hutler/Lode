@@ -204,6 +204,20 @@ newest first, open shelves by default.
   terminal; with `--json` or without a terminal that is a usage error. `replayed` is true when
   the shelf was already submitted at that version. The author is the shelf's owner.
 
+A submit refused by the checks gate exits 1 with code `checks_required`; `details` is
+`{ "shelf_id", "shelf_version", "missing": [ { "name", "reporter", "reason", "state"?,
+"reported_by"? } ] }` (`reason`: `absent`, `not_success`, `wrong_reporter`), and the human
+message lists each unmet check on its own line.
+
+### `lode checks <rN | ID[@VERSION]> [--depot D]`
+
+`{ "target": { "kind": "revision"|"shelf", "id", "version"? }, "checks": [ { "target",
+"name", "state", "summary"?, "url"?, "reporter": { "name", "kind", "owner"? }, "updated_at" } ] }`,
+most recently reported first. `state` is `pending`, `success`, `failure`, `error` or
+`cancelled`. A shelf without `@VERSION` means its current version. Outside a workspace give
+`--server` (or `LODE_SERVER`) and `--depot`. A server without the checks module answers
+`module_disabled` (exit 1).
+
 ### `lode unshelve <id>`
 
 ```json
@@ -352,6 +366,11 @@ may also manage that agent's tokens).
 | `acl remove <id>` | `{ "removed": id }` |
 | `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null }` |
 | `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
+| `webhook add <depot> <url> --events E,… [--branch G]` | `{ "hook": hook, "secret" }`; the secret goes to stdout once |
+| `webhook list <depot>` | `{ "webhooks": [ { "id", "depot", "url", "events", "branch"?, "active", "created_by", "created_at" } ] }` |
+| `webhook remove <depot> <id>` | `{ "removed": id }` |
+| `webhook deliveries <depot> <id>` | `{ "deliveries": [ { "id", "hook_id", "event", "state": "pending"|"ok"|"failed", "attempts", "next_attempt_at"?, "last_status"?, "last_error"?, "created_at" } ] }`, newest first |
+| `webhook ping <depot> <id>` | the queued delivery |
 
 A subject is `user:NAME` (or a bare name), `group:NAME` or `all`. Branch and path patterns
 default to `**` and are checked before anything is sent (`usage` on a bad one). Passwords are
