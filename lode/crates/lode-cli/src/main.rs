@@ -136,7 +136,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
     if cli.version {
         let v = env!("CARGO_PKG_VERSION");
         ctx.out.line(format!("lode {v}"));
-        return Ok(json!({ "version": v }));
+        return Ok(json!({ "version": v, "api": lode_proto::consts::API_VERSION }));
     }
     match cli.command {
         None => Err(CliError::usage("no command given; see `lode --help`")),

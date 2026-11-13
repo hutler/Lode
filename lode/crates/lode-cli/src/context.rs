@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use lode_client::{read_token_file, Client, CredentialStore, ServerUrl};
 use lode_workspace::db::keys;
-use lode_workspace::Workspace;
+use lode_workspace::{BlobCache, Workspace, DEFAULT_SHARED_CACHE_CAP};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CliError, CliResult, Exit};
@@ -34,6 +34,12 @@ pub struct Settings {
     /// Server used when nothing else names one; set by `lode login`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<String>,
+    /// Shared download cache directory; `LODE_CACHE_DIR` overrides it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_dir: Option<PathBuf>,
+    /// Size cap of the shared download cache in GiB (default 20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_max_gib: Option<u64>,
 }
 
 /// What a command runs with.
@@ -160,9 +166,10 @@ impl Ctx {
     pub fn token(&self, server: &ServerUrl) -> CliResult<Option<String>> {
         if let Some(file) = std::env::var_os("LODE_TOKEN_FILE").filter(|f| !f.is_empty()) {
             let path = PathBuf::from(file);
-            return match read_token_file(&path)? {
-                Some(t) => Ok(Some(t)),
-                None => Err(CliError::new(
+            // The path is only reported, never stored in the workspace.
+            return match read_token_file(&path) {
+                Ok(Some(t)) => Ok(Some(t)),
+                Ok(None) => Err(CliError::new(
                     Exit::Auth,
                     "unauthenticated",
                     format!(
@@ -170,9 +177,31 @@ impl Ctx {
                         path.display()
                     ),
                 )),
+                Err(e) => Err(CliError::new(
+                    Exit::Auth,
+                    "unauthenticated",
+                    format!("cannot read LODE_TOKEN_FILE {}: {e}", path.display()),
+                )),
             };
         }
         Ok(self.credentials().load(server)?)
+    }
+
+    /// The shared download cache: `LODE_CACHE_DIR`, else the `cache_dir` setting; none when
+    /// neither is set.
+    pub fn shared_cache(&self) -> CliResult<Option<BlobCache>> {
+        let settings = self.settings()?;
+        let dir = match std::env::var_os("LODE_CACHE_DIR").filter(|d| !d.is_empty()) {
+            Some(d) => PathBuf::from(d),
+            None => match settings.cache_dir {
+                Some(d) if !d.as_os_str().is_empty() => d,
+                _ => return Ok(None),
+            },
+        };
+        let cap = settings
+            .cache_max_gib
+            .map_or(DEFAULT_SHARED_CACHE_CAP, |g| g.saturating_mul(1 << 30));
+        Ok(Some(BlobCache::new(dir, cap)))
     }
 
     /// A client for `server` without a token.

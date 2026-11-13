@@ -179,7 +179,7 @@ async fn sync_view(
         })?;
         removed += 1;
     }
-    let fetched = fetch_entries(ws, &client, &depot, entries, &ctx.out).await?;
+    let fetched = fetch_entries(ws, &client, &depot, entries, ctx).await?;
     ws.set_view_spec(next)?;
     ctx.out.line(format!(
         "View updated: {} files added, {removed} removed.",

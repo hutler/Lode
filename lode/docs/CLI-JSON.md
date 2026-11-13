@@ -45,7 +45,8 @@ Error codes from the server (`lode_core::ErrorCode`) are passed through unchange
 
 ### `lode --version`
 
-`{ "version": "0.1.0" }`
+`{ "version": "0.1.0", "api": "1" }`. `api` is the server API version this client speaks
+(`/api/v1`).
 
 ### `lode login <url>`
 
@@ -265,6 +266,10 @@ it is right after commits too. An interrupted switch is finished by `lode switch
 branch or `lode update`. `update` prints `"branch"`, `"switched_from": null` and
 `"locks_left": []` too.
 
+With `-r REV` the workspace goes straight to that revision of the branch without first
+syncing its head; `REV` must be in the branch's history (`not_found` otherwise). Only blobs
+of that revision are downloaded.
+
 ### `lode merge <branch> [-r REV]`
 
 ```json
@@ -379,6 +384,44 @@ prompted for twice in a terminal, or read from stdin with `--password-stdin` (re
 rest on stderr); listings never show values. `fsck` exits 1 with code `fsck_failed` and the
 report as `details` when it finds problems. `acl check` evaluates the rules as for a token
 with every scope; a real token's scopes can only narrow that.
+
+### Unattended machines
+
+Build agents and other scripts drive a workspace with no person at the keyboard.
+
+**Sign-in.** Set `LODE_SERVER` and `LODE_TOKEN_FILE` (a path to a file whose first line is a
+token). They win over a stored `lode login`. A missing or unreadable token file is
+`unauthenticated` (exit 3); there is no fallback to a stored login. No variable carries the
+token itself, and the file's path is never written into the workspace. `--server` and a
+workspace's own server still come before `LODE_SERVER`.
+
+**Shared download cache.** `LODE_CACHE_DIR`, or `cache_dir` in the user's `settings.toml`,
+names a directory that checkout, update and switch read before downloading and fill with
+what they download. Several workspaces of one depot on one machine then download each blob
+once. Entries are named by content id, written to a temporary file and renamed, and checked
+against their id on every read: a damaged entry is deleted and downloaded again. Files are
+always copied into the workspace, never linked, so a build that edits a file cannot harm the
+cache. The cap is 20 GiB (`cache_max_gib` in `settings.toml` changes it); the least recently
+used entries go when a sync finishes over the cap. Any number of `lode` processes may share
+it. A cache problem is a warning, never a failed command.
+
+```toml
+# settings.toml in the user's lode config directory
+cache_dir = "D:/lode-cache"
+cache_max_gib = 50
+```
+
+**Reset sequence.** To bring a reused workspace to an exact state, whatever the last job left
+behind (modified, added, deleted or untracked files, conflicts, a pending merge):
+
+```
+lode revert --all                 # undo every change, clear conflicts, drop a pending merge
+lode clean                        # remove untracked files (add --ignored for build output too)
+lode switch <branch> -r <rev>     # exactly that revision of that branch
+```
+
+Each step exits 0 on success. After it, `lode status --json` lists no files and reports the
+branch and revision asked for. `lode clean` keeps ignored files unless given `--ignored`.
 
 ### External commands
 

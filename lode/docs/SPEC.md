@@ -297,9 +297,11 @@ lode admin webhook add|list|remove|deliveries|ping …   (with the webhooks modu
 ```
 
 Every command honours the environment variables `LODE_SERVER` and `LODE_TOKEN_FILE` (a path
-to a file holding a token) for sign-in without a stored login, and `LODE_CACHE_DIR` for a
-download cache shared by several workspaces on one machine. `lode --version --json` reports
-the client version in machine-readable form.
+to a file holding a token) for sign-in without a stored login, and `LODE_CACHE_DIR` (or the
+user setting `cache_dir`) for a download cache shared by several workspaces on one machine.
+`lode --version --json` reports the client and API versions in machine-readable form. A
+reused workspace is reset with `lode revert --all`, `lode clean` and
+`lode switch <branch> -r <rev>` (docs/CLI-JSON.md, "Unattended machines").
 
 Exit codes: `0` success, `1` operation failed (conflict, rejected, not found), `2` usage error,
 `3` authentication or permission error, `4` network or server error.

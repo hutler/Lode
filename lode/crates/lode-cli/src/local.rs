@@ -154,6 +154,7 @@ pub struct Bases<'a> {
     server: ServerUrl,
     depot: String,
     cache: BlobCache,
+    shared: Option<BlobCache>,
     tmp: PathBuf,
     client: Option<Client>,
 }
@@ -170,6 +171,8 @@ impl<'a> Bases<'a> {
             server: ctx.server_url(Some(ws))?,
             depot,
             cache: ws.cache(DEFAULT_CACHE_CAP),
+            // A bad settings file must not stop offline commands; it only loses the cache.
+            shared: ctx.shared_cache().ok().flatten(),
             tmp: ws.layout().tmp(),
             client: None,
         })
@@ -212,8 +215,19 @@ impl<'a> Bases<'a> {
             fs::copy(p, &tmp)?;
             return Ok(tmp);
         }
+        if let Some(shared) = &self.shared {
+            if shared.copy_out(id, &tmp).unwrap_or(false) {
+                return Ok(tmp);
+            }
+        }
         let depot = self.depot.clone();
         self.client()?.download_blob(&depot, id, &tmp).await?;
+        if let Some(shared) = &self.shared {
+            // Evicted by the next checkout, update or switch.
+            if let Err(e) = shared.store_file(id, &tmp) {
+                self.ctx.out.warn(format!("shared cache: {e}"));
+            }
+        }
         Ok(tmp)
     }
 

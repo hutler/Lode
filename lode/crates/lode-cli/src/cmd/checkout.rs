@@ -146,7 +146,7 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
     let (entries, epoch) = full_manifest(&client, &depot, rev, &view).await?;
     let count = entries.len();
     crate::crash::point("checkout.planned");
-    let fetched = fetch_entries(&mut ws, &client, &depot, entries, &ctx.out).await?;
+    let fetched = fetch_entries(&mut ws, &client, &depot, entries, ctx).await?;
     crate::crash::point("checkout.fetched");
     ws.db_mut().write(|tx| {
         tx.set_config(keys::SYNCED_REV, &rev.to_string())?;

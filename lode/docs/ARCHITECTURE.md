@@ -709,8 +709,11 @@ Read-only commands such as `status` do not take it.
 
 **Shared download cache (optional).** When `LODE_CACHE_DIR` or the user setting `cache_dir`
 names a directory, checkout, update and switch look there for a blob before downloading and
-store downloaded blobs there. It is content-addressed, written with temp-plus-rename, verified
-by hash on read, size-capped with LRU eviction, and safe for concurrent `lode` processes.
+store downloaded blobs there; merges and reverts that need a base use it too. It is
+content-addressed, written with temp-plus-rename, verified by hash on read (a damaged entry is
+deleted and downloaded again), size-capped (default 20 GiB, user setting `cache_max_gib`)
+with LRU eviction once at the end of each sync, and safe for concurrent `lode` processes:
+eviction skips what another process removed or holds open, and a cache error only warns.
 Files are always copied into workspaces, never hard-linked, so a build that modifies a file
 cannot corrupt the cache. Several workspaces of one depot on one machine then download each
 blob once.

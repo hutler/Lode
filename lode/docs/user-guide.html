@@ -55,8 +55,7 @@
   <p class="meta">
     Version 0.1 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes Lode 0.1. Sections marked <em>Planned</em> describe features<br>
-    that arrive with a later release.
+    Describes Lode 0.1 with the integration release (webhooks, checks).
   </p>
 </section>
 
@@ -353,11 +352,17 @@ lode commit -m "x" --json
 <p>Useful global options: <code>-C &lt;dir&gt;</code> runs as if started in that folder; <code>--server</code> and <code>--depot</code> let <code>log</code>, <code>cat</code>, <code>ls</code> and <code>blame</code> work without a workspace. Every JSON shape is listed in <code>docs/CLI-JSON.md</code>.</p>
 <h3>Unattended machines</h3>
 <p>On build machines and in scripts, sign in without a stored login by setting two environment variables: <code>LODE_SERVER</code> (the server address) and <code>LODE_TOKEN_FILE</code> (the path of a file containing a token). Keep that file outside the workspace and readable only by the account that runs <code>lode</code>.</p>
-<p>To bring a reused workspace exactly to a known revision, whatever state the last job left it in:</p>
-<pre><code>lode revert --all
-lode clean
-lode switch main -r 214</code></pre>
-<p>If several workspaces of the same depot live on one machine, set <code>LODE_CACHE_DIR</code> to a shared folder so each file is downloaded once.</p>
+<p>These variables win over a stored login. If the token file is missing or cannot be read, the command stops with exit code 3 instead of trying another account. No variable holds the token itself, and the file's path is never stored in the workspace.</p>
+<p>To bring a reused workspace exactly to a known revision, whatever state the last job left it in (edits, new or deleted files, conflicts, a merge in progress, build output):</p>
+<pre><code>lode revert --all             # undo every change, clear conflicts, drop a pending merge
+lode clean                    # delete untracked files; add --ignored for ignored ones too
+lode switch main -r 214       # exactly revision 214 of main</code></pre>
+<p><code>lode switch</code> with <code>-r</code> goes straight to that revision without first fetching the branch's newest files, and downloads only what that revision holds.</p>
+<p>If several workspaces of the same depot live on one machine, give them a shared download cache so each file is downloaded once: set <code>LODE_CACHE_DIR</code> to a folder, or put it in the <code>settings.toml</code> of your Lode config folder:</p>
+<pre><code>cache_dir = "D:/lode-cache"
+cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
+<p>Files are always copied out of the cache, so a build that edits them cannot damage it. Every entry is checked when read, and a damaged one is downloaded again. When the cache grows past its cap, the files used least recently are removed. Several <code>lode</code> processes can use it at the same time.</p>
+<p><code>lode --version --json</code> prints the client version and the server API version it speaks, for scripts that check compatibility.</p>
 <p>You can add your own commands: an executable named <code>lode-foo</code> on your <code>PATH</code> runs when you type <code>lode foo</code>.</p>
 
 <h1>15. AI agents on your machine</h1>
@@ -380,7 +385,7 @@ lode switch main -r 214</code></pre>
   <tr><td><code>out_of_date</code></td><td>Someone committed a change to a file you are committing or locking. Run <code>lode update</code>, review, try again.</td></tr>
   <tr><td><code>locked</code></td><td>Someone else holds a lock on the file. <code>lode locks</code> shows who.</td></tr>
   <tr><td><code>lock_required</code></td><td>This file type needs a lock before it can be changed. Run <code>lode lock</code> on it, then commit.</td></tr>
-  <tr><td><code>checks_required</code></td><td><em>Planned.</em> The branch requires passing checks before a shelf is submitted. Wait for the checks to pass, or ask your administrator which are required.</td></tr>
+  <tr><td><code>checks_required</code></td><td>The branch requires passing checks before a shelf is submitted. Wait for the checks to pass, or ask your administrator which are required.</td></tr>
   <tr><td><code>permission_denied</code></td><td>Your account or token may not do this here. Ask your administrator.</td></tr>
   <tr><td><code>unauthenticated</code></td><td>You are not signed in or the token expired. Run <code>lode login</code>.</td></tr>
   <tr><td><code>invalid_path</code></td><td>The file name is not allowed (see below), or differs from an existing name only by letter case.</td></tr>
@@ -411,6 +416,7 @@ lode switch main -r 214</code></pre>
   <tr><td><code>lode branch list|create|archive</code> · <code>switch BRANCH [-r REV]</code></td><td>Branches</td></tr>
   <tr><td><code>lode merge BRANCH [-r REV]</code></td><td>Merge from another branch</td></tr>
   <tr><td><code>lode view show|include|exclude</code></td><td>Change what the workspace holds</td></tr>
+  <tr><td><code>lode checks rREV | SHELF[@VERSION]</code></td><td>Results other systems reported</td></tr>
   <tr><td><code>lode mcp</code></td><td>MCP server for AI tools</td></tr>
   <tr><td><code>lode admin …</code></td><td>Administration (Part II)</td></tr>
 </table>
@@ -636,39 +642,47 @@ text   = ["**/*.shader"]     # always treat these as text</code></pre>
   <tr><td><code>checks</code></td><td>Results reported by other systems, and required checks before shelf submit</td><td>Off by default. <code>[checks]</code> rules are ignored</td></tr>
 </table>
 <p>The server's <code>/api/v1/info</code> address lists the active modules.</p>
-<div class="warn"><strong>Planned.</strong> The webhooks and checks modules are not in Lode 0.1: switching them on has no effect yet. They arrive with the integration release; the next two sections describe the planned interface.</div>
-
-<h2>Webhooks (planned)</h2>
+<h2>Webhooks</h2>
 <p>A webhook tells another system, such as a build server, that something happened in a depot, so it does not have to keep asking.</p>
 <pre><code>lode admin webhook add game https://ci.example.com/hooks/lode --events revision.created,shelf.created,shelf.updated --branch "main"
-Created webhook 4. Secret (shown once): 9f2c…
+9f2c…                         (the secret, shown only now)
 lode admin webhook list game
-lode admin webhook ping 4
-lode admin webhook deliveries 4
-lode admin webhook remove 4</code></pre>
+lode admin webhook ping game 4
+lode admin webhook deliveries game 4
+lode admin webhook remove game 4</code></pre>
+<p>Managing webhooks needs administrator rights on the depot.</p>
 <ul>
   <li>Events: <code>revision.created</code>, <code>branch.created</code>, <code>branch.archived</code>, <code>shelf.created</code>, <code>shelf.updated</code>, <code>shelf.submitted</code>, <code>shelf.deleted</code>, <code>lock.acquired</code>, <code>lock.released</code>, <code>check.updated</code>.</li>
   <li>Each request is signed with the secret in the <code>X-Lode-Signature</code> header. The receiver must verify it.</li>
   <li>Events contain identifiers only, never file names or content. The receiver reads details with its own token.</li>
-  <li>A failed delivery is retried for up to 24 hours. The same event can arrive twice; the <code>X-Lode-Delivery</code> header identifies repeats.</li>
+  <li>The signature is <code>sha256=</code> followed by the hex HMAC-SHA256 of the request body, keyed with the secret's text.</li>
+  <li>A failed delivery is retried after 10 seconds, 1, 5 and 30 minutes, then hourly, for up to 24 hours. <code>deliveries</code> shows the state of each. The same event can arrive twice; the <code>X-Lode-Delivery</code> header identifies repeats.</li>
   <li>Addresses must use <code>https://</code> unless you set <code>allow_http = true</code> under <code>[webhooks]</code> in the configuration.</li>
 </ul>
 
-<h2>Checks (planned)</h2>
+<h2>Checks</h2>
 <p>A check is a named result, for example "ci/build: success", that another system attaches to a revision or to one version of a shelf. Lode stores and shows checks; it does not run builds.</p>
 <p>Give the reporting system its own account and a token with the <code>checks</code> scope:</p>
 <pre><code>lode admin user create ci
 lode admin token create --for ci --name reporter --scope read,checks</code></pre>
+<p>The build system reports a result with one request; reporting the same name again replaces it:</p>
+<pre><code>POST https://lode.example.com/api/v1/depots/game/checks
+Authorization: Bearer lode_…
+{ "target": { "kind": "shelf", "id": 37, "version": 3 },
+  "name": "ci/build", "state": "success",
+  "summary": "412 tests passed", "url": "https://ci.example.com/run/981" }</code></pre>
+<p>States are <code>pending</code> (queued or running), <code>success</code>, <code>failure</code>, <code>error</code> and <code>cancelled</code>. For a revision, use <code>"kind": "revision"</code> and leave out <code>version</code>.</p>
 <p>Anyone with read access can see the results:</p>
 <pre><code>lode checks r214        # checks on a revision
-lode checks 37          # checks on the current version of shelf 37</code></pre>
+lode checks 37          # checks on the current version of shelf 37
+lode checks 37@2        # checks on version 2 of shelf 37</code></pre>
 <h3>Requiring checks before a shelf is submitted</h3>
 <p>Add a <code>[checks]</code> section to <code>.lodeconfig</code> on the branch:</p>
 <pre><code>[checks]
 branches = ["main", "release/*"]
 required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
 <ul>
-  <li><code>lode shelf submit</code> to a matching branch is refused unless every required check is <code>success</code> for that exact shelf version and was reported by the named account.</li>
+  <li><code>lode shelf submit</code> to a matching branch is refused unless every required check is <code>success</code> for that exact shelf version and was reported by the named account. The refusal lists each missing check and why.</li>
   <li>Changing a shelf raises its version, so it must pass again.</li>
   <li>The rule is taken from the branch, not from the shelf, so a shelf cannot remove the rule it has to meet.</li>
   <li>Direct commits are not affected. Keep the reporting token on the build server only, never on machines that run untrusted code.</li>
@@ -686,6 +700,7 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
   <tr><td>See team activity</td><td><code>list_locks</code>, <code>list_shelves</code>, <code>get_shelf</code></td></tr>
   <tr><td>Propose changes</td><td><code>create_shelf</code>, <code>update_shelf</code></td></tr>
   <tr><td>Commit (only with scope <code>write</code>)</td><td><code>submit_shelf</code></td></tr>
+  <tr><td>See build results (with the checks module)</td><td><code>list_checks</code></td></tr>
 </table>
 <p>The same scopes and permissions apply as everywhere else: an agent sees only what its account may read, and tools it may not use are not offered to it. Large files and diffs are cut off at a size limit and marked as truncated.</p>
 

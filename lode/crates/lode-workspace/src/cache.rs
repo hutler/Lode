@@ -10,8 +10,11 @@ use std::time::{Duration, SystemTime};
 
 use lode_core::ObjectId;
 
-/// Default size cap: 1 GiB.
+/// Default size cap of a workspace's own cache: 1 GiB.
 pub const DEFAULT_CACHE_CAP: u64 = 1024 * 1024 * 1024;
+
+/// Default size cap of the shared download cache: 20 GiB.
+pub const DEFAULT_SHARED_CACHE_CAP: u64 = 20 * 1024 * 1024 * 1024;
 
 /// Temporary files older than this are leftovers of a killed process.
 const STALE_TMP: Duration = Duration::from_secs(3600);
@@ -78,6 +81,48 @@ impl BlobCache {
         Ok(Some(path))
     }
 
+    /// Copies the cached content of `id` to `dest` (a new file, never a link), checking the
+    /// id while copying. Returns `false`, leaving no `dest`, when the entry is absent, was
+    /// evicted meanwhile or is damaged; a damaged entry is removed. A hit counts as a use.
+    pub fn copy_out(&self, id: &ObjectId, dest: &Path) -> io::Result<bool> {
+        let path = self.entry_path(id);
+        let mut src = match File::open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        let mut out = File::create(dest)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let n = match src.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    drop(out);
+                    remove_if_exists(dest)?;
+                    return Err(e);
+                }
+            };
+            hasher.update(&buf[..n]);
+            out.write_all(&buf[..n])?;
+        }
+        drop(out);
+        drop(src);
+        if ObjectId::from_bytes(*hasher.finalize().as_bytes()) != *id {
+            tracing::warn!(%id, "removing a damaged cache entry");
+            remove_if_exists(&path)?;
+            remove_if_exists(dest)?;
+            return Ok(false);
+        }
+        let _ = File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(SystemTime::now()));
+        Ok(true)
+    }
+
     /// Whether `id` is cached, without reading it.
     pub fn contains(&self, id: &ObjectId) -> bool {
         self.entry_path(id).is_file()
@@ -90,7 +135,19 @@ impl BlobCache {
     }
 
     /// Stores content read from `reader` as `id`; see [`BlobCache::insert_file`].
-    pub fn insert_reader(&self, id: &ObjectId, mut reader: impl Read) -> io::Result<PathBuf> {
+    pub fn insert_reader(&self, id: &ObjectId, reader: impl Read) -> io::Result<PathBuf> {
+        let dest = self.store_reader(id, reader)?;
+        self.evict()?;
+        Ok(dest)
+    }
+
+    /// Copies the file at `src` into the cache as `id` without evicting, for a caller that
+    /// stores many entries and calls [`BlobCache::evict`] once at the end.
+    pub fn store_file(&self, id: &ObjectId, src: &Path) -> io::Result<PathBuf> {
+        self.store_reader(id, File::open(src)?)
+    }
+
+    fn store_reader(&self, id: &ObjectId, mut reader: impl Read) -> io::Result<PathBuf> {
         let dest = self.entry_path(id);
         if dest.is_file() {
             return Ok(dest);
@@ -128,7 +185,6 @@ impl BlobCache {
             Err(e) if dest.is_file() => drop(e),
             Err(e) => return Err(e.error),
         }
-        self.evict()?;
         Ok(dest)
     }
 
@@ -142,13 +198,16 @@ impl BlobCache {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(EvictReport::default()),
             Err(e) => return Err(e),
         };
-        for shard in shards {
-            let shard = shard?;
-            if !shard.file_type()?.is_dir() {
+        // Other processes may add and remove entries meanwhile: whatever vanishes or cannot
+        // be removed is skipped.
+        for shard in shards.flatten() {
+            if !shard.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
-            for entry in fs::read_dir(shard.path())? {
-                let entry = entry?;
+            let Ok(files) = fs::read_dir(shard.path()) else {
+                continue;
+            };
+            for entry in files.flatten() {
                 let meta = match entry.metadata() {
                     Ok(m) if m.is_file() => m,
                     _ => continue,
@@ -156,7 +215,7 @@ impl BlobCache {
                 let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 if entry.file_name().to_string_lossy().starts_with(TMP_PREFIX) {
                     if now.duration_since(mtime).unwrap_or_default() > STALE_TMP {
-                        remove_if_exists(&entry.path())?;
+                        let _ = remove_if_exists(&entry.path());
                     }
                     continue;
                 }
@@ -177,7 +236,9 @@ impl BlobCache {
             if report.bytes_after <= self.cap {
                 break;
             }
-            remove_if_exists(&path)?;
+            if remove_if_exists(&path).is_err() {
+                continue;
+            }
             report.bytes_after -= len;
             report.removed += 1;
         }
@@ -237,5 +298,31 @@ mod tests {
         assert_eq!(cache.get(&id(&a)).unwrap(), None);
         assert!(!pa.exists());
         assert_eq!(cache.get(&id(b"never")).unwrap(), None);
+    }
+
+    #[test]
+    fn copy_out_checks_and_never_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = BlobCache::new(dir.path().join("cache"), DEFAULT_CACHE_CAP);
+        let data = b"shared content".to_vec();
+        let entry = cache.store_file(&id(&data), &{
+            let src = dir.path().join("src");
+            fs::write(&src, &data).unwrap();
+            src
+        });
+        let entry = entry.unwrap();
+        let dest = dir.path().join("out");
+        assert!(cache.copy_out(&id(&data), &dest).unwrap());
+        assert_eq!(fs::read(&dest).unwrap(), data);
+        // Changing the copy leaves the entry alone.
+        fs::write(&dest, b"changed by a build").unwrap();
+        assert_eq!(fs::read(&entry).unwrap(), data);
+
+        assert!(!cache.copy_out(&id(b"absent"), &dest).unwrap());
+        fs::write(&entry, b"bit rot").unwrap();
+        let dest2 = dir.path().join("out2");
+        assert!(!cache.copy_out(&id(&data), &dest2).unwrap());
+        assert!(!entry.exists());
+        assert!(!dest2.exists());
     }
 }

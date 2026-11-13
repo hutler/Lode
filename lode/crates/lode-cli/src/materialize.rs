@@ -19,17 +19,14 @@ use lode_workspace::scan::stat_for_row;
 use lode_workspace::{BlobCache, FileRow, Workspace};
 use serde_json::json;
 
+use crate::context::Ctx;
 use crate::error::{CliError, CliResult};
-use crate::output::Out;
 
 /// Parallel downloads.
 pub const PARALLEL_DOWNLOADS: usize = 8;
 
 /// Largest symlink target accepted.
 const MAX_SYMLINK: u64 = 64 * 1024;
-
-/// Default cap of the shared download cache (`LODE_CACHE_DIR`).
-const SHARED_CACHE_CAP: u64 = 10 * 1024 * 1024 * 1024;
 
 fn unsafe_path(path: &DepotPath, why: &str) -> CliError {
     CliError::failed("unsafe_path", format!("refusing to write {path}: {why}"))
@@ -189,13 +186,6 @@ pub struct Fetched {
     pub downloaded: u64,
 }
 
-/// The shared download cache, if `LODE_CACHE_DIR` names one.
-fn shared_cache() -> Option<BlobCache> {
-    std::env::var_os("LODE_CACHE_DIR")
-        .filter(|d| !d.is_empty())
-        .map(|d| BlobCache::new(PathBuf::from(d), SHARED_CACHE_CAP))
-}
-
 /// Test hook: exit abruptly after placing this many files, as if killed.
 fn exit_after() -> Option<u64> {
     std::env::var("LODE_TEST_EXIT_AFTER_FILES")
@@ -226,17 +216,20 @@ fn already_there(ws: &Workspace, entry: &ManifestEntry) -> CliResult<bool> {
 
 /// Downloads and places `entries`, recording a row for each as soon as it is on disk, so
 /// an interrupted run resumes where it stopped. Entries already present are skipped.
+/// Content comes from the shared download cache when there is one (ARCHITECTURE §10.1),
+/// always copied, and what is downloaded is stored there.
 pub async fn fetch_entries(
     ws: &mut Workspace,
     client: &Client,
     depot: &str,
     entries: Vec<ManifestEntry>,
-    out: &Out,
+    ctx: &Ctx,
 ) -> CliResult<Fetched> {
+    let out = &ctx.out;
     let root = ws.root().to_path_buf();
     let tmp_dir = ws.layout().tmp();
     fs::create_dir_all(&tmp_dir)?;
-    let cache = shared_cache();
+    let cache: Option<BlobCache> = ctx.shared_cache()?;
     let mut todo: BTreeMap<ObjectId, Vec<ManifestEntry>> = BTreeMap::new();
     let mut links = Vec::new();
     let mut seen = HashSet::new();
@@ -312,28 +305,25 @@ pub async fn fetch_entries(
         let depot = depot.to_owned();
         async move {
             let tmp = tmp_dir.join(format!("{}-{}", id.to_hex(), std::process::id()));
-            let mut from_server = false;
+            // A cache problem never fails the sync: the blob is downloaded instead.
             let hit = match &cache {
-                Some(c) => c.get(&id)?,
-                None => None,
+                Some(c) => c.copy_out(&id, &tmp).unwrap_or_else(|e| {
+                    eprintln!("warning: shared cache: {e}");
+                    false
+                }),
+                None => false,
             };
-            match hit {
-                Some(cached) => {
-                    fs::copy(&cached, &tmp)?;
-                }
-                None => {
-                    // The manifest's size bounds what the server may send.
-                    let size = group.first().map_or(0, |e| e.size);
-                    client.download_blob_max(&depot, &id, &tmp, size).await?;
-                    from_server = true;
-                    if let Some(c) = &cache {
-                        if let Err(e) = c.insert_file(&id, &tmp) {
-                            eprintln!("warning: shared cache: {e}");
-                        }
+            if !hit {
+                // The manifest's size bounds what the server may send.
+                let size = group.first().map_or(0, |e| e.size);
+                client.download_blob_max(&depot, &id, &tmp, size).await?;
+                if let Some(c) = &cache {
+                    if let Err(e) = c.store_file(&id, &tmp) {
+                        eprintln!("warning: shared cache: {e}");
                     }
                 }
             }
-            Ok::<_, CliError>((tmp, group, from_server))
+            Ok::<_, CliError>((tmp, group, !hit))
         }
     }))
     .buffer_unordered(PARALLEL_DOWNLOADS);
@@ -358,5 +348,10 @@ pub async fn fetch_entries(
         }
     }
     progress.finish();
+    if let Some(c) = &cache {
+        if let Err(e) = c.evict() {
+            out.warn(format!("shared cache: {e}"));
+        }
+    }
     Ok(stats)
 }
