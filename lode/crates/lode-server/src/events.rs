@@ -125,7 +125,7 @@ impl Dispatcher {
                 self.backoff
                     .get(m.name())
                     .and_then(|b| b.until)
-                    .map_or(true, |t| t <= now)
+                    .is_none_or(|t| t <= now)
             })
             .cloned()
             .collect();

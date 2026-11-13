@@ -118,7 +118,7 @@ pub(crate) async fn authenticate(state: &AppState, token: &str) -> Result<Caller
             // An agent is disabled with its owner (SPEC §7.1).
             let owner_disabled = match principal.owner_id {
                 Some(o) if principal.kind == lode_meta::PrincipalKind::Agent => {
-                    tx.principal(o)?.map_or(true, |o| o.disabled)
+                    tx.principal(o)?.is_none_or(|o| o.disabled)
                 }
                 _ => false,
             };

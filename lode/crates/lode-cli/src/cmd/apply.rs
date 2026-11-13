@@ -136,7 +136,7 @@ impl Apply<'_> {
         };
         let root = ws.root().to_path_buf();
         if mine == Some(theirs) {
-            if row.as_ref().map_or(true, |r| r.state == FileState::Deleted) {
+            if row.as_ref().is_none_or(|r| r.state == FileState::Deleted) {
                 Self::put_row(ws, c, row)?;
             }
             return Ok(Outcome::Unchanged);

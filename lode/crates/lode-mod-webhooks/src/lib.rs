@@ -190,7 +190,7 @@ impl Webhooks {
             .await?;
         let due: Vec<Due> = heads
             .into_iter()
-            .filter(|d| d.next_attempt_at.map_or(true, |t| t <= now))
+            .filter(|d| d.next_attempt_at.is_none_or(|t| t <= now))
             .collect();
         let client = self.inner.client.as_ref();
         let outcomes = futures::future::join_all(due.iter().map(|d| attempt(client, d))).await;
@@ -501,7 +501,7 @@ fn check_url(url: &str, allow_http: bool) -> ApiResult<()> {
             )))
         }
     }
-    if parsed.host_str().map_or(true, str::is_empty) {
+    if parsed.host_str().is_none_or(str::is_empty) {
         return Err(ApiError::invalid_request("the URL has no host"));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {

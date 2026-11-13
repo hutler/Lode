@@ -210,7 +210,7 @@ fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRow> {
 pub fn in_chain(chain: &[HistorySegment], branch: BranchId, num: u64) -> bool {
     chain
         .iter()
-        .any(|seg| seg.branch_id == branch && seg.max_rev.map_or(true, |m| num <= m))
+        .any(|seg| seg.branch_id == branch && seg.max_rev.is_none_or(|m| num <= m))
 }
 
 fn collect<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>> {

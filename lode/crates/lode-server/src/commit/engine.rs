@@ -693,7 +693,7 @@ pub async fn check_change_set(
             let base = tx.revision(d, base_rev)?.filter(|r| {
                 r.num <= b.head_rev
                     && chain.iter().any(|seg| {
-                        seg.branch_id == r.branch_id && seg.max_rev.map_or(true, |m| r.num <= m)
+                        seg.branch_id == r.branch_id && seg.max_rev.is_none_or(|m| r.num <= m)
                     })
             });
             Ok(Some((b, base)))

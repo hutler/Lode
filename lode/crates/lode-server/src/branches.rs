@@ -312,7 +312,7 @@ async fn create(
             let chain = tx.branch_chain(src.id)?;
             let source = tx.revision(id, from_rev)?.filter(|r| {
                 chain.iter().any(|seg| {
-                    seg.branch_id == r.branch_id && seg.max_rev.map_or(true, |m| r.num <= m)
+                    seg.branch_id == r.branch_id && seg.max_rev.is_none_or(|m| r.num <= m)
                 }) && r.num <= src.head_rev
             });
             let Some(source) = source else {
