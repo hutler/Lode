@@ -294,7 +294,9 @@ async fn random_kills_converge() {
         // A fresh checkout, killed somewhere.
         let fresh = ws_for(&server);
         kill_after(&fresh, &["checkout", &url, "."], delay(&mut rng));
-        rerun(&fresh, &["checkout", &url, "."], &[]);
+        // A checkout that finished before the kill is a workspace already; the checks below
+        // show it is a complete one.
+        rerun(&fresh, &["checkout", &url, "."], &["already_a_workspace"]);
         clean_status(&fresh);
         assert_eq!(files(fresh.root()), files(ws.root()), "{ctx}: checkout");
     }
