@@ -18,9 +18,13 @@ use crate::materialize::remove_and_prune;
 pub struct RevertArgs {
     /// Files and directories to revert.
     pub paths: Vec<PathBuf>,
-    /// Revert every change in the workspace and clear all conflicts.
+    /// Revert every change in the workspace, clear all conflicts and abandon a pending merge.
     #[arg(long, conflicts_with = "paths")]
     pub all: bool,
+    /// Abandon the pending merge: the next commit does not record it. Files stay as they are
+    /// unless named or --all is given.
+    #[arg(long)]
+    pub merge: bool,
 }
 
 /// `lode clean` options.
@@ -38,13 +42,30 @@ pub struct CleanArgs {
 
 /// Runs `lode revert`.
 pub async fn revert(ctx: &Ctx, args: RevertArgs) -> CliResult<Value> {
-    if !args.all && args.paths.is_empty() {
+    if !args.all && !args.merge && args.paths.is_empty() {
         return Err(CliError::usage(
             "name the paths to revert, or pass --all to revert everything",
         ));
     }
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
+    let mut abandoned = Vec::new();
+    if args.all || args.merge {
+        abandoned = crate::cmd::merge::pending_merges(&ws)?;
+        crate::cmd::merge::set_pending_merges(&mut ws, &[])?;
+        for m in &abandoned {
+            ctx.out.line(format!(
+                "Abandoned the merge of {}",
+                crate::cmd::merge::describe(m)
+            ));
+        }
+        if args.merge && abandoned.is_empty() {
+            ctx.out.line("No merge is pending.");
+        }
+        if !args.all && args.paths.is_empty() {
+            return Ok(json!({ "reverted": [], "merges_abandoned": abandoned }));
+        }
+    }
     let paths = if args.all {
         Vec::new()
     } else {
@@ -95,7 +116,7 @@ pub async fn revert(ctx: &Ctx, args: RevertArgs) -> CliResult<Value> {
     if reverted.is_empty() {
         ctx.out.line("Nothing to revert.");
     }
-    Ok(json!({ "reverted": reverted }))
+    Ok(json!({ "reverted": reverted, "merges_abandoned": abandoned }))
 }
 
 /// What `clean` removes below `dir`: `files` that go, then directories that end up empty.

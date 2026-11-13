@@ -34,7 +34,7 @@ use lode_proto::commit::{CommitRequest, CommitResponse};
 use lode_proto::consts::{HEADER_ACCESS_EPOCH, MAX_MISSING_QUERY};
 use lode_proto::depot::{
     BranchList, BranchView, CreateBranchRequest, CreateDepotRequest, DepotList, DepotView,
-    MissingObjectsRequest, MissingObjectsResponse, PatchBranchRequest,
+    MergeInfo, MissingObjectsRequest, MissingObjectsResponse, PatchBranchRequest,
 };
 use lode_proto::locks::{LockList, LockRequest, LocksQuery, UnlockRequest, UnlockResponse};
 use lode_proto::read::{
@@ -448,6 +448,14 @@ impl Client {
             req,
         )
         .await
+    }
+
+    /// `GET /depots/{d}/branches/{b}/merge-info?source=`: the merge base for merging
+    /// `source` into `branch`, and the merges already recorded.
+    pub async fn merge_info(&self, depot: &str, branch: &str, source: &str) -> Result<MergeInfo> {
+        let mut url = self.url(&["depots", depot, "branches", branch, "merge-info"])?;
+        url.query_pairs_mut().append_pair("source", source);
+        self.json(Retry::Yes, Method::GET, url).await
     }
 
     // ---- content ----

@@ -266,6 +266,7 @@ percent-encoded (`release%2F1.0`).
 | `GET/POST/DELETE /tokens[/{id}]` | Own tokens |
 | `GET/POST /depots` | List; create (admin) |
 | `GET/POST /depots/{d}/branches` · `GET/PATCH …/{b}` | List, create, show, archive |
+| `GET /depots/{d}/branches/{b}/merge-info?source=<branch>` | Merging `source` into `b`: `{target, source, branch_point, merged: [{rev, from_rev, to_rev}], base, source_head, pending}`. `branch_point` is the newest revision both histories share; `merged` the ranges from `source` recorded in `b`'s history (§4.3); `base` the merge base of SPEC §5.4; `pending` how many source revisions come after it. Needs read on both branches |
 | `POST /depots/{d}/objects/missing` | `{ids}` → `{missing}`; at most 10,000 ids per call. Needs scope `write` or `shelve`, like upload, because the answer reveals whether content exists |
 | `PUT /depots/{d}/blobs/{id}` | Upload. Body is the raw content, optionally `Content-Encoding: zstd` |
 | `GET /depots/{d}/blobs/{id}` | Download; honours `Accept-Encoding: zstd`; supports `Range` on raw bytes only when stored uncompressed, otherwise full body |
@@ -813,9 +814,15 @@ Details of the client implementation:
 
 ### 10.5 Merge
 
-Compute the merge base (SPEC 5.4) from `rev_merge` data returned by the server, fetch the
-manifest diff `base → source`, and apply it to the workspace with the update algorithm. Record
-the range in workspace config; the next commit sends it as `merged_from`.
+Compute the merge base (SPEC 5.4) from `rev_merge` data returned by the server
+(`merge-info`), fetch the manifest diff `base → source` (and `source → base` for the base side
+of each changed path), and apply it to the workspace with the three-way rules `unshelve` uses:
+rows keep the workspace's base, so the result is ordinary local changes. Record the range in
+workspace config (`pending_merge`); the next commit sends it as `merged_from`, a shelve moves
+it into the shelf and `unshelve` brings it back. `-r N` uses the diff `parent(N) → N` and
+records `N..N`. Only ranges whose source is the merged branch count toward the base; content
+that reached the source through other merges is merged again, which three-way merging mostly
+absorbs.
 
 ## 11. Maintenance
 

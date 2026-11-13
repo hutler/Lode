@@ -206,6 +206,13 @@ fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRow> {
     })
 }
 
+/// Whether revision `num` of branch `branch` is in the history `chain`.
+pub fn in_chain(chain: &[HistorySegment], branch: BranchId, num: u64) -> bool {
+    chain
+        .iter()
+        .any(|seg| seg.branch_id == branch && seg.max_rev.map_or(true, |m| num <= m))
+}
+
 fn collect<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>> {
     Ok(rows.collect::<rusqlite::Result<Vec<T>>>()?)
 }
@@ -599,6 +606,61 @@ pub trait Reads {
                 _ => None,
             };
         }
+        Ok(out)
+    }
+
+    /// Merges from `source` recorded on revisions in the history `chain` (from
+    /// [`Reads::branch_chain`]), oldest first, each with the revision that recorded it.
+    fn merges_from(
+        &self,
+        depot: DepotId,
+        chain: &[HistorySegment],
+        source: BranchId,
+    ) -> Result<Vec<(u64, MergeRow)>> {
+        let mut st = self.db().prepare(
+            "SELECT m.rev, r.branch_id, m.from_rev, m.to_rev FROM rev_merge m \
+             JOIN revision r ON r.depot_id = m.depot_id AND r.num = m.rev \
+             WHERE m.depot_id = ?1 AND m.source_branch_id = ?2 ORDER BY m.rev, m.rowid",
+        )?;
+        let rows = st.query_map(params![depot.0, source.0], |r| {
+            Ok((
+                get_u64(r, 0)?,
+                BranchId(r.get(1)?),
+                MergeRow {
+                    source_branch_id: source,
+                    from_rev: get_u64(r, 2)?,
+                    to_rev: get_u64(r, 3)?,
+                },
+            ))
+        })?;
+        Ok(collect(rows)?
+            .into_iter()
+            .filter(|(rev, b, _)| in_chain(chain, *b, *rev))
+            .map(|(rev, _, m)| (rev, m))
+            .collect())
+    }
+
+    /// Numbers of the revisions in the history `chain` newer than `after`, oldest first.
+    fn chain_revs_after(
+        &self,
+        depot: DepotId,
+        chain: &[HistorySegment],
+        after: u64,
+    ) -> Result<Vec<u64>> {
+        let mut st = self.db().prepare(
+            "SELECT num FROM revision \
+             WHERE depot_id = ?1 AND branch_id = ?2 AND num > ?3 AND num <= ?4 ORDER BY num",
+        )?;
+        let mut out = Vec::new();
+        for seg in chain {
+            let cap = seg.max_rev.map(to_i64).transpose()?.unwrap_or(i64::MAX);
+            let rows = st.query_map(
+                params![depot.0, seg.branch_id.0, to_i64(after)?, cap],
+                |r| get_u64(r, 0),
+            )?;
+            out.extend(collect(rows)?);
+        }
+        out.sort_unstable();
         Ok(out)
     }
 

@@ -637,7 +637,7 @@ pub(crate) async fn sync(
 }
 
 /// Fails unless revision `rev` is in the history of `branch`.
-async fn check_on_branch(
+pub(crate) async fn check_on_branch(
     client: &lode_client::Client,
     depot: &str,
     branch: &str,

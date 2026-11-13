@@ -85,6 +85,8 @@ enum Command {
     Branch(cmd::branch::BranchArgs),
     /// Move the workspace to another branch.
     Switch(cmd::branch::SwitchArgs),
+    /// Merge another branch into the workspace.
+    Merge(cmd::merge::MergeArgs),
     /// Settle a conflict left by an update.
     Resolve(cmd::update::ResolveArgs),
     /// Take exclusive locks on files.
@@ -148,6 +150,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Update(a)) => cmd::update::update(&ctx, a).await,
         Some(Command::Branch(a)) => cmd::branch::branch(&ctx, a).await,
         Some(Command::Switch(a)) => cmd::branch::switch(&ctx, a).await,
+        Some(Command::Merge(a)) => cmd::merge::merge(&ctx, a).await,
         Some(Command::Resolve(a)) => cmd::update::resolve(&ctx, a).await,
         Some(Command::Lock(a)) => cmd::locks::lock(&ctx, a).await,
         Some(Command::Unlock(a)) => cmd::locks::unlock(&ctx, a).await,

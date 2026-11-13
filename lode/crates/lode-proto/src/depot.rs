@@ -113,3 +113,35 @@ pub struct PutBlobResponse {
     /// False if the blob was already there.
     pub created: bool,
 }
+
+/// A merge already recorded into the target branch's history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergedRange {
+    /// Revision that recorded it.
+    pub rev: u64,
+    /// First merged source revision.
+    pub from_rev: u64,
+    /// Last merged source revision.
+    pub to_rev: u64,
+}
+
+/// `GET /depots/{d}/branches/{b}/merge-info?source=<branch>`: what merging `source` into the
+/// branch would start from (SPEC §5.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeInfo {
+    /// The branch merged into.
+    pub target: String,
+    /// The branch merged from.
+    pub source: String,
+    /// Newest revision both branches share in their history.
+    pub branch_point: u64,
+    /// Merges from `source` recorded in the target's history, oldest first.
+    pub merged: Vec<MergedRange>,
+    /// The merge base: the highest source revision up to which every source revision after
+    /// the branch point is merged, or the branch point.
+    pub base: u64,
+    /// Head of the source branch.
+    pub source_head: u64,
+    /// How many source revisions after the base a merge would bring.
+    pub pending: u64,
+}

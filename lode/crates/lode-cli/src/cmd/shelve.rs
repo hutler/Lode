@@ -6,27 +6,23 @@
 //! unless `--keep`. `unshelve` applies a shelf's changes on top of the workspace with the merge
 //! and conflict handling of `update`, the shelf's base content being the common ancestor.
 
-use std::collections::BTreeMap;
-use std::fs;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use lode_client::Client;
-use lode_core::{
-    validate_changes, Change, ChangeAction, DepotPath, EntryKind, LodeConfig, ObjectId,
-};
+use lode_core::{validate_changes, Change, ChangeAction};
 use lode_proto::shelves::{
     CreateShelfRequest, ShelfState, ShelfView, ShelvesQuery, SubmitShelfRequest, UpdateShelfRequest,
 };
-use lode_workspace::classify::{class_by_config, class_by_content};
 use lode_workspace::db::keys;
-use lode_workspace::{ConflictRow, FileClass, FileRow, FileState, ScanEntry, Workspace};
+use lode_workspace::Workspace;
 use serde_json::{json, Value};
 
+use crate::cmd::apply::{apply_changes, count, refuse_conflicts, Outcome};
 use crate::cmd::commit::{explain, gather, upload, Outgoing, PENDING_COMMIT};
-use crate::cmd::diff::TEXT_LIMIT;
 use crate::cmd::history::{format_time, who};
-use crate::cmd::update::{disk_id, local_config, relabel, write_through_tmp, UPDATE_REV};
+use crate::cmd::merge::{describe, pending_merges, set_pending_merges};
+use crate::cmd::update::UPDATE_REV;
 use crate::context::Ctx;
 use crate::error::{CliError, CliResult};
 use crate::local::{self, Bases, FROM_SHELF};
@@ -231,6 +227,13 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
         .filter(|d| !d.is_empty())
         .ok_or_else(|| CliError::usage("a shelf needs a description: pass -m"))?;
 
+    let merges = pending_merges(&t.ws)?;
+    if !merges.is_empty() && (!paths.is_empty() || list_id.is_some()) {
+        return Err(CliError::usage(format!(
+            "the merge of {} must be shelved whole: shelve without paths or -c",
+            describe(&merges[0])
+        )));
+    }
     let (out, _) = gather(ctx, &mut t.ws, &paths, list_id)?;
     if out.is_empty() {
         let msg = match &args.changelist {
@@ -254,7 +257,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
                     base_rev: head,
                     description,
                     changes,
-                    merged_from: vec![],
+                    merged_from: merges.clone(),
                     provenance: ctx.g.provenance(),
                 },
             )
@@ -270,7 +273,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
                         base_rev: head,
                         description,
                         changes,
-                        merged_from: vec![],
+                        merged_from: merges.clone(),
                         provenance: ctx.g.provenance(),
                     },
                 )
@@ -283,6 +286,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
     };
     if !args.keep {
         discard(ctx, &mut t.ws, &out).await?;
+        set_pending_merges(&mut t.ws, &[])?;
     }
     let n = out.len();
     ctx.out.line(format!(
@@ -308,6 +312,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
         "uploaded": uploaded,
         "kept": args.keep,
         "updated": args.update.is_some(),
+        "merged_from": merges,
     }))
 }
 
@@ -542,246 +547,12 @@ pub(crate) fn print_shelf(ctx: &Ctx, v: &ShelfView) {
     }
 }
 
-/// What `unshelve` did to a path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Outcome {
-    Applied,
-    Merged,
-    Conflicted,
-    Unchanged,
-    Skipped,
-}
-
-impl Outcome {
-    fn name(self) -> &'static str {
-        match self {
-            Outcome::Applied => "applied",
-            Outcome::Merged => "merged",
-            Outcome::Conflicted => "conflicted",
-            Outcome::Unchanged => "unchanged",
-            Outcome::Skipped => "skipped",
-        }
-    }
-}
-
-struct Apply<'a> {
-    bases: Bases<'a>,
-    config: Option<LodeConfig>,
-    shelf: u64,
-}
-
-impl Apply<'_> {
-    fn is_text(&self, path: &DepotPath, sides: &[&[u8]]) -> bool {
-        match class_by_config(path, self.config.as_ref()) {
-            Some(c) => c == FileClass::Text,
-            None => sides
-                .iter()
-                .all(|s| s.len() as u64 <= TEXT_LIMIT && class_by_content(s) == FileClass::Text),
-        }
-    }
-
-    /// A row for `c.path` now that the shelf's content is on disk: the row it had (deleted
-    /// no more), or an add.
-    fn put_row(ws: &mut Workspace, c: &Change, row: Option<FileRow>) -> CliResult<()> {
-        let r = match row {
-            Some(mut r) => {
-                if r.state == FileState::Deleted {
-                    r.state = FileState::Normal;
-                }
-                r.mtime_ns = 0;
-                r
-            }
-            None => {
-                let mut r = crate::cmd::files::added_row(&ws.local_path(&c.path), c.path.clone())?;
-                r.copy_from = c.copy_from.clone();
-                r.mtime_ns = 0;
-                r
-            }
-        };
-        ws.db_mut().write(|tx| tx.put_file(&r))?;
-        Ok(())
-    }
-
-    /// Records a conflict: the row keeps the workspace's base, the conflict holds the shelf's
-    /// side.
-    fn conflict(
-        &self,
-        ws: &mut Workspace,
-        c: &Change,
-        row: Option<FileRow>,
-        mine_id: Option<ObjectId>,
-    ) -> CliResult<Outcome> {
-        let mut r = row.unwrap_or(FileRow {
-            path: c.path.clone(),
-            base_id: None,
-            kind: c.kind.unwrap_or(EntryKind::File),
-            executable: c.executable,
-            size: 0,
-            mtime_ns: 0,
-            state: FileState::Added,
-            copy_from: c.copy_from.clone(),
-            changelist_id: None,
-            lock_held: false,
-        });
-        r.state = FileState::Conflicted;
-        r.mtime_ns = 0;
-        let conflict = ConflictRow {
-            path: c.path.clone(),
-            base_id: c.base_id,
-            theirs_id: c.new_id,
-            theirs_rev: FROM_SHELF,
-            mine_id,
-        };
-        ws.db_mut().write(|tx| {
-            tx.put_file(&r)?;
-            tx.put_conflict(&conflict)
-        })?;
-        Ok(Outcome::Conflicted)
-    }
-
-    /// An add or modify: the shelf has `new_id` at the path.
-    async fn put(
-        &mut self,
-        ws: &mut Workspace,
-        c: &Change,
-        e: Option<&ScanEntry>,
-    ) -> CliResult<Outcome> {
-        let Some(theirs) = c.new_id else {
-            return Ok(Outcome::Unchanged);
-        };
-        let kind = c.kind.unwrap_or(EntryKind::File);
-        let row = e.and_then(|e| e.row.clone());
-        let mine = match e {
-            Some(e) => disk_id(ws, e)?,
-            None => None,
-        };
-        let root = ws.root().to_path_buf();
-        if mine == Some(theirs) {
-            if row.as_ref().map_or(true, |r| r.state == FileState::Deleted) {
-                Self::put_row(ws, c, row)?;
-            }
-            return Ok(Outcome::Unchanged);
-        }
-        // Nothing changed here since the shelf's base (or nothing is here at all).
-        if mine == c.base_id {
-            self.bases
-                .place(&root, &c.path, &theirs, kind, c.executable)
-                .await?;
-            Self::put_row(ws, c, row)?;
-            return Ok(Outcome::Applied);
-        }
-        let Some(disk) = e.and_then(|e| e.disk.as_ref()) else {
-            // Deleted here, changed on the shelf.
-            return self.conflict(ws, c, row, None);
-        };
-        let local = ws.local_path(&c.path);
-        let small = disk.size <= TEXT_LIMIT && c.size.unwrap_or(0) <= TEXT_LIMIT;
-        if kind == EntryKind::File && disk.kind == EntryKind::File && small {
-            let base = match c.base_id {
-                Some(b) => self.bases.read(&b).await?,
-                None => Vec::new(),
-            };
-            let their_bytes = self.bases.read(&theirs).await?;
-            let mine_bytes = fs::read(&local)?;
-            if self.is_text(&c.path, &[&base, &mine_bytes, &their_bytes]) {
-                let mut opts = diffy::MergeOptions::new();
-                opts.set_conflict_style(diffy::ConflictStyle::Merge)
-                    .set_incomplete_hunk_style(diffy::IncompleteHunkStyle::Git);
-                return match opts.merge_bytes(&base, &mine_bytes, &their_bytes) {
-                    Ok(merged) => {
-                        write_through_tmp(ws, &c.path, &merged, c.executable)?;
-                        Self::put_row(ws, c, row)?;
-                        Ok(Outcome::Merged)
-                    }
-                    Err(conflicted) => {
-                        let mine_id = lode_core::blob_id(&mine_bytes[..])?;
-                        let keep = local::mine_path(ws, &mine_id);
-                        fs::create_dir_all(ws.layout().conflicts())?;
-                        if !keep.exists() {
-                            fs::write(&keep, &mine_bytes)?;
-                        }
-                        let label = format!("shelf {}", self.shelf);
-                        write_through_tmp(
-                            ws,
-                            &c.path,
-                            &relabel(conflicted, &label),
-                            disk.executable,
-                        )?;
-                        self.conflict(ws, c, row, Some(mine_id))
-                    }
-                };
-            }
-        }
-        // Binary or a symlink: keep the local file, put the shelf's beside it.
-        if kind == EntryKind::File {
-            let content = self.bases.read(&theirs).await?;
-            fs::write(local::theirs_path(&local, FROM_SHELF), content)?;
-        }
-        self.conflict(ws, c, row, None)
-    }
-
-    /// A delete: the shelf removes the path.
-    fn delete(
-        &mut self,
-        ws: &mut Workspace,
-        c: &Change,
-        e: Option<&ScanEntry>,
-    ) -> CliResult<Outcome> {
-        let Some(row) = e.and_then(|e| e.row.clone()) else {
-            return Ok(Outcome::Unchanged);
-        };
-        let mine = match e {
-            Some(e) => disk_id(ws, e)?,
-            None => None,
-        };
-        let gone = |ws: &mut Workspace, row: FileRow| -> CliResult<()> {
-            if row.base_id.is_none() {
-                ws.db_mut().write(|tx| tx.remove_file(&row.path))?;
-            } else {
-                let mut r = row;
-                r.state = FileState::Deleted;
-                r.mtime_ns = 0;
-                ws.db_mut().write(|tx| tx.put_file(&r))?;
-            }
-            Ok(())
-        };
-        if mine.is_none() {
-            if row.state == FileState::Deleted {
-                return Ok(Outcome::Unchanged);
-            }
-            gone(ws, row)?;
-            return Ok(Outcome::Applied);
-        }
-        if mine == c.base_id {
-            remove_and_prune(ws.root(), &c.path)?;
-            gone(ws, row)?;
-            return Ok(Outcome::Applied);
-        }
-        // Changed here, deleted on the shelf: the local file stays.
-        self.conflict(ws, c, Some(row), None)
-    }
-}
-
 /// Runs `lode unshelve`.
 pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> CliResult<Value> {
     let mut t = open(ctx)?;
     let _lock = t.ws.lock()?;
     refuse_unfinished(&t.ws)?;
-    let conflicts = t.ws.db().conflicts()?;
-    if !conflicts.is_empty() {
-        let paths: Vec<String> = conflicts
-            .iter()
-            .map(|c| c.path.as_str().to_owned())
-            .collect();
-        return Err(CliError::failed(
-            "conflicted",
-            format!(
-                "resolve these conflicts first (`lode resolve`): {}",
-                paths.join(", ")
-            ),
-        )
-        .with_details(json!({ "paths": paths })));
-    }
+    refuse_conflicts(&t.ws)?;
     let shelf = get(&t, args.id, false).await?;
     if shelf.state == ShelfState::Deleted {
         return Err(CliError::failed(
@@ -789,34 +560,30 @@ pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> CliResult<Value> {
             format!("shelf {} was deleted", shelf.id),
         ));
     }
+    if !shelf.merged_from.is_empty() {
+        if let Some(m) = pending_merges(&t.ws)?.first() {
+            return Err(CliError::failed(
+                "merge_pending",
+                format!(
+                    "the shelf carries a merge, and the merge of {} is pending here; commit or abandon it first",
+                    describe(m)
+                ),
+            ));
+        }
+    }
     let changes = shelf.changes.clone().unwrap_or_default();
-    let view = t.ws.view_spec()?.compile()?;
-    let paths: Vec<DepotPath> = changes.iter().map(|c| c.path.clone()).collect();
-    let report = local::scan(ctx, &mut t.ws, &paths, false)?;
-    let mut run = Apply {
-        bases: Bases::new(ctx, &t.ws)?,
-        config: local_config(&t.ws),
-        shelf: shelf.id,
-    };
-    let mut outcomes: BTreeMap<String, Outcome> = BTreeMap::new();
-    for c in &changes {
-        let outcome = if !view.contains(&c.path) {
-            Outcome::Skipped
-        } else {
-            let e = report.get(&c.path);
-            match c.action {
-                ChangeAction::Delete => run.delete(&mut t.ws, c, e)?,
-                ChangeAction::Add | ChangeAction::Modify => run.put(&mut t.ws, c, e).await?,
-            }
-        };
-        outcomes.insert(c.path.as_str().to_owned(), outcome);
+    let outcomes = apply_changes(
+        ctx,
+        &mut t.ws,
+        &changes,
+        format!("shelf {}", shelf.id),
+        FROM_SHELF,
+    )
+    .await?;
+    if !shelf.merged_from.is_empty() {
+        set_pending_merges(&mut t.ws, &shelf.merged_from)?;
     }
-    crate::cmd::locks::protect(&t.ws, &paths)?;
-
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for o in outcomes.values() {
-        *counts.entry(o.name()).or_default() += 1;
-    }
+    let counts = count(&outcomes);
     for (p, o) in &outcomes {
         if *o != Outcome::Applied {
             ctx.out.line(format!("{:<10} {p}", o.name()));
@@ -833,6 +600,12 @@ pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> CliResult<Value> {
             summary.join(", ")
         }
     ));
+    for m in &shelf.merged_from {
+        ctx.out.line(format!(
+            "The shelf carries the merge of {}; the next commit records it.",
+            describe(m)
+        ));
+    }
     if counts.contains_key("conflicted") {
         ctx.out
             .line("Resolve conflicts with `lode resolve <path> --mine|--theirs|--merged`.");
@@ -846,5 +619,6 @@ pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> CliResult<Value> {
         "version": shelf.version,
         "files": files,
         "counts": counts,
+        "merged_from": shelf.merged_from,
     }))
 }

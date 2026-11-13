@@ -21,7 +21,7 @@ use tokio::sync::Semaphore;
 
 pub use error::{MetaError, Result};
 pub use migrate::{schema_version, Migration, MigrationSet, CORE_MIGRATIONS};
-pub use queries::Reads;
+pub use queries::{in_chain, Reads};
 pub use rows::*;
 
 /// Settings for [`MetaStore::open`].

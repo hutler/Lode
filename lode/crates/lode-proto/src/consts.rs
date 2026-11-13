@@ -66,6 +66,8 @@ pub mod paths {
     pub const BRANCHES: &str = "/api/v1/depots/{d}/branches";
     /// `GET` and `PATCH` one branch.
     pub const BRANCH: &str = "/api/v1/depots/{d}/branches/{b}";
+    /// `GET` merge base and recorded merges from `?source=` (SPEC §5.4).
+    pub const MERGE_INFO: &str = "/api/v1/depots/{d}/branches/{b}/merge-info";
     /// `POST` which of these objects are missing.
     pub const OBJECTS_MISSING: &str = "/api/v1/depots/{d}/objects/missing";
     /// `PUT` and `GET` a blob.

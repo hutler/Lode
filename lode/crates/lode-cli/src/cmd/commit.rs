@@ -21,6 +21,7 @@ use lode_workspace::{FileRow, FileState, Status, Workspace};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::cmd::merge::{describe, pending_merges, PENDING_MERGE};
 use crate::context::Ctx;
 use crate::error::{CliError, CliResult, Exit};
 use crate::local;
@@ -270,6 +271,9 @@ fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> CliResult<()> {
             if tx.changelist_size(*id)? == 0 {
                 tx.delete_changelist(*id)?;
             }
+        }
+        if !p.request.merged_from.is_empty() {
+            tx.remove_config(PENDING_MERGE)?;
         }
         tx.remove_config(PENDING_COMMIT)
     })?;
@@ -529,8 +533,15 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             Ok(())
         })?;
     }
+    let merges = pending_merges(&ws)?;
+    if !merges.is_empty() && (!paths.is_empty() || list_id.is_some()) {
+        return Err(CliError::usage(format!(
+            "the merge of {} must be committed whole: commit without paths or -c",
+            describe(&merges[0])
+        )));
+    }
     let (out, lists) = gather(ctx, &mut ws, &paths, list_id)?;
-    if out.is_empty() {
+    if out.is_empty() && merges.is_empty() {
         let msg = match &args.changelist {
             Some(n) => format!("nothing to commit in changelist {n}"),
             None => "nothing to commit".to_owned(),
@@ -553,7 +564,13 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
     let default_msg = list
         .as_ref()
         .and_then(|l| l.as_ref())
-        .map(|c| c.description.clone());
+        .map(|c| c.description.clone())
+        .or_else(|| {
+            (!merges.is_empty()).then(|| {
+                let names: Vec<String> = merges.iter().map(describe).collect();
+                format!("Merge {}", names.join(", ").replace('`', ""))
+            })
+        });
     let msg = message(ctx, &ws, &args, &summary, default_msg.as_deref())?;
 
     let uploaded = upload(ctx, &client, &depot, &out).await?;
@@ -563,7 +580,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             request_id: uuid::Uuid::new_v4().to_string(),
             message: msg,
             changes,
-            merged_from: vec![],
+            merged_from: merges,
             provenance: ctx.g.provenance(),
             extensions: if args.keep_locks {
                 [(KEEP_LOCKS.to_owned(), Value::Bool(true))].into()

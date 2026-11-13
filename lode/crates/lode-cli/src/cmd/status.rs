@@ -25,7 +25,7 @@ the server will refuse to commit it until you `lode lock` it. A copied or moved 
 its origin. Files in a changelist are listed after the others, under a heading per
 changelist (see `lode changelist`).
 
-With --json: {\"ok\":true,\"files\":[{\"path\",\"status\",\"copy_from\":{\"path\",\"rev\"}|null,
+With --json: {\"ok\":true,\"branch\",\"rev\",\"merges\":[{\"branch\",\"from_rev\",\"to_rev\"}],\"files\":[{\"path\",\"status\",\"copy_from\":{\"path\",\"rev\"}|null,
 \"moved\":bool,\"changelist\":name|null,\"locked\":bool,\"needs_lock\":bool}],
 \"invalid\":[{\"local\",\"reason\"}]}.
 `status` is one of modified, added, deleted, missing, conflicted, untracked.")]
@@ -74,6 +74,13 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
     let rev = ws.db().config_u64(lode_workspace::db::keys::SYNCED_REV)?;
     if let (Some(b), Some(r)) = (&branch, rev) {
         ctx.out.line(format!("On branch {b} at r{r}"));
+    }
+    let merges = crate::cmd::merge::pending_merges(&ws)?;
+    for m in &merges {
+        ctx.out.line(format!(
+            "Merging {} (commit to record it, `lode revert --merge` to abandon it)",
+            crate::cmd::merge::describe(m)
+        ));
     }
 
     let mut files = Vec::new();
@@ -146,5 +153,11 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
         .iter()
         .map(|i| json!({ "local": i.local, "reason": i.reason }))
         .collect();
-    Ok(json!({ "branch": branch, "rev": rev, "files": files, "invalid": invalid }))
+    Ok(json!({
+        "branch": branch,
+        "rev": rev,
+        "merges": merges,
+        "files": files,
+        "invalid": invalid,
+    }))
 }

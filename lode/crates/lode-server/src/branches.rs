@@ -8,7 +8,8 @@ use lode_core::ErrorCode;
 use lode_meta::{BranchRow, BranchState, MetaError, PrincipalKind, Reads, RevisionRow};
 use lode_proto::consts::paths;
 use lode_proto::depot::{
-    BranchList, BranchPoint, BranchView, CreateBranchRequest, PatchBranchRequest,
+    BranchList, BranchPoint, BranchView, CreateBranchRequest, MergeInfo, MergedRange,
+    PatchBranchRequest,
 };
 use serde_json::json;
 
@@ -27,6 +28,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route(paths::BRANCHES, get(list).post(create))
         .route(paths::BRANCH, get(show).patch(patch))
+        .route(paths::MERGE_INFO, get(merge_info))
 }
 
 /// Checks a new branch name: `[A-Za-z0-9._/-]`, at most 200 characters, no empty, `.` or
@@ -154,6 +156,106 @@ async fn show(
         .cloned()
         .ok_or_else(|| ApiError::not_found(format!("no branch `{branch}`")))?;
     Ok(Json(views(&all, std::iter::once(found)).remove(0)))
+}
+
+async fn merge_info(
+    State(state): State<AppState>,
+    caller: Caller,
+    ApiPath((depot, target)): ApiPath<(String, String)>,
+    q: ApiQuery,
+) -> ApiResult<Json<MergeInfo>> {
+    caller.require_scope(SCOPE_READ)?;
+    let source = q
+        .get("source")
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| ApiError::invalid_request("`source` is required"))?;
+    let (d, access) = resolve(&state, &caller, &depot).await?;
+    for b in [&target, &source] {
+        if !access.branch(b).reads_anything() {
+            return Err(ApiError::not_found(format!("no branch `{b}`")));
+        }
+    }
+    if target == source {
+        return Err(ApiError::invalid_request(
+            "a branch cannot be merged into itself",
+        ));
+    }
+    let id = d.id;
+    let info = state
+        .meta()
+        .read(move |tx| {
+            let (Some(t), Some(s)) = (tx.branch(id, &target)?, tx.branch(id, &source)?) else {
+                return Ok(None);
+            };
+            let t_chain = tx.branch_chain(t.id)?;
+            let s_chain = tx.branch_chain(s.id)?;
+            // The newest shared stretch of history; its end is the branch point.
+            let point = t_chain.iter().find_map(|ts| {
+                s_chain
+                    .iter()
+                    .find(|ss| ss.branch_id == ts.branch_id)
+                    .map(|ss| match (ts.max_rev, ss.max_rev) {
+                        (Some(a), Some(b)) => a.min(b),
+                        (Some(a), None) | (None, Some(a)) => a,
+                        (None, None) => 0,
+                    })
+            });
+            let merged = tx.merges_from(id, &t_chain, s.id)?;
+            let revs = match point {
+                Some(p) => tx.chain_revs_after(id, &s_chain, p)?,
+                None => Vec::new(),
+            };
+            Ok(Some((t, s, point, merged, revs)))
+        })
+        .await?;
+    let Some((t, s, point, merged, revs)) = info else {
+        return Err(ApiError::not_found("no such branch"));
+    };
+    let Some(point) = point else {
+        return Err(ApiError::invalid_request(format!(
+            "`{}` and `{}` share no history",
+            s.name, t.name
+        )));
+    };
+    Ok(Json(merge_base(
+        &t.name, &s.name, point, s.head_rev, &merged, &revs,
+    )))
+}
+
+/// SPEC §5.4: the base is the highest source revision `R` such that every source revision
+/// after the branch point up to `R` is inside a recorded range; the branch point otherwise.
+fn merge_base(
+    target: &str,
+    source: &str,
+    point: u64,
+    source_head: u64,
+    merged: &[(u64, lode_meta::MergeRow)],
+    source_revs: &[u64],
+) -> MergeInfo {
+    let covered = |r: u64| merged.iter().any(|(_, m)| m.from_rev <= r && r <= m.to_rev);
+    let done = source_revs.iter().take_while(|r| covered(**r)).count();
+    let base = if done == 0 {
+        point
+    } else {
+        source_revs[done - 1]
+    };
+    MergeInfo {
+        target: target.to_owned(),
+        source: source.to_owned(),
+        branch_point: point,
+        merged: merged
+            .iter()
+            .map(|(rev, m)| MergedRange {
+                rev: *rev,
+                from_rev: m.from_rev,
+                to_rev: m.to_rev,
+            })
+            .collect(),
+        base,
+        source_head,
+        pending: (source_revs.len() - done) as u64,
+    }
 }
 
 enum Created {
@@ -316,4 +418,36 @@ async fn patch(
         state.outbox_notify().notify_one();
     }
     Ok(Json(views(&all, std::iter::once(row)).remove(0)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_base;
+    use lode_meta::{BranchId, MergeRow};
+
+    fn m(from_rev: u64, to_rev: u64) -> (u64, MergeRow) {
+        (
+            100,
+            MergeRow {
+                source_branch_id: BranchId(2),
+                from_rev,
+                to_rev,
+            },
+        )
+    }
+
+    #[test]
+    fn base_follows_the_covered_prefix() {
+        let revs = [5, 7, 9, 12];
+        let none = merge_base("main", "feat", 3, 12, &[], &revs);
+        assert_eq!((none.base, none.pending), (3, 4));
+        let some = merge_base("main", "feat", 3, 12, &[m(4, 9)], &revs);
+        assert_eq!((some.base, some.pending), (9, 1));
+        // A pick of 12 alone leaves the gap at 5..9: the base stays at the branch point.
+        let gap = merge_base("main", "feat", 3, 12, &[m(12, 12)], &revs);
+        assert_eq!((gap.base, gap.pending), (3, 4));
+        let all = merge_base("main", "feat", 3, 12, &[m(4, 9), m(10, 12)], &revs);
+        assert_eq!((all.base, all.pending), (12, 0));
+        assert_eq!(all.merged.len(), 2);
+    }
 }

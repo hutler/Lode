@@ -79,6 +79,7 @@ distinct blobs fetched from the server.
 {
   "branch": "main",
   "rev": 12,
+  "merges": [ { "branch": "feat", "from_rev": 8, "to_rev": 11 } ],
   "files": [
     { "path": "c/2.txt", "status": "added", "copy_from": { "path": "a/2.txt", "rev": 7 },
       "moved": true, "changelist": null, "locked": false, "needs_lock": false }
@@ -90,6 +91,7 @@ distinct blobs fetched from the server.
 Only changed paths are listed. `moved` is true when the origin is deleted in the same change.
 `locked` is true when this workspace holds the file's lock; `needs_lock` is true for a changed
 file that matches `[locks].required` and is not locked here (the commit would be refused).
+`merges` lists the merge waiting for the next commit (`lode merge`), empty when there is none.
 
 ### `lode add <paths>`
 
@@ -103,9 +105,12 @@ file that matches `[locks].required` and is not locked here (the commit would be
 
 `{ "moved": [ { "from", "to" } ] }` / `{ "copied": [ { "from", "to" } ] }`
 
-### `lode revert <paths> | --all`
+### `lode revert <paths> | --all | --merge`
 
-`{ "reverted": [paths] }`
+`{ "reverted": [paths], "merges_abandoned": [ { "branch", "from_rev", "to_rev" } ] }`
+
+`--merge` forgets the pending merge and leaves the files as they are (name paths too to revert
+them); `--all` reverts everything and forgets the merge as well.
 
 ### `lode clean [--ignored] [--dry-run] [paths]`
 
@@ -137,6 +142,10 @@ file that matches `[locks].required` and is not locked here (the commit would be
 `--keep-locks` keeps this workspace's locks on the committed files; without it they are
 released by the commit.
 
+With a merge pending the commit records it as `merged_from` and may have no file changes. It
+must then include everything: paths and `-c` are a usage error. The default message is
+`Merge <branch> r<from>..r<to>`.
+
 ### `lode lock <paths…> [-m COMMENT]` / `lode unlock <paths…> [--force]`
 
 `{ "locked": [paths] }` and `{ "released": [paths] }`. A lock is all or nothing: if any file
@@ -166,7 +175,11 @@ neither `-m` nor `-F` is given.
 
 ### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
 
-`{ "shelf": id, "version": n, "files": n, "uploaded": n, "kept": bool, "updated": bool }`
+`{ "shelf": id, "version": n, "files": n, "uploaded": n, "kept": bool, "updated": bool,
+"merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
+
+A pending merge goes into the shelf's `merged_from` (and leaves the workspace unless `--keep`);
+it must then be shelved whole, like a commit.
 
 The changes are uploaded and checked against the branch head like a commit (`out_of_date`
 means: run `lode update` first), then reverted in the workspace unless `--keep`. The
@@ -197,12 +210,14 @@ newest first, open shelves by default.
 {
   "shelf": 7, "version": 2,
   "files": [ { "path": "a.txt", "outcome": "merged" } ],
-  "counts": { "merged": 1 }
+  "counts": { "merged": 1 },
+  "merged_from": []
 }
 ```
 
 Outcomes: `applied`, `merged`, `conflicted`, `unchanged` (already as on the shelf), `skipped`
-(outside the view). A conflict is settled with `lode resolve`; `--theirs` takes the shelf's
+(outside the view). A shelf that carries a merge makes it pending again here, and is refused
+(`merge_pending`) while another merge is pending. A conflict is settled with `lode resolve`; `--theirs` takes the shelf's
 side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
 
 ### `lode update [-r REV]`
@@ -235,6 +250,31 @@ an update carries them; a switch compares the target's full manifest with the wo
 it is right after commits too. An interrupted switch is finished by `lode switch` to the same
 branch or `lode update`. `update` prints `"branch"`, `"switched_from": null` and
 `"locks_left": []` too.
+
+### `lode merge <branch> [-r REV]`
+
+```json
+{
+  "source": "feat", "from_rev": 8, "to_rev": 11, "base": 7, "nothing_to_do": false,
+  "files": [ { "path": "a.txt", "outcome": "merged" } ],
+  "counts": { "merged": 1 }
+}
+```
+
+Applies the source branch's changes from the merge base (`base`, SPEC §5.4) to its head, as
+`unshelve` applies a shelf: outcomes `applied`, `merged`, `conflicted`, `unchanged`, `skipped`.
+A binary conflict leaves the source's content in `<file>.theirs-r<to_rev>`; conflict markers
+name it `<branch> r<to_rev>`. The range `from_rev..to_rev` is kept until the next commit
+records it (see `lode status`, `lode revert --merge`). With nothing new on the source,
+`nothing_to_do` is true and `from_rev`/`to_rev` are null. `-r REV` applies one revision's
+change (`parent → REV`) and records `REV..REV`.
+
+Refused with `conflicted` while conflicts remain, `merge_pending` while a merge is not yet
+committed, and `pending_commit`/`update_incomplete` like `update`.
+
+Known limit: after a single-revision pick a later full merge starts from the base before the
+gap and applies the picked change again. Usually that is `unchanged`; if the file changed
+since, it can conflict.
 
 ### `lode resolve <paths> --mine|--theirs|--merged`
 

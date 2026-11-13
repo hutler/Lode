@@ -236,7 +236,11 @@ impl Worker {
                 if !paths.is_empty() && i.all {
                     return Err(CliError::usage("pass `paths` or `all`, not both"));
                 }
-                let args = cmd::revert::RevertArgs { paths, all: i.all };
+                let args = cmd::revert::RevertArgs {
+                    paths,
+                    all: i.all,
+                    merge: false,
+                };
                 cmd::revert::revert(&ctx, args).await
             }
             "update" => {
