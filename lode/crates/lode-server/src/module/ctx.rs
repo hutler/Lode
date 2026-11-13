@@ -259,6 +259,17 @@ impl Depots<'_> {
         .await
     }
 
+    /// The blame of a text file at revision `rev`, as `GET /blame` returns it to `caller`.
+    pub async fn blame(
+        &self,
+        caller: &Caller,
+        depot: &DepotRow,
+        rev: u64,
+        path: &DepotPath,
+    ) -> ApiResult<lode_proto::read::BlameView> {
+        read::blame(self.state, caller, depot, rev, path).await
+    }
+
     /// One revision, as `GET /revisions/{n}` returns it to `caller`.
     pub async fn revision(
         &self,

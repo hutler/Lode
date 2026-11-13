@@ -109,6 +109,13 @@ pub(crate) fn core_tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
                        "description": "Most bytes of text to return (default 262144)" }
     });
     rev_props(&mut read_file_props);
+    let mut blame_props = json!({
+        "depot": depot_prop(),
+        "path": { "type": "string", "description": "Text file path, such as `src/main.rs`" },
+        "start_line": { "type": "integer", "minimum": 1, "description": "First line to return (1-based, default 1)" },
+        "end_line": { "type": "integer", "minimum": 1, "description": "Last line to return, inclusive" }
+    });
+    rev_props(&mut blame_props);
     vec![
         tool(
             ctx,
@@ -219,6 +226,17 @@ pub(crate) fn core_tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
         ),
         tool(
             ctx,
+            "blame",
+            "Which revision last changed each line of a text file, with the author, time and \
+             message summary of each revision named. History is followed through copies and \
+             renames and into the branch the file came from. At most 2000 lines per call; \
+             `next_line` is set when there are more. `truncated` means the history walk \
+             stopped early, so the oldest revision named may stand for older ones.",
+            object(blame_props, &["depot", "path"]),
+            blame,
+        ),
+        tool(
+            ctx,
             "search_history",
             "Find revisions whose message or changed paths contain some text (case does not \
              matter), newest first. Each hit names the paths that matched. Looks through up \
@@ -291,6 +309,17 @@ struct ReadFileInput {
     start_line: Option<u64>,
     end_line: Option<u64>,
     max_bytes: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BlameInput {
+    depot: String,
+    path: String,
+    rev: Option<u64>,
+    branch: Option<String>,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -638,6 +667,60 @@ async fn side(ctx: &ModuleCtx, depot: &DepotRow, id: &ObjectId, size: u64) -> Ap
         Ok(s) => Ok(Side::Text(s)),
         Err(_) => Ok(Side::Skipped("binary")),
     }
+}
+
+/// Most lines one `blame` call returns.
+const BLAME_LINES_MAX: usize = 2000;
+
+async fn blame(ctx: ModuleCtx, caller: Caller, input: BlameInput) -> ApiResult<Value> {
+    let (depot, _) = ctx.depots().resolve(&caller, &input.depot).await?;
+    let rev = pick_rev(
+        &ctx,
+        &caller,
+        &input.depot,
+        input.rev,
+        input.branch.as_deref(),
+    )
+    .await?;
+    let file_path = path(&input.path)?;
+    let start = input.start_line.unwrap_or(1).max(1);
+    if input.end_line.is_some_and(|e| e < start) {
+        return Err(ApiError::invalid_request(
+            "`end_line` is before `start_line`",
+        ));
+    }
+    let b = ctx.depots().blame(&caller, &depot, rev, &file_path).await?;
+    let total = b.lines.len();
+    let end = input
+        .end_line
+        .unwrap_or(total)
+        .min(total)
+        .min(start.saturating_add(BLAME_LINES_MAX - 1));
+    let lines: Vec<Value> = b
+        .lines
+        .iter()
+        .enumerate()
+        .skip(start - 1)
+        .take(end.saturating_sub(start - 1))
+        .map(|(i, l)| json!({ "line": i + 1, "rev": l.rev, "text": l.text }))
+        .collect();
+    let named: std::collections::BTreeSet<u64> =
+        lines.iter().filter_map(|l| l["rev"].as_u64()).collect();
+    let revisions: Vec<&lode_proto::read::BlameRevision> = b
+        .revisions
+        .iter()
+        .filter(|r| named.contains(&r.rev))
+        .collect();
+    let wanted_end = input.end_line.unwrap_or(total).min(total);
+    Ok(json!({
+        "path": b.path,
+        "rev": b.rev,
+        "total_lines": total,
+        "lines": lines,
+        "revisions": revisions,
+        "truncated": b.truncated,
+        "next_line": (end < wanted_end).then_some(end + 1),
+    }))
 }
 
 async fn diff(ctx: ModuleCtx, caller: Caller, input: DiffInput) -> ApiResult<Value> {

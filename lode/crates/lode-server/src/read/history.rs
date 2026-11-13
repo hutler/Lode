@@ -51,6 +51,31 @@ fn finish<T>(r: Result<T, Fail>) -> TxResult<T> {
     }
 }
 
+/// How a revision names a principal: name, kind, and an agent's owner.
+pub(super) fn principal_ref(tx: &dyn Reads, id: PrincipalId) -> Result<PrincipalRef, MetaError> {
+    Ok(match tx.principal(id)? {
+        Some(p) => {
+            let owner = match (p.kind, p.owner_id) {
+                (PrincipalKind::Agent, Some(o)) => tx.principal(o)?.map(|o| o.name),
+                _ => None,
+            };
+            PrincipalRef {
+                name: p.name,
+                kind: match p.kind {
+                    PrincipalKind::User => lode_proto::PrincipalKind::User,
+                    PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
+                },
+                owner,
+            }
+        }
+        None => PrincipalRef {
+            name: String::new(),
+            kind: lode_proto::PrincipalKind::User,
+            owner: None,
+        },
+    })
+}
+
 /// Caches what one listing needs repeatedly: branch names and access, principal names.
 struct Lookup<'a> {
     depot: DepotId,
@@ -101,27 +126,7 @@ impl<'a> Lookup<'a> {
         if let Some(p) = self.principals.get(&id) {
             return Ok(p.clone());
         }
-        let p = match tx.principal(id)? {
-            Some(p) => {
-                let owner = match (p.kind, p.owner_id) {
-                    (PrincipalKind::Agent, Some(o)) => tx.principal(o)?.map(|o| o.name),
-                    _ => None,
-                };
-                PrincipalRef {
-                    name: p.name,
-                    kind: match p.kind {
-                        PrincipalKind::User => lode_proto::PrincipalKind::User,
-                        PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
-                    },
-                    owner,
-                }
-            }
-            None => PrincipalRef {
-                name: String::new(),
-                kind: lode_proto::PrincipalKind::User,
-                owner: None,
-            },
-        };
+        let p = principal_ref(tx, id)?;
         self.principals.insert(id, p.clone());
         Ok(p)
     }

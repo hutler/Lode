@@ -36,6 +36,7 @@ struct Inner {
     permissions: Permissions,
     trees: TreeLoader,
     config_cache: Lru<ObjectId, Arc<LodeConfig>>,
+    blame_cache: Lru<crate::read::BlameKey, Arc<crate::read::BlameData>>,
     branch_locks: Mutex<HashMap<(DepotId, String), BranchLock>>,
     outbox_notify: Arc<tokio::sync::Notify>,
     gc_fence: tokio::sync::RwLock<()>,
@@ -80,6 +81,7 @@ impl AppState {
                 login_limiter: LoginLimiter::default(),
                 permissions: Permissions::default(),
                 config_cache: Lru::new(CONFIG_CACHE_ENTRIES),
+                blame_cache: Lru::new(crate::read::BLAME_CACHE_ENTRIES),
                 branch_locks: Mutex::new(HashMap::new()),
                 outbox_notify: Arc::new(tokio::sync::Notify::new()),
                 gc_fence: tokio::sync::RwLock::new(()),
@@ -158,6 +160,11 @@ impl AppState {
     /// Parsed branch configurations by blob id.
     pub fn config_cache(&self) -> &Lru<ObjectId, Arc<LodeConfig>> {
         &self.inner.config_cache
+    }
+
+    /// Computed blames (see [`crate::read::blame`]).
+    pub fn blame_cache(&self) -> &Lru<crate::read::BlameKey, Arc<crate::read::BlameData>> {
+        &self.inner.blame_cache
     }
 
     /// The lock that serializes commits to one branch.

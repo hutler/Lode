@@ -8,10 +8,10 @@ use axum::routing::get;
 use axum::{Json, Router};
 use lode_core::EntryKind;
 use lode_proto::consts::{paths, HEADER_ACCESS_EPOCH, NDJSON};
-use lode_proto::read::{RevisionList, RevisionListQuery, RevisionView, TreeListing};
+use lode_proto::read::{BlameView, RevisionList, RevisionListQuery, RevisionView, TreeListing};
 
 use super::{
-    delta_manifest, full_manifest, list_revisions, list_tree, open_file, readable_rev,
+    blame, delta_manifest, full_manifest, list_revisions, list_tree, open_file, readable_rev,
     revision_detail, View, Visibility,
 };
 use crate::auth::{Caller, SCOPE_READ};
@@ -31,6 +31,7 @@ pub fn routes() -> Router<AppState> {
         .route(paths::MANIFEST, get(manifest))
         .route(paths::TREE, get(tree))
         .route(paths::FILES, get(files))
+        .route(paths::BLAME, get(blame_file))
 }
 
 fn view(q: &ApiQuery) -> ApiResult<View> {
@@ -186,4 +187,19 @@ async fn files(
         axum::body::Body::from_stream(reader_stream(file.reader)),
     )
         .into_response())
+}
+
+async fn blame_file(
+    State(state): State<AppState>,
+    caller: Caller,
+    ApiPath(depot): ApiPath<String>,
+    q: ApiQuery,
+) -> ApiResult<Json<BlameView>> {
+    caller.require_scope(SCOPE_READ)?;
+    let (d, _) = resolve(&state, &caller, &depot).await?;
+    let rev = required_rev(&q)?;
+    let path = q
+        .path("path")?
+        .ok_or_else(|| ApiError::invalid_request("`path` is required"))?;
+    Ok(Json(blame(&state, &caller, &d, rev, &path).await?))
 }

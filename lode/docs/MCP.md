@@ -112,7 +112,7 @@ work.
 
 ### The intended workflow
 
-1. The agent reads with `list_dir`, `read_file`, `log`, `diff` and `search_history`.
+1. The agent reads with `list_dir`, `read_file`, `log`, `diff`, `blame` and `search_history`.
 2. It proposes changes with `create_shelf`, giving whole new file contents and the revision it
    read them at as `base_rev`, and refines them with `update_shelf`.
 3. A person reviews: `lode shelf diff <id>` or `lode unshelve <id>` to try it locally.

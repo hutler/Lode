@@ -299,6 +299,25 @@ and `changes_truncated`.
 `"content_base64"` in place of `content` when the content is not UTF-8. Without `--json` the
 raw bytes go to stdout.
 
+### `lode blame <path>[@rev]`
+
+```json
+{
+  "path": "b.txt", "rev": 14, "id": "…",
+  "lines": [ { "rev": 12, "text": "one" } ],
+  "revisions": [ { "rev": 12, "branch": "main", "author": { "name", "kind" },
+                   "created_at": "…", "summary": "first line of the message" } ],
+  "truncated": false
+}
+```
+
+Each line names the revision that last changed it. The file's history is followed through
+`copy_from` (renames and copies) and the branch chain. `revisions` describes every revision
+named, newest first. `truncated` (left out when false) means the walk stopped early: more than
+1000 versions, a version over 1 MiB or not text, or history the caller cannot read; the oldest
+version looked at then takes the remaining lines (marked `^` in human output). A binary file or
+a symlink is `invalid_request`; a file over 1 MiB is `too_large`.
+
 ### `lode ls [path][@rev]`
 
 `{ "depot", "rev", "path": dir|null, "entries": [ { "name", "kind", "id", "size", "executable" } ] }`

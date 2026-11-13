@@ -276,7 +276,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/manifest?rev=N[&base=M][&include=…][&exclude=…]` | NDJSON stream. Without `base`: every file at `N`. With `base`: only differences `M → N`, each line `{"op":"put"|"del", …}` |
 | `GET /depots/{d}/tree?rev=&path=` | List one directory |
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
-| `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision (M5) |
+| `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision of a text file: `{path, rev, id, lines: [{rev, text}], revisions: [{rev, branch, author, created_at, summary}], truncated?}`. Walks `rev_change` for the path along the branch chain and through `copy_from`, diffing successive versions line by line (Myers, 2 s per pair before settling for a less minimal diff). At most 1000 versions and 1 MiB per version; history the caller cannot read ends the walk. Either sets `truncated`, and the oldest version looked at takes the remaining lines. Binary or symlink is `invalid_request`, over 1 MiB `too_large`. Results are cached in memory (64 entries) by depot, path and the revision of the newest version, which fixes the history walked; walks cut short by access are not cached |
 | `…/admin/principals[/{name}]` (`GET`/`POST`; `PATCH` `{disabled?, password?}`), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
@@ -548,6 +548,8 @@ and reports truncation; binary content is returned as a summary (size, id), not 
   256 KiB per side (others get `skipped: binary | too_large`) and caps the text at 256 KiB
   (up to 1 MiB). `search_history` matches message and changed paths case-insensitively and
   looks through at most 2000 revisions per call, returning `next_before` to continue.
+  `blame` takes `path`, `rev` or `branch` and an optional line range, returns at most 2000
+  lines (`next_line` continues) with the revisions they name.
 - Built on `rmcp` 3.x, which needs Rust 1.88.
 - Shelf tools (shelves module): `create_shelf` (`base_rev` defaults to the branch head) and
   `update_shelf` (scope `shelve`) take whole-file edits; `update_shelf` replaces the full

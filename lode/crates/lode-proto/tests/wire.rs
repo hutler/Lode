@@ -388,11 +388,22 @@ fn read_types() {
     );
     snap!(
         "blame",
-        Blame {
+        BlameView {
+            path: p("Source/Door.cpp"),
+            rev: 1043,
+            id: id(7),
             lines: vec![BlameLine {
                 rev: 1001,
-                author: "ana".into(),
+                text: "int open();".into(),
             }],
+            revisions: vec![BlameRevision {
+                rev: 1001,
+                branch: "main".into(),
+                author: ana(),
+                created_at: T,
+                summary: "Add the door".into(),
+            }],
+            truncated: false,
         }
     );
 }

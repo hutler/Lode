@@ -55,6 +55,24 @@ pub struct CatArgs {
     pub source: Source,
 }
 
+/// `lode blame` options.
+#[derive(Debug, clap::Args)]
+#[command(
+    long_about = "Show the revision that last changed each line of a text file.
+\nThe file's history is followed through copies and renames (`lode mv`, `lode cp`) and into
+the branch it came from. Each line shows the revision, its author and date, the line number and
+the text. When the history is cut short (very long, a version that is not text, or history you
+cannot read), the oldest version looked at takes the remaining lines and a note says so.
+\nWith --json: {\"path\",\"rev\",\"id\",\"lines\":[{\"rev\",\"text\"}],\"revisions\":[{\"rev\",
+\"branch\",\"author\":{\"name\",\"kind\"},\"created_at\",\"summary\"}],\"truncated\":bool}."
+)]
+pub struct BlameArgs {
+    /// `path` or `path@rev` (`@12` or `@r12`).
+    pub path: String,
+    #[command(flatten)]
+    pub source: Source,
+}
+
 /// `lode ls` options.
 #[derive(Debug, clap::Args)]
 pub struct LsArgs {
@@ -419,4 +437,56 @@ pub async fn ls(ctx: &Ctx, args: LsArgs) -> CliResult<Value> {
         "path": dir.as_ref().map(DepotPath::as_str),
         "entries": serde_json::to_value(&entries).map_err(|e| CliError::failed("internal", e.to_string()))?,
     }))
+}
+
+/// Runs `lode blame`.
+pub async fn blame(ctx: &Ctx, args: BlameArgs) -> CliResult<Value> {
+    let t = target(ctx, &args.source)?;
+    let (p, given) = split_rev(&args.path)?;
+    let path = t
+        .path(ctx, p)?
+        .ok_or_else(|| CliError::usage("name a file to blame"))?;
+    let rev = t.rev(given).await?;
+    let b = t.client.blame(&t.depot, rev, &path).await?;
+    let info: std::collections::HashMap<u64, &lode_proto::read::BlameRevision> =
+        b.revisions.iter().map(|r| (r.rev, r)).collect();
+    let rev_w = b
+        .lines
+        .iter()
+        .map(|l| l.rev.to_string().len())
+        .max()
+        .unwrap_or(1);
+    let num_w = b.lines.len().to_string().len();
+    let oldest = b.lines.iter().map(|l| l.rev).min();
+    for (i, l) in b.lines.iter().enumerate() {
+        let (author, date) = match info.get(&l.rev) {
+            Some(r) => (
+                who(&r.author.name, r.author.kind),
+                format_time(r.created_at)
+                    .split(' ')
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+            None => (String::new(), String::new()),
+        };
+        // `^` marks lines that may be older than shown.
+        let mark = if b.truncated && Some(l.rev) == oldest {
+            '^'
+        } else {
+            ' '
+        };
+        ctx.out.line(format!(
+            "{mark}r{:<rev_w$} {:<12.12} {date:<10} {:>num_w$}| {}",
+            l.rev,
+            author,
+            i + 1,
+            l.text
+        ));
+    }
+    if b.truncated {
+        ctx.out
+            .warn("the history was cut short; lines marked ^ may be older than shown");
+    }
+    serde_json::to_value(&b).map_err(|e| CliError::failed("internal", e.to_string()))
 }

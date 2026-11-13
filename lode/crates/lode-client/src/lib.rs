@@ -38,7 +38,8 @@ use lode_proto::depot::{
 };
 use lode_proto::locks::{LockList, LockRequest, LocksQuery, UnlockRequest, UnlockResponse};
 use lode_proto::read::{
-    ManifestDelta, ManifestEntry, RevisionList, RevisionListQuery, RevisionView, TreeListing,
+    BlameView, ManifestDelta, ManifestEntry, RevisionList, RevisionListQuery, RevisionView,
+    TreeListing,
 };
 use lode_proto::shelves::{
     CreateShelfRequest, ShelfList, ShelfState, ShelfView, ShelvesQuery, SubmitShelfRequest,
@@ -753,6 +754,15 @@ impl Client {
                 p.append_pair("path", path.as_str());
             }
         }
+        self.json(Retry::Yes, Method::GET, url).await
+    }
+
+    /// `GET /depots/{d}/blame`: the revision that last changed each line of a text file.
+    pub async fn blame(&self, depot: &str, rev: u64, path: &DepotPath) -> Result<BlameView> {
+        let mut url = self.url(&["depots", depot, "blame"])?;
+        url.query_pairs_mut()
+            .append_pair("rev", &rev.to_string())
+            .append_pair("path", path.as_str());
         self.json(Retry::Yes, Method::GET, url).await
     }
 

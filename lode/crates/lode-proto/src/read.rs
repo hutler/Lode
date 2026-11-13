@@ -196,18 +196,48 @@ pub struct TreeListing {
     pub entries: Vec<TreeEntryView>,
 }
 
-/// One line of blame output (M5).
+/// One line of a blame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlameLine {
-    /// Revision that last changed the line.
+    /// The revision that last changed the line (with `truncated`: at the latest).
     pub rev: u64,
-    /// Author of that revision.
-    pub author: String,
+    /// The line, without its line ending.
+    pub text: String,
 }
 
-/// Answer of `GET /depots/{d}/blame`.
+/// A revision named by a blame.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Blame {
-    /// One entry per line.
+pub struct BlameRevision {
+    /// Number.
+    pub rev: u64,
+    /// Its branch.
+    pub branch: String,
+    /// Who made the change.
+    pub author: PrincipalRef,
+    /// Commit time.
+    #[serde(with = "rfc3339")]
+    pub created_at: Timestamp,
+    /// First line of the message.
+    pub summary: String,
+}
+
+/// `GET /depots/{d}/blame?rev=&path=`: the revision that last changed each line of a text
+/// file, following the file's history through copies and renames.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlameView {
+    /// The file.
+    pub path: DepotPath,
+    /// The revision asked for.
+    pub rev: u64,
+    /// Content id of the file at `rev`.
+    pub id: ObjectId,
+    /// Every line, in order.
     pub lines: Vec<BlameLine>,
+    /// The revisions the lines name, newest first.
+    pub revisions: Vec<BlameRevision>,
+    /// True when the history walk stopped early (depth cap, a version too large or not
+    /// text, or history the caller cannot read): lines from the oldest version looked at are
+    /// attributed to it, though they may be older.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub truncated: bool,
 }

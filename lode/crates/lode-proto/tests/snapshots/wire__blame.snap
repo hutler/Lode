@@ -3,10 +3,25 @@ source: crates/lode-proto/tests/wire.rs
 expression: v
 ---
 {
+  "path": "Source/Door.cpp",
+  "rev": 1043,
+  "id": "0707070707070707070707070707070707070707070707070707070707070707",
   "lines": [
     {
       "rev": 1001,
-      "author": "ana"
+      "text": "int open();"
+    }
+  ],
+  "revisions": [
+    {
+      "rev": 1001,
+      "branch": "main",
+      "author": {
+        "name": "ana",
+        "kind": "user"
+      },
+      "created_at": "2026-11-12T10:30:00Z",
+      "summary": "Add the door"
     }
   ]
 }

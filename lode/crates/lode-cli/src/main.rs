@@ -109,6 +109,8 @@ enum Command {
     Log(cmd::history::LogArgs),
     /// Print a file as of a revision.
     Cat(cmd::history::CatArgs),
+    /// Show the revision that last changed each line of a file.
+    Blame(cmd::history::BlameArgs),
     /// List a directory as of a revision.
     Ls(cmd::history::LsArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
@@ -162,6 +164,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Unshelve(a)) => cmd::shelve::unshelve(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
+        Some(Command::Blame(a)) => cmd::history::blame(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
         Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {

@@ -2,10 +2,14 @@
 //! listings and file content. Every listing is filtered by read permission and by the
 //! caller's view.
 
+mod blame;
 mod handlers;
 mod history;
 mod manifest;
 
+pub use blame::{
+    blame, BlameData, BlameKey, BLAME_CACHE_ENTRIES, BLAME_FILE_MAX, BLAME_MAX_VERSIONS,
+};
 pub use handlers::routes;
 pub use history::{list_revisions, revision_detail};
 pub use manifest::{

@@ -143,6 +143,7 @@ async fn read_tools_respect_access() {
         "list_dir",
         "read_file",
         "diff",
+        "blame",
         "search_history",
         "list_locks",
         "list_shelves",
@@ -210,6 +211,35 @@ async fn read_tools_respect_access() {
     )
     .await;
     assert_eq!(found["revisions"], json!([]), "{found}");
+    let b = call(
+        &c,
+        "blame",
+        json!({ "depot": "game", "path": "src/main.rs", "start_line": 2, "end_line": 3 }),
+    )
+    .await;
+    assert_eq!(b["total_lines"], 3);
+    assert_eq!(
+        b["lines"],
+        json!([
+            { "line": 2, "rev": r2, "text": "    println!(\"hello\");" },
+            { "line": 3, "rev": r1, "text": "}" }
+        ])
+    );
+    assert_eq!(b["revisions"].as_array().unwrap().len(), 2);
+    assert_eq!(b["revisions"][0]["author"]["name"], "admin");
+    assert_eq!(
+        call_err(&c, "blame", json!({ "depot": "game", "path": "img.bin" })).await,
+        "invalid_request"
+    );
+    assert_eq!(
+        call_err(
+            &c,
+            "blame",
+            json!({ "depot": "game", "path": "secret/key.txt" })
+        )
+        .await,
+        "not_found"
+    );
     let d = call(&c, "diff", json!({ "depot": "game", "to_rev": r2 })).await;
     assert_eq!(d["from_rev"], r1);
     assert!(!d["diff"].as_str().unwrap().contains("hunter"), "{d}");
