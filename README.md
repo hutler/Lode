@@ -12,7 +12,7 @@ Shared documents are in [docs/](docs/). Rules for agents working here are in [AG
 
 ## Status
 
-Planning is done for all three; no code exists yet. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md), [umpalumpa/plan/TASKS.md](umpalumpa/plan/TASKS.md), [unreal/docs/TASKS.md](unreal/docs/TASKS.md).
+Lode v1 is implemented (milestones M0 to M6) and being prepared for its first release, 0.1.0. UmpaLumpa (on hold) and Lode for Unreal are planned; no code exists for them yet. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md), [umpalumpa/plan/TASKS.md](umpalumpa/plan/TASKS.md), [unreal/docs/TASKS.md](unreal/docs/TASKS.md).
 
 ## How the parts fit
 

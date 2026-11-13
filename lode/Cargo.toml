@@ -22,7 +22,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-rust-version = "1.80"
+rust-version = "1.88"
 repository = "https://github.com/hutler/simpledevops"
 publish = false
 

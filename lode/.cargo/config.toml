@@ -1,0 +1,4 @@
+# `cargo update` picks dependency versions that still build with `rust-version`
+# (Cargo.toml), so the stated minimum stays true.
+[resolver]
+incompatible-rust-versions = "fallback"

@@ -17,6 +17,8 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M4.md](M4.md) | Agents and MCP | T040–T043 |
 | [M5.md](M5.md) | Branching, merge, hardening, packaging | T050–T056 |
 | [M6.md](M6.md) | Integration: webhooks, checks, submit gate, unattended client | T060–T064 |
+| [M7.md](M7.md) | Release v1 | T070–T072 |
+| [M8.md](M8.md) | Easy setup | T080–T087 |
 
 ## Dependency graph
 
@@ -60,6 +62,15 @@ M5   T050                             (after T016 T025)
 M6   T060  T061                       (T060 after T017 T022; T061 after T017 T040; can run alongside M5)
      T062  T063                       (T062 after T061 T035; T063 after T061 T028 T041)
      T064                             (after T050 T028)
+
+M7   T070  T071                       (T070 after T064; T071 after T028 T031)
+     T072                             (after T070 T071 and the GitHub repository)
+
+M8   T080  T084  T085                 (T080 after T054; T084 after T072; T085 after T053)
+     T081  T086                       (T081 after T080; T086 after T085)
+     T082                             (after T081)
+     T083                             (after T082)
+     T087                             (after T080–T086)
 ```
 
 ## Status
@@ -114,3 +125,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T062 | review | `lode/T062-submit-gate` | `[checks]` parsing was already in `lode-core` (T014); the gate is `pre_commit` in `lode-mod-checks`, reading `origin` and its own table only; `details.missing` gives `reason` per check (`absent`, `not_success`, `wrong_reporter`); a `shelves` origin without the shelf attributes is refused rather than let through |
 | T063 | review | `lode/T063-checks-client` | `lode checks <rN | ID[@V]> [--depot D]` reuses `--server`; a shelf without a version asks the shelves module for the current one; `module_disabled` when the server lacks the module; `shelf submit` lists unmet checks one per line (`checks_required`, exit 1); MCP `list_checks` takes `target_kind`, `target_id`, `target_version` (required for a shelf, since the module cannot look a shelf up); webhook commands added to CLI-JSON.md |
 | T064 | review | `lode/T064-unattended` | `switch -r` already existed (T050); T064 adds the tests. Shared cache cap is 20 GiB, set by `cache_max_gib` in `settings.toml`; eviction runs once per sync instead of after every insert; `BlobCache` gains `copy_out` (copy and verify in one read) and `store_file`; merge and revert bases also use the shared cache; an unreadable token file is exit 3 like a missing one; `--version --json` adds `api` |
+| T070 | review | `lode/T070-release-prep` | `main` fast-forwarded to the M6 tip; MSRV 1.88 with a CI job building on exactly 1.88; `uuid` held at 1.26 (1.27+ needs Rust 1.89) and `.cargo/config.toml` makes `cargo update` respect the MSRV; M7 and M8 task files written from the post-v1 plan; pushing and the macOS CI run wait for the GitHub repository |

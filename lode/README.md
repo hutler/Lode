@@ -14,12 +14,15 @@ and large binary files. Part of SimpleDevOps.
 
 ## Installing
 
-Release archives for Linux (static, x86_64 and aarch64), Windows (x86_64) and macOS (Intel
-and Apple silicon) hold `lode`, `loded` and the service files in `packaging/`, with a
-`SHA256SUMS` list. A release is made by pushing a tag `lode-v<version>`; the workflow
-`.github/workflows/lode-release.yml` builds the archives, publishes them, and pushes the
-server image `ghcr.io/<owner>/loded`. The user guide covers installation, systemd, Windows
-(WinSW) and the container.
+Releases are published on the repository's GitHub Releases page under tags `lode-v<version>`.
+Each holds archives for Linux (static, x86_64 and aarch64), Windows (x86_64) and macOS (Intel
+and Apple silicon) with `lode`, `loded` and the service files in `packaging/`, a `SHA256SUMS`
+list, and the server image `ghcr.io/<owner>/loded`. Unpack, put the binaries on your `PATH`,
+and follow the user guide: Part I for the client, Part II for running a server (systemd,
+Windows service, container).
+
+A release is made by pushing a tag `lode-v<version>`; `.github/workflows/lode-release.yml`
+builds and publishes it.
 
 ```
 docker build -t loded .                 # the server image, from this folder
@@ -28,8 +31,8 @@ packaging/docker/smoke.sh loded         # start, commit, restart, check
 
 ## Building
 
-Needs a stable Rust toolchain (`rust-toolchain.toml` selects it) and, on Windows, the MSVC
-C++ build tools.
+Needs Rust 1.88 or newer (`rust-toolchain.toml` selects the current stable) and, on Windows,
+the MSVC C++ build tools.
 
 ```
 cargo build --workspace
