@@ -327,7 +327,6 @@ Everything else in sections 5–7 and 9 is covered by the scenario suite
 | 6.1 Locks | `lode switch` leaves this workspace's locks on the old branch (they are per branch) and reports them; it does not release them. |
 | 6.4 MCP | The server endpoint also offers `list_depots`, and `submit_shelf` to tokens with `write`. Large files, diffs and blame are cut off at fixed sizes (`truncated`, `next_line`). |
 | 7.3 Provenance | A submitted shelf's revision has `via` of the submit request and an extra `submitted_shelf` field (see 7.3). |
-| 10 Quality | `loded` times out stalled request bodies but not slow request headers. A server reachable from the internet should sit behind a reverse proxy; see `docs/HARDENING.md`. |
 | 10 Quality | The performance targets were measured on Linux only (`docs/BENCHMARKS.md`); Windows and macOS run the same tests in CI but not the benchmarks. |
 
 ## 11. Milestones

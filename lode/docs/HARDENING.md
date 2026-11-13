@@ -19,6 +19,7 @@ runs in CI in a short bounded form; the long forms are under [Running longer](#r
 | Fuzz: `.lodeconfig` | same file | Arbitrary bytes and TOML-shaped text: never a panic. |
 | Fuzz: client manifest lines | `lode-client/src/manifest.rs` tests | Valid NDJSON split at arbitrary points gives the same entries; arbitrary bytes end in entries or an error; hostile paths never come out as entries; an endless line is refused. |
 | Hostile server | `lode-client/tests/hostile.rs` | A body that stalls and a server that never answers hit the read timeout; a blob larger than expected is refused and leaves no file; a zstd bomb stops at the expected size; an endless JSON answer is cut off at 64 MiB. Earlier tests already covered wrong hashes (`mock.rs`) and paths that leave the workspace (`lode-cli/tests/checkout.rs`). |
+| Slow and many connections (T080) | `lode-server/tests/connections.rs` | Headers sent one byte at a time, a connection that never sends a request (HTTP/1.1, and HTTP/2 over TLS) and an idle kept-alive connection are closed after `[connections] header_timeout_seconds`. Connections past `max_per_address` from one address are closed at once while other addresses still connect, and closing one frees its slot. |
 | Hostile client | `lode-testkit/tests/hostile.rs` | An upload that stalls is dropped after `body_idle_seconds` and stores nothing; a zstd bomb is `too_large`; commit paths such as `../x`, `/etc/x`, `a\..\x` and `C:x` are `invalid_request`; an oversized JSON body and an oversized declared blob length are `too_large`. Earlier tests covered hash mismatches and aborted uploads (`lode-server/tests/blobs.rs`). |
 
 ## Defects found and fixed
@@ -46,10 +47,13 @@ runs in CI in a short bounded form; the long forms are under [Running longer](#r
 
 ## Known limits
 
-- **Slow request headers.** `loded` has no timeout for a client that opens a connection and
-  sends its headers very slowly (slowloris). The HTTP server in use has no header-read timer.
-  Deployments facing the internet should sit behind a reverse proxy with header timeouts,
-  as the operator guide recommends.
+- **Slow request headers** were a known limit until T080: `loded` now runs its own
+  connection loop, closes a connection whose request headers take longer than
+  `[connections] header_timeout_seconds` (30), and holds at most `max_per_address` (64)
+  connections per client address (an IPv6 /64 network). A reverse proxy is no longer needed
+  for this. Rate limiting by account is not done (login is rate-limited by name and address).
+- **HTTP/2 connections that stay idle** are not closed while the peer answers keep-alive
+  pings; the per-address limit bounds how many one client can hold.
 - **Upload decompression.** A zstd upload is bounded by `max_blob_size` after decompression,
   so a bomb costs the server at most that many bytes of disk in a temporary file before it is
   refused. Lower `max_blob_size` if that is too much.

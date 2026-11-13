@@ -165,6 +165,10 @@ impl ClientBuilder {
             .user_agent(user_agent)
             .connect_timeout(self.connect_timeout)
             .read_timeout(self.read_timeout)
+            // Below the server's default header timeout (30 s), which also closes idle
+            // kept-alive connections, so a pooled connection is not reused just as the server
+            // closes it.
+            .pool_idle_timeout(Duration::from_secs(20))
             // Redirects could carry the token elsewhere or downgrade to http; the API never
             // redirects.
             .redirect(reqwest::redirect::Policy::none());

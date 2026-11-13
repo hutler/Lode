@@ -474,6 +474,10 @@ data_dir = "."                     # relative to this file
 # cert = "cert.pem"
 # key = "key.pem"
 
+[connections]
+header_timeout_seconds = 30        # time for a request's headers; idle connections close after it
+max_per_address = 64               # open connections per client address (IPv6: per /64)
+
 [limits]
 max_request_json = 67108864        # 64 MiB, largest JSON request
 max_blob_size = 68719476736        # 64 GiB, largest single file
@@ -500,7 +504,7 @@ grace_seconds = 86400              # unused data younger than this is kept</code
   <li><strong>Built-in.</strong> Fill in the <code>[tls]</code> section with a certificate and key in PEM format. Restart the server after renewing the certificate.</li>
   <li><strong>Reverse proxy.</strong> Leave <code>[tls]</code> out, keep <code>listen = "127.0.0.1:7480"</code>, and put a web server such as Caddy or nginx in front. The proxy must allow large uploads, must not buffer request bodies, and must pass the <code>Authorization</code> header through.</li>
 </ul>
-<p>A server reachable from the internet should sit behind a proxy in either case: <code>loded</code> fails request bodies that stall, but it does not time out a client that sends its request headers very slowly. Proxies do that by default.</p>
+<p>With built-in TLS, <code>loded</code> can face the internet directly: it closes a connection whose request headers do not arrive within <code>header_timeout_seconds</code>, fails request bodies that stall, and limits how many connections one address may hold (<code>[connections]</code> in chapter 3). A proxy is only needed if you want one, for example to share port 443 with a website:</p>
 <pre><code># Caddy
 lode.example.com {
     reverse_proxy 127.0.0.1:7480 {
@@ -753,7 +757,7 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 
 <h1>16. Security checklist</h1>
 <ul>
-  <li>Serve only over TLS, and put a reverse proxy in front of a server reachable from the internet (chapter 4).</li>
+  <li>Serve only over TLS, either built in or through a reverse proxy (chapter 4).</li>
   <li>Keep the admin token in a password manager. Create a personal administrator account for daily use and keep <code>admin</code> for emergencies.</li>
   <li>Grant <code>read</code> broadly and <code>write</code> narrowly. Use groups, not per-user rules.</li>
   <li>Give every script and agent its own account and token, with the fewest scopes that work and an expiry date.</li>

@@ -310,7 +310,13 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
 ## 7. Security
 
 - **Transport.** `loded` terminates TLS itself with rustls (cert and key in config) or listens
-  on plain HTTP bound to localhost behind a reverse proxy. The client refuses plain HTTP to
+  on plain HTTP bound to localhost behind a reverse proxy. Over TLS, ALPN picks HTTP/2 or
+  HTTP/1.1; plain HTTP is HTTP/1.1 only. `loded` runs its own connection loop on hyper (not
+  `axum::serve`), so it can face the internet directly: request headers must arrive within
+  `[connections] header_timeout_seconds` (30, also the limit for an idle kept-alive HTTP/1.1
+  connection and for the first request on an HTTP/2 connection), and one client address (an
+  IPv6 /64 network) may hold at most `[connections] max_per_address` (64) connections; more
+  are closed at once. The TLS handshake must finish within 10 s. The client refuses plain HTTP to
   non-loopback hosts unless `--insecure` is given.
 - **Passwords** are hashed with Argon2id. **Tokens** are 256 bits of randomness, shown once,
   stored as SHA-256. Login is rate-limited per name and per address.
@@ -344,7 +350,9 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
   bounds JSON bodies, blob sizes (after decompression) and changes per commit. The client
   times out a response after 300 s without data, stops a download once it passes the size the
   manifest gave, caps JSON answers at 64 MiB and manifest lines at 1 MiB. Slow request
-  headers are not timed out by `loded`; a reverse proxy should do that.
+  headers and many connections from one address are handled by the connection limits above
+  (T080). The client keeps idle pooled connections for 20 s, below the server's header
+  timeout, so it does not reuse one the server is closing.
 - **Bootstrap.** `loded init` creates the data directory and prints a one-time admin token.
   `loded reset-admin` (offline, on the server machine) revokes the `admin` user's tokens and
   prints a new one.

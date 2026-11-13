@@ -22,6 +22,7 @@ pub mod module;
 pub mod perm;
 pub mod read;
 pub mod routes;
+mod serve;
 pub mod server;
 pub mod state;
 pub mod tls;
@@ -29,7 +30,8 @@ pub mod tls;
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
-    ConfigError, GcConfig, Limits, ModulesConfig, ServerConfig, TlsConfig, WebhooksConfig,
+    ConfigError, ConnectionsConfig, GcConfig, Limits, ModulesConfig, ServerConfig, TlsConfig,
+    WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};

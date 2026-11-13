@@ -1530,6 +1530,8 @@ dependencies = [
  "bytes",
  "futures",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "lode-core",
  "lode-meta",
  "lode-proto",

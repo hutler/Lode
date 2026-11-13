@@ -14,8 +14,8 @@ pub const DEFAULT_LISTEN: &str = "127.0.0.1:7480";
 /// The commented default configuration written by `loded init`.
 pub const DEFAULT_CONFIG: &str = r#"# Lode server configuration. Unknown keys are an error.
 
-# Address and port to listen on. Without [tls], keep this on a loopback address and put a
-# TLS-terminating reverse proxy in front of the server.
+# Address and port to listen on. Without [tls], keep this on a loopback address (or put a
+# TLS-terminating reverse proxy in front of the server).
 listen = "127.0.0.1:7480"
 
 # Data directory holding meta.db and depots/. A relative path is relative to this file.
@@ -25,6 +25,14 @@ data_dir = "."
 # [tls]
 # cert = "cert.pem"
 # key = "key.pem"
+
+[connections]
+# Seconds a client has to send a request's headers, and that an idle kept-alive connection
+# stays open waiting for its next request. Slower connections are closed.
+header_timeout_seconds = 30
+# Most open connections from one client address (an IPv6 address counts by its /64
+# network). Further connections are closed at once.
+max_per_address = 64
 
 [limits]
 # Largest JSON request body, in bytes (64 MiB).
@@ -96,6 +104,9 @@ pub struct ServerConfig {
     /// Serve HTTPS with this certificate and key.
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+    /// Connection timeouts and limits.
+    #[serde(default)]
+    pub connections: ConnectionsConfig,
     /// Size and count limits.
     #[serde(default)]
     pub limits: Limits,
@@ -131,6 +142,26 @@ impl Default for GcConfig {
     fn default() -> Self {
         Self {
             grace_seconds: 24 * 60 * 60,
+        }
+    }
+}
+
+/// The `[connections]` table.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ConnectionsConfig {
+    /// Seconds allowed for a request's headers, and for the next request on an idle
+    /// kept-alive connection. Default 30.
+    pub header_timeout_seconds: u64,
+    /// Most open connections from one address (an IPv6 /64 network). Default 64.
+    pub max_per_address: usize,
+}
+
+impl Default for ConnectionsConfig {
+    fn default() -> Self {
+        Self {
+            header_timeout_seconds: 30,
+            max_per_address: 64,
         }
     }
 }
@@ -235,6 +266,18 @@ impl ServerConfig {
             path: origin.to_owned(),
             message: e.to_string(),
         })?;
+        let invalid = |message: &str| ConfigError::Parse {
+            path: origin.to_owned(),
+            message: message.to_owned(),
+        };
+        if cfg.connections.header_timeout_seconds == 0 {
+            return Err(invalid(
+                "[connections] header_timeout_seconds must be at least 1",
+            ));
+        }
+        if cfg.connections.max_per_address == 0 {
+            return Err(invalid("[connections] max_per_address must be at least 1"));
+        }
         cfg.data_dir = base.join(&cfg.data_dir);
         if let Some(tls) = &mut cfg.tls {
             tls.cert = base.join(&tls.cert);
@@ -260,6 +303,7 @@ impl ServerConfig {
             listen: default_listen(),
             data_dir: data_dir.into(),
             tls: None,
+            connections: ConnectionsConfig::default(),
             limits: Limits::default(),
             gc: GcConfig::default(),
             modules: ModulesConfig::default(),
@@ -280,6 +324,8 @@ mod tests {
         assert_eq!(cfg.listen.to_string(), DEFAULT_LISTEN);
         assert_eq!(cfg.data_dir, Path::new("/srv/lode").join("."));
         assert!(cfg.tls.is_none());
+        assert_eq!(cfg.connections.header_timeout_seconds, 30);
+        assert_eq!(cfg.connections.max_per_address, 64);
         assert_eq!(cfg.limits.max_request_json, 64 * 1024 * 1024);
         assert_eq!(cfg.limits.max_blob_size, 64 * 1024 * 1024 * 1024);
         assert_eq!(cfg.limits.max_changes_per_commit, 500_000);
@@ -297,6 +343,9 @@ mod tests {
         for text in [
             "data_dir = '.'\nlisten_addr = '1.2.3.4:5'",
             "data_dir = '.'\n[limits]\nmax_json = 1",
+            "data_dir = '.'\n[connections]\nidle_seconds = 1",
+            "data_dir = '.'\n[connections]\nheader_timeout_seconds = 0",
+            "data_dir = '.'\n[connections]\nmax_per_address = 0",
             "data_dir = '.'\n[modules]\nfrobnicate = true",
             "data_dir = '.'\n[webhooks]\nallow_ftp = true",
             "data_dir = '.'\n[tls]\ncert='a'\nkey='b'\npassword='c'",

@@ -19,6 +19,8 @@ base64.workspace = true
 blake3.workspace = true
 bytes.workspace = true
 futures.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 lode-core.workspace = true
 lode-meta.workspace = true
 lode-proto.workspace = true
@@ -45,6 +47,8 @@ rcgen.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 http-body-util = "0.1"
+hyper = { workspace = true, features = ["client"] }
+hyper-util.workspace = true
 tower = { workspace = true, features = ["util"] }
 rustls.workspace = true
 tokio-rustls.workspace = true

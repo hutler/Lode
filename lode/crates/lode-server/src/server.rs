@@ -5,18 +5,21 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use lode_meta::{MetaConfig, MetaStore, MigrationSet, NewPrincipal, PrincipalKind, Reads};
 use lode_store::{FsBlobStore, FsBlobStoreConfig};
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 
 use crate::auth::{generate_token, hash_token, ScopeRegistry, ADMIN_USER};
 use crate::clock::{Clock, SharedClock, SystemClock};
 use crate::config::{ServerConfig, CONFIG_FILE_NAME, DEFAULT_CONFIG};
 use crate::module::Modules;
+use crate::serve::{self, Settings};
 use crate::state::AppState;
-use crate::tls::{load_server_config, TlsError, TlsListener};
+use crate::tls::{load_server_config, TlsError};
 
 /// Name of the metadata database inside the data directory.
 pub const META_DB_FILE: &str = "meta.db";
@@ -217,32 +220,13 @@ pub async fn open_state(
 #[derive(Debug, Clone, Copy)]
 pub struct ClientInfo(pub SocketAddr);
 
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, TcpListener>>
-    for ClientInfo
-{
-    fn connect_info(stream: axum::serve::IncomingStream<'_, TcpListener>) -> Self {
-        Self(*stream.remote_addr())
-    }
-}
-
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, TlsListener>>
-    for ClientInfo
-{
-    fn connect_info(stream: axum::serve::IncomingStream<'_, TlsListener>) -> Self {
-        Self(*stream.remote_addr())
-    }
-}
-
-enum Listener {
-    Plain(TcpListener),
-    Tls(TlsListener),
-}
-
 /// A server bound to its address, ready to run.
 pub struct BoundServer {
-    listener: Listener,
+    tcp: TcpListener,
+    tls: Option<TlsAcceptor>,
     local: SocketAddr,
     router: Router,
+    settings: Settings,
 }
 
 impl BoundServer {
@@ -254,13 +238,10 @@ impl BoundServer {
         let local = tcp
             .local_addr()
             .map_err(io_err("cannot read the listen address"))?;
-        let listener = match &config.tls {
+        let tls = match &config.tls {
             Some(tls) => {
                 let rustls_config = load_server_config(&tls.cert, &tls.key)?;
-                Listener::Tls(
-                    TlsListener::new(tcp, rustls_config)
-                        .map_err(io_err("cannot start the TLS listener"))?,
-                )
+                Some(TlsAcceptor::from(Arc::new(rustls_config)))
             }
             None => {
                 if !local.ip().is_loopback() {
@@ -270,13 +251,19 @@ impl BoundServer {
                          a TLS-terminating proxy in front"
                     );
                 }
-                Listener::Plain(tcp)
+                None
             }
         };
+        let settings = Settings {
+            header_timeout: Duration::from_secs(config.connections.header_timeout_seconds),
+            max_per_address: config.connections.max_per_address,
+        };
         Ok(Self {
-            listener,
+            tcp,
+            tls,
             local,
             router,
+            settings,
         })
     }
 
@@ -287,9 +274,10 @@ impl BoundServer {
 
     /// `https` or `http`.
     pub fn scheme(&self) -> &'static str {
-        match self.listener {
-            Listener::Plain(_) => "http",
-            Listener::Tls(_) => "https",
+        if self.tls.is_some() {
+            "https"
+        } else {
+            "http"
         }
     }
 
@@ -299,14 +287,8 @@ impl BoundServer {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        // Connection info gives handlers the client address (login rate limiting).
-        let app = self
-            .router
-            .into_make_service_with_connect_info::<ClientInfo>();
-        match self.listener {
-            Listener::Plain(l) => axum::serve(l, app).with_graceful_shutdown(shutdown).await,
-            Listener::Tls(l) => axum::serve(l, app).with_graceful_shutdown(shutdown).await,
-        }
+        serve::serve(self.tcp, self.tls, self.router, self.settings, shutdown).await;
+        Ok(())
     }
 }
 

@@ -58,6 +58,10 @@ futures = "0.3"
 globset = "0.4"
 hex = "0.4"
 hmac = "0.12"
+# hyper and its companion hyper-util (already used through axum): the server's own connection
+# loop, for header timeouts and per-address limits (T080).
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server", "server-graceful", "http1", "http2", "tokio"] }
 ignore = "0.4"
 rand = "0.8"
 # The official Rust MCP SDK. 3.x needs Rust 1.88.
