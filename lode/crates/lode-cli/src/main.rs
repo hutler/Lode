@@ -15,6 +15,7 @@ mod external;
 mod local;
 mod materialize;
 mod output;
+mod paths_from;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -42,6 +43,10 @@ struct Cli {
     /// Allow plain HTTP to hosts other than this machine.
     #[arg(long, global = true)]
     insecure: bool,
+    /// Read more path arguments from FILE, one per line (`-` for standard input). For
+    /// commands that take a list of paths.
+    #[arg(long, global = true, value_name = "FILE")]
+    paths_from: Option<PathBuf>,
     /// Print the version.
     #[arg(long, short = 'V')]
     version: bool,
@@ -126,6 +131,8 @@ enum Command {
 }
 
 async fn run(cli: Cli) -> CliResult<Value> {
+    // Already turned into path arguments by `paths_from::expand`.
+    let _ = cli.paths_from;
     let ctx = Ctx::new(Globals {
         json: cli.json,
         server: cli.server,
@@ -211,7 +218,12 @@ fn finish(json: bool, result: CliResult<Value>) -> ExitCode {
 
 fn main() -> ExitCode {
     let json = wants_json();
-    let cli = match Cli::try_parse() {
+    // `--paths-from` is applied to the arguments before they are parsed.
+    let argv = match paths_from::expand(std::env::args_os().collect()) {
+        Ok(a) => a,
+        Err(e) => return finish(json, Err(e)),
+    };
+    let cli = match Cli::try_parse_from(argv) {
         Ok(c) => c,
         Err(e) => {
             use clap::error::ErrorKind;

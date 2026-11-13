@@ -91,18 +91,18 @@ This section is the contract between the two subprojects. Lode stays generic: no
 | --- | --- | --- | --- |
 | 1 | Every command prints exactly one JSON document with `--json`, with stable error codes and exit codes | The whole plugin depends on it | Present (spec 7.4, task T028) |
 | 2 | A written JSON schema for each command, `docs/CLI-JSON.md` | The plugin is built and tested against it | Present (task T028) |
-| 3 | `status --json <paths>` limited to the paths given, reporting per file: state, changelist, lock held, lock required | Refreshing a few assets must not scan the whole workspace | Partly present (task T023 takes paths); fields to confirm |
-| 4 | Server information in status on request: whether a newer revision of the file exists, and who holds its lock | "Not at head" and "locked by someone else" without two extra calls per refresh | To confirm. Proposed: `status --remote` |
+| 3 | `status --json <paths>` limited to the paths given, reporting per file: state, changelist, lock held, lock required | Refreshing a few assets must not scan the whole workspace | Present: `status --unchanged <paths>` lists every named file with `status`, `changelist`, `locked` and `lock_required` (task T071) |
+| 4 | Server information in status on request: whether a newer revision of the file exists, and who holds its lock | "Not at head" and "locked by someone else" without two extra calls per refresh | Present: `status --remote` (task T071) |
 | 5 | `locks --json` with a path prefix | Lock holders for the folder being viewed | Present (task T031) |
 | 6 | `log <path> --json` with revision, author, submitter, time, message, action and size | History window | Present in outline; fields to confirm |
-| 7 | `cat <path>@<rev> -o <file>` writing to a file | Diff against a revision for binary assets, which cannot go through standard output safely on Windows | To confirm |
-| 8 | A way to pass many paths without the command line, such as `--paths-from <file>` | Windows limits a command line to about 32,000 characters, and a submit can name thousands of assets | To confirm |
-| 9 | Paths accepted as absolute Windows paths, with either slash | The editor hands the plugin absolute paths | To confirm |
+| 7 | `cat <path>@<rev> -o <file>` writing to a file | Diff against a revision for binary assets, which cannot go through standard output safely on Windows | Present (task T071) |
+| 8 | A way to pass many paths without the command line, such as `--paths-from <file>` | Windows limits a command line to about 32,000 characters, and a submit can name thousands of assets | Present: `--paths-from <file>` or `-` for stdin (task T071) |
+| 9 | Paths accepted as absolute Windows paths, with either slash | The editor hands the plugin absolute paths | Present; on Windows the root is matched without regard to case (task T071) |
 | 10 | Readers (`status`, `locks`, `log`) may run while another `lode` process is working in the same workspace | The editor refreshes state in the background | Present (task T021: readers may run in parallel) |
 | 11 | Changes to a file's read-only attribute happen only through `lock`, `unlock`, `revert`, `commit` and `update` | The editor caches writability | Present (task T031) |
 | 12 | `lode login --token-stdin` and `LODE_TOKEN_FILE` | Sign-in dialog without storing a token in the plugin | Present |
 
-**Proposed Lode task.** Items 4, 7, 8 and 9 fit one small task in Lode's client milestone: "Command line support for editor integrations". It is proposed here and is not yet in `lode/docs/tasks/`. Until it is accepted, the plugin falls back to separate `status` and `locks` calls and to batches of paths under the length limit.
+**Lode task.** Items 3, 4, 7, 8 and 9 were done in Lode task T071 ("Command-line support for editor integrations", milestone M7). The JSON shapes are in `lode/docs/CLI-JSON.md`.
 
 **Version check.** On connect the plugin reads `lode --version --json` and refuses a client whose `api` value is older than the plugin supports, with a message naming the version needed.
 

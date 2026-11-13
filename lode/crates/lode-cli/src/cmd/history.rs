@@ -48,9 +48,20 @@ pub struct LogArgs {
 
 /// `lode cat` options.
 #[derive(Debug, clap::Args)]
+#[command(
+    long_about = "Print a file as of a revision (default: the workspace's revision, else \
+the branch head).
+\nWith -o FILE the content is written to FILE instead (whole or not at all: it goes to a \
+temporary file next to it first), and nothing else goes to standard output.
+\nWith --json: {\"path\",\"rev\",\"id\",\"kind\",\"executable\",\"size\",\"content\" or \
+\"content_base64\"}; with -o, {\"path\",\"rev\",\"id\",\"size\",\"output\"} and no content."
+)]
 pub struct CatArgs {
     /// `path` or `path@rev` (`@12` or `@r12`).
     pub path: String,
+    /// Write the content to this file instead of standard output.
+    #[arg(short = 'o', long = "output", value_name = "FILE")]
+    pub output: Option<std::path::PathBuf>,
     #[command(flatten)]
     pub source: Source,
 }
@@ -337,6 +348,29 @@ pub async fn cat(ctx: &Ctx, args: CatArgs) -> CliResult<Value> {
     let rev = t.rev(given).await?;
     let file = t.client.file(&t.depot, rev, &path).await?;
     let (id, kind, executable) = (file.id, file.kind, file.executable);
+    if let Some(out) = &args.output {
+        let dest = ctx.local(out);
+        let dir = match dest.parent() {
+            Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
+            _ => ctx.cwd.clone(),
+        };
+        let tmp = tempfile::Builder::new()
+            .prefix(".lode-cat-")
+            .tempfile_in(&dir)?;
+        let mut f = tokio::fs::File::from_std(tmp.as_file().try_clone()?);
+        let size = file.write_to(&mut f).await?;
+        f.flush().await?;
+        f.sync_all().await?;
+        drop(f);
+        tmp.persist(&dest).map_err(|e| CliError::from(e.error))?;
+        return Ok(json!({
+            "path": path.as_str(),
+            "rev": rev,
+            "id": id.to_hex(),
+            "size": size,
+            "output": dest.display().to_string(),
+        }));
+    }
     if ctx.g.json {
         let mut buf = Vec::new();
         let size = file.write_to(&mut buf).await?;

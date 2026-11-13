@@ -17,7 +17,9 @@ pub fn to_local(root: &Path, path: &DepotPath) -> PathBuf {
 
 /// The depot path of `local`, which is absolute or relative to `cwd`, inside `root`. `None`
 /// for the root itself. A name that breaks SPEC §5.7 is [`WorkspaceError::InvalidName`] with
-/// the rule it breaks.
+/// the rule it breaks. Either slash works on Windows, where the root is also matched without
+/// regard to letter case, as the file system does; the part below the root keeps the case
+/// it was given.
 pub fn to_depot(root: &Path, cwd: &Path, local: &Path) -> Result<Option<DepotPath>> {
     let joined = if local.is_absolute() {
         local.to_path_buf()
@@ -26,9 +28,8 @@ pub fn to_depot(root: &Path, cwd: &Path, local: &Path) -> Result<Option<DepotPat
     };
     let abs = normalize(&joined);
     let root = normalize(root);
-    let rel = abs
-        .strip_prefix(&root)
-        .map_err(|_| WorkspaceError::OutsideWorkspace(local.to_path_buf()))?;
+    let rel = strip_root(&abs, &root, cfg!(windows))
+        .ok_or_else(|| WorkspaceError::OutsideWorkspace(local.to_path_buf()))?;
     let mut segs = Vec::new();
     for c in rel.components() {
         match c {
@@ -59,6 +60,27 @@ pub fn to_depot(root: &Path, cwd: &Path, local: &Path) -> Result<Option<DepotPat
             local: local.to_path_buf(),
             reason: e.to_string(),
         })
+}
+
+/// `abs` below `root`, comparing components exactly or, with `ignore_case`, without regard
+/// to letter case.
+fn strip_root(abs: &Path, root: &Path, ignore_case: bool) -> Option<PathBuf> {
+    if !ignore_case {
+        return abs.strip_prefix(root).ok().map(Path::to_path_buf);
+    }
+    let mut rest = abs.components();
+    for want in root.components() {
+        let got = rest.next()?;
+        let same = got.as_os_str() == want.as_os_str()
+            || match (got.as_os_str().to_str(), want.as_os_str().to_str()) {
+                (Some(a), Some(b)) => a.to_lowercase() == b.to_lowercase(),
+                _ => false,
+            };
+        if !same {
+            return None;
+        }
+    }
+    Some(rest.as_path().to_path_buf())
 }
 
 /// `path` without the Windows verbatim prefix that `canonicalize` adds (`\\?\C:\x` becomes
@@ -135,6 +157,40 @@ mod tests {
         assert_eq!(
             to_local(root, &DepotPath::parse("a/b.txt").unwrap()),
             Path::new("/ws").join("a").join("b.txt")
+        );
+    }
+
+    #[test]
+    fn root_matched_without_case_where_the_file_system_ignores_it() {
+        let root = Path::new("/Dev/Game");
+        let p = |l: &str, ic| strip_root(Path::new(l), root, ic);
+        assert_eq!(
+            p("/dev/GAME/Content/A.uasset", true),
+            Some(PathBuf::from("Content/A.uasset"))
+        );
+        assert_eq!(p("/dev/GAME/Content/A.uasset", false), None);
+        assert_eq!(p("/Dev/Game/x", false), Some(PathBuf::from("x")));
+        assert_eq!(p("/Dev/Gamex/x", true), None);
+        assert_eq!(p("/Dev", true), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_with_either_slash_and_any_case() {
+        let root = Path::new(r"E:\DEV\Game");
+        let cwd = Path::new(r"E:\DEV\Game");
+        let d = |l: &str| to_depot(root, cwd, Path::new(l)).unwrap().unwrap();
+        assert_eq!(
+            d("E:/DEV/Game/Content/Hero.uasset").as_str(),
+            "Content/Hero.uasset"
+        );
+        assert_eq!(
+            d(r"e:\dev\game\Content\Hero.uasset").as_str(),
+            "Content/Hero.uasset"
+        );
+        assert_eq!(
+            d("e:/Dev/GAME/Content/Hero.uasset").as_str(),
+            "Content/Hero.uasset"
         );
     }
 }

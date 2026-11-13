@@ -363,6 +363,15 @@ lode switch main -r 214       # exactly revision 214 of main</code></pre>
 cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 <p>Files are always copied out of the cache, so a build that edits them cannot damage it. Every entry is checked when read, and a damaged one is downloaded again. When the cache grows past its cap, the files used least recently are removed. Several <code>lode</code> processes can use it at the same time.</p>
 <p><code>lode --version --json</code> prints the client version and the server API version it speaks, for scripts that check compatibility.</p>
+<h3>Editors and other tools</h3>
+<p>A few options exist for programs that drive <code>lode</code>, such as editor plugins:</p>
+<ul>
+  <li><code>lode status --unchanged PATHS</code> reports every named file, changed or not, with its changelist, whether you hold its lock and whether it needs one.</li>
+  <li><code>lode status --remote</code> adds what the server knows: files with a newer version on the branch and who holds each lock, in three requests however many files you name.</li>
+  <li><code>lode cat PATH@REV -o FILE</code> writes a past version to a file, which is safer than standard output for binary files on Windows.</li>
+  <li><code>--paths-from FILE</code> (or <code>-</code> for standard input) reads a long list of paths, one per line, for commands such as <code>commit</code>, <code>lock</code> and <code>revert</code>.</li>
+  <li>Paths can be absolute, with either kind of slash.</li>
+</ul>
 <p>You can add your own commands: an executable named <code>lode-foo</code> on your <code>PATH</code> runs when you type <code>lode foo</code>.</p>
 
 <h1>15. AI agents on your machine</h1>

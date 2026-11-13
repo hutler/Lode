@@ -189,7 +189,15 @@ impl Worker {
             "status" => {
                 let i: Paths = parse(input)?;
                 let paths = confine_all(root, &i.paths)?;
-                cmd::status::status(&ctx, cmd::status::StatusArgs { paths }).await
+                cmd::status::status(
+                    &ctx,
+                    cmd::status::StatusArgs {
+                        paths,
+                        unchanged: false,
+                        remote: false,
+                    },
+                )
+                .await
             }
             "diff" => {
                 let i: Paths = parse(input)?;
@@ -320,6 +328,7 @@ impl Worker {
                 }
                 let args = cmd::history::CatArgs {
                     path: arg,
+                    output: None,
                     source: no_source(),
                 };
                 cmd::history::cat(&ctx, args).await

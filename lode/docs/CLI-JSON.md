@@ -38,8 +38,20 @@ Error codes from the server (`lode_core::ErrorCode`) are passed through unchange
 
 - Paths are depot paths: `/`-separated, relative to the depot root.
 - Ids are 64 hex digits (BLAKE3).
-- `status` values: `modified`, `added`, `deleted`, `missing`, `conflicted`, `untracked`.
+- `status` values: `modified`, `added`, `deleted`, `missing`, `conflicted`, `untracked`, and
+  `unchanged` with `status --unchanged`.
 - `kind` values: `file`, `symlink`, `dir`.
+- Path arguments may be relative to the working directory or absolute, with either slash. On
+  Windows the workspace root is matched without regard to letter case.
+
+### Many paths: `--paths-from FILE`
+
+Commands that take a list of paths (`status`, `add`, `rm`, `revert`, `diff`, `commit`, `lock`,
+`unlock`, `shelve`, `clean`, `changelist move`) also read them from a file, one per line, or
+from standard input with `--paths-from -`. The file is UTF-8; a byte-order mark, `\r\n` line
+ends and blank lines are fine. Use it when a list would not fit on a command line (about
+32,000 characters on Windows). An empty list is a `usage` error, never "everything"; any other
+command refuses the option with `usage`.
 
 ## Commands
 
@@ -74,7 +86,7 @@ distinct blobs fetched from the server.
 - `show`: `{ "view": { "include": [..], "exclude": [..] } }`
 - `include`, `exclude`: `{ "view": {..}, "added": n, "removed": n }`
 
-### `lode status [paths]`
+### `lode status [--unchanged] [--remote] [paths]`
 
 ```json
 {
@@ -83,13 +95,29 @@ distinct blobs fetched from the server.
   "merges": [ { "branch": "feat", "from_rev": 8, "to_rev": 11 } ],
   "files": [
     { "path": "c/2.txt", "status": "added", "copy_from": { "path": "a/2.txt", "rev": 7 },
-      "moved": true, "changelist": null, "locked": false, "needs_lock": false }
+      "moved": true, "changelist": null, "locked": false, "needs_lock": false,
+      "lock_required": false }
   ],
-  "invalid": [ { "local": "/abs/path", "reason": "…" } ]
+  "invalid": [ { "local": "/abs/path", "reason": "…" } ],
+  "remote": {
+    "head_rev": 14,
+    "files": [
+      { "path": "Content/Hero.uasset", "newer": false, "deleted_at_head": false,
+        "locked_by": { "name": "bob", "kind": "user" }, "lock_workspace": "…", "mine": false }
+    ]
+  }
 }
 ```
 
-Only changed paths are listed. `moved` is true when the origin is deleted in the same change.
+Only changed paths are listed, unless `--unchanged` is given: then every tracked file in scope
+is listed, unchanged ones with status `unchanged`. `lock_required` is true for any file that
+matches `[locks].required`, whatever its state.
+`remote` is present only with `--remote`. It lists the files in scope that have a newer
+version at the branch head (`newer`; `deleted_at_head` when the head deleted it) or a lock
+held by anyone (`mine` when the lock is this workspace's own); files with neither are left
+out. It costs one request for the branch, at most one for the changes since the workspace's
+revision (none when it is at the head) and one for the locks, however many paths are named.
+Without the locks module, no locks are reported. `moved` is true when the origin is deleted in the same change.
 `locked` is true when this workspace holds the file's lock; `needs_lock` is true for a changed
 file that matches `[locks].required` and is not locked here (the commit would be refused).
 `merges` lists the merge waiting for the next commit (`lode merge`), empty when there is none.
@@ -317,6 +345,11 @@ and `changes_truncated`.
 `{ "path", "rev", "id", "kind", "executable", "size", "content": text }`, or
 `"content_base64"` in place of `content` when the content is not UTF-8. Without `--json` the
 raw bytes go to stdout.
+
+With `-o FILE` the content is written to `FILE` (through a temporary file next to it, so it
+is whole or absent) and nothing else goes to stdout; with `--json` the result is
+`{ "path", "rev", "id", "size", "output" }`, without content. Use it for binary files, which
+cannot pass through stdout safely on Windows.
 
 ### `lode blame <path>[@rev]`
 
