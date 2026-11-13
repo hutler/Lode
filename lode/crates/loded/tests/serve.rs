@@ -95,7 +95,10 @@ fn init_then_serve_answers_info() {
     let info: serde_json::Value = serde_json::from_str(body).unwrap();
     assert_eq!(info["server_version"], env!("CARGO_PKG_VERSION"));
     // Modules on by default that this build has.
-    assert_eq!(info["modules"], serde_json::json!(["locks", "shelves", "mcp"]));
+    assert_eq!(
+        info["modules"],
+        serde_json::json!(["locks", "shelves", "mcp"])
+    );
     assert!(response.to_ascii_lowercase().contains("x-request-id:"));
 
     let response = http_get_auth(&addr, "/api/v1/auth/whoami", &admin_token);

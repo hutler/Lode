@@ -35,6 +35,11 @@ max_blob_size = 68719476736
 max_changes_per_commit = 500000
 # Most changed paths listed per revision in a revision list.
 max_changes_listed = 1000
+# Most file edits in one MCP shelf tool call (create_shelf, update_shelf).
+mcp_max_edits = 500
+# Most file content, in bytes, inline in one MCP shelf tool call (16 MiB). Larger work uses
+# the HTTP blob API.
+mcp_max_inline_bytes = 16777216
 
 # Optional features compiled into loded. Webhooks and checks are off by default.
 [modules]
@@ -132,6 +137,10 @@ pub struct Limits {
     pub max_changes_per_commit: usize,
     /// Most changed paths listed per revision in a revision list.
     pub max_changes_listed: usize,
+    /// Most file edits in one MCP shelf tool call.
+    pub mcp_max_edits: usize,
+    /// Most inline file content, in bytes, in one MCP shelf tool call.
+    pub mcp_max_inline_bytes: u64,
 }
 
 impl Default for Limits {
@@ -141,6 +150,8 @@ impl Default for Limits {
             max_blob_size: lode_proto::consts::MAX_BLOB_SIZE,
             max_changes_per_commit: lode_proto::consts::MAX_CHANGES_PER_COMMIT,
             max_changes_listed: lode_proto::consts::MAX_CHANGES_LISTED,
+            mcp_max_edits: 500,
+            mcp_max_inline_bytes: 16 * 1024 * 1024,
         }
     }
 }
@@ -249,6 +260,8 @@ mod tests {
         assert_eq!(cfg.limits.max_blob_size, 64 * 1024 * 1024 * 1024);
         assert_eq!(cfg.limits.max_changes_per_commit, 500_000);
         assert_eq!(cfg.limits.max_changes_listed, 1_000);
+        assert_eq!(cfg.limits.mcp_max_edits, 500);
+        assert_eq!(cfg.limits.mcp_max_inline_bytes, 16 * 1024 * 1024);
         assert!(cfg.modules.locks && cfg.modules.shelves && cfg.modules.mcp);
         assert!(!cfg.modules.webhooks && !cfg.modules.checks);
     }

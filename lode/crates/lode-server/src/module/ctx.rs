@@ -71,6 +71,11 @@ impl ModuleCtx {
         self.state.tools()
     }
 
+    /// Size and count limits from `[limits]`.
+    pub fn limits(&self) -> &crate::config::Limits {
+        &self.state.config().limits
+    }
+
     /// The server's time source.
     pub fn clock(&self) -> &SharedClock {
         self.state.clock()
@@ -192,6 +197,28 @@ impl Depots<'_> {
         let target = read::readable_rev(self.state, caller, depot.id, rev).await?;
         let vis = Visibility::new(target.access, View::default());
         read::list_tree(self.state, depot.id, target.rev.root_tree, path, &vis).await
+    }
+
+    /// The entry at `path` in revision `rev`: `None` when nothing is there, `not_found` when
+    /// `caller` may not read the path (whether or not something is there).
+    pub async fn entry(
+        &self,
+        caller: &Caller,
+        depot: &DepotRow,
+        rev: u64,
+        path: &DepotPath,
+    ) -> ApiResult<Option<TreeEntry>> {
+        let target = read::readable_rev(self.state, caller, depot.id, rev).await?;
+        let vis = Visibility::new(target.access, View::default());
+        if !vis.shows(path) {
+            return Err(ApiError::not_found(format!("no file {}", path.as_str())));
+        }
+        commit::lookup(self.state.trees(), depot.id, &target.rev.root_tree, path)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "cannot load a tree");
+                ApiError::internal()
+            })
     }
 
     /// A file at revision `rev`, as `GET /files` returns it; `not_found` when hidden.

@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod db;
+mod mcp;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -325,12 +326,35 @@ async fn create(
     ApiJson(req): ApiJson<CreateShelfRequest>,
 ) -> ApiResult<(StatusCode, Json<ShelfView>)> {
     caller.require_scope(SCOPE_SHELVE)?;
-    let (d, _) = ctx.depots().resolve(&caller, &depot).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(create_shelf(&ctx, &caller, &depot, req).await?),
+    ))
+}
+
+/// The provenance a shelf stores: the client's, with `via` set by the server.
+fn shelf_provenance(caller: &Caller, given: Option<Provenance>) -> Provenance {
+    let mut p = given.unwrap_or_default();
+    p.via = Some(caller.via);
+    p.submitted_shelf = None;
+    p
+}
+
+/// Creates a shelf owned by `caller` (see `POST …/shelves`). The caller must have passed
+/// the scope check.
+pub async fn create_shelf(
+    ctx: &ModuleCtx,
+    caller: &Caller,
+    depot: &str,
+    mut req: CreateShelfRequest,
+) -> ApiResult<ShelfView> {
+    req.provenance = Some(shelf_provenance(caller, req.provenance.take()));
+    let (d, _) = ctx.depots().resolve(caller, depot).await?;
     // Garbage collection must not delete the blobs between the check and the write.
     let _fence = ctx.gc_fence().read().await;
     let branch = check_content(
-        &ctx,
-        &caller,
+        ctx,
+        caller,
         &d,
         &req.branch,
         req.base_rev,
@@ -380,7 +404,7 @@ async fn create(
         })
         .await?;
     ctx.notify_events();
-    Ok((StatusCode::CREATED, Json(loaded.view())))
+    Ok(loaded.view())
 }
 
 enum Changed {
@@ -397,8 +421,21 @@ async fn replace(
 ) -> ApiResult<Json<ShelfView>> {
     caller.require_scope(SCOPE_SHELVE)?;
     let id = parse_id(&id)?;
-    let (d, access) = ctx.depots().resolve(&caller, &depot).await?;
-    let current = visible_shelf(&ctx, &access, d.id, id, false).await?;
+    Ok(Json(update_shelf(&ctx, &caller, &depot, id, req).await?))
+}
+
+/// Replaces the content of shelf `id`, which `caller` must own (see `PUT …/shelves/{id}`).
+/// The caller must have passed the scope check.
+pub async fn update_shelf(
+    ctx: &ModuleCtx,
+    caller: &Caller,
+    depot: &str,
+    id: i64,
+    mut req: UpdateShelfRequest,
+) -> ApiResult<ShelfView> {
+    req.provenance = Some(shelf_provenance(caller, req.provenance.take()));
+    let (d, access) = ctx.depots().resolve(caller, depot).await?;
+    let current = visible_shelf(ctx, &access, d.id, id, false).await?;
     if current.owner_id != caller.principal.id {
         return Err(ApiError::new(
             ErrorCode::PermissionDenied,
@@ -410,8 +447,8 @@ async fn replace(
     }
     let _fence = ctx.gc_fence().read().await;
     check_content(
-        &ctx,
-        &caller,
+        ctx,
+        caller,
         &d,
         &current.branch,
         req.base_rev,
@@ -468,7 +505,7 @@ async fn replace(
     match out {
         Changed::Done(loaded) => {
             ctx.notify_events();
-            Ok(Json(loaded.view()))
+            Ok(loaded.view())
         }
         Changed::NotOpen(state) => Err(not_open(&state)),
         Changed::Gone => Err(ApiError::not_found(format!("no shelf {id}"))),
@@ -932,7 +969,8 @@ impl Module for Shelves {
 
     fn mcp_tools(&self, ctx: ModuleCtx) -> Vec<ToolDef> {
         let list_ctx = ctx.clone();
-        vec![
+        let mut tools = mcp::tools(&ctx);
+        tools.extend([
             ToolDef {
                 name: "list_shelves".into(),
                 description: "List shelves (proposed change sets stored on the server) of a \
@@ -989,6 +1027,7 @@ impl Module for Shelves {
                     })
                 }),
             },
-        ]
+        ]);
+        tools
     }
 }

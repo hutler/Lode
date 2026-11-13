@@ -548,6 +548,16 @@ and reports truncation; binary content is returned as a summary (size, id), not 
   (up to 1 MiB). `search_history` matches message and changed paths case-insensitively and
   looks through at most 2000 revisions per call, returning `next_before` to continue.
 - Built on `rmcp` 3.x, which needs Rust 1.88.
+- Shelf tools (shelves module): `create_shelf` (`base_rev` defaults to the branch head) and
+  `update_shelf` (scope `shelve`) take whole-file edits; `update_shelf` replaces the full
+  edit set and keeps the description, base revision and `agent` unless given. Each edit's
+  `base_id` comes from the base revision, which also makes a path the caller cannot read
+  `not_found`. `add` with `copy_from` and no content copies the source exactly. An optional
+  `agent` object is stored as provenance. At most `[limits] mcp_max_edits` (500) edits and
+  `mcp_max_inline_bytes` (16 MiB) of content per call, else `too_large`. `submit_shelf`
+  (scope `write`) needs `expected_version`.
+- A shelf's provenance gets `via` from the server, like a commit's. A submitted shelf's
+  revision records the submitter's `via`; the shelf keeps the one it was made with.
 
 ### 9.4 Webhooks (`lode-mod-webhooks`)
 
