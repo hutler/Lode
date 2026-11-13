@@ -57,6 +57,7 @@ pub fn run(cmd: ServiceCommand) -> anyhow::Result<()> {
     }
 }
 
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
 /// The systemd unit for `loded serve --config <config>`, running as `user`, allowed to write
 /// only `writable`, and able to bind ports below 1024 when `low_port`.
 pub fn systemd_unit(
@@ -111,6 +112,7 @@ pub fn systemd_unit(
     )
 }
 
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
 /// A path as one systemd word: quoted when it holds spaces.
 fn systemd_quote(p: &Path) -> String {
     let s = p.display().to_string();
@@ -121,6 +123,7 @@ fn systemd_quote(p: &Path) -> String {
     }
 }
 
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
 /// The directories the server writes: the data directory, and the backup directory when
 /// backups are on and it lies outside.
 pub fn writable_dirs(cfg: &ServerConfig) -> Vec<PathBuf> {
