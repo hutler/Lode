@@ -40,6 +40,12 @@ pub enum ServerError {
     /// `init` was run on a directory that already holds a server.
     #[error("data directory {0} is already initialized")]
     AlreadyInitialized(PathBuf),
+    /// A password shorter than the minimum.
+    #[error(
+        "the password must have at least {} characters",
+        crate::auth::MIN_PASSWORD_LEN
+    )]
+    WeakPassword,
     /// The database has no built-in `admin` user.
     #[error("the database has no `admin` user")]
     NoAdmin,
@@ -185,6 +191,44 @@ pub async fn reset_admin(config: &ServerConfig) -> Result<String, ServerError> {
         return Err(ServerError::NoAdmin);
     }
     Ok(token)
+}
+
+/// Offline: sets the built-in `admin` user's password, so the administrator can sign in with
+/// `lode login` (used by `loded setup`). The password must have at least
+/// [`MIN_PASSWORD_LEN`](crate::auth::MIN_PASSWORD_LEN) characters.
+pub async fn set_admin_password(config: &ServerConfig, password: &str) -> Result<(), ServerError> {
+    if password.chars().count() < crate::auth::MIN_PASSWORD_LEN {
+        return Err(ServerError::WeakPassword);
+    }
+    let db = check_initialized(&config.data_dir)?;
+    let meta = open_meta(db, Vec::new()).await?;
+    let password = password.to_owned();
+    let hash = tokio::task::spawn_blocking(move || crate::auth::hash_password(&password))
+        .await
+        .map_err(|e| ServerError::Io {
+            context: "hashing the password".into(),
+            source: io::Error::other(e),
+        })?
+        .map_err(|e| ServerError::Io {
+            context: "hashing the password".into(),
+            source: io::Error::other(e.to_string()),
+        })?;
+    let found = meta
+        .write(move |tx| {
+            let Some(admin) = tx
+                .principal_by_name(ADMIN_USER)?
+                .filter(|p| p.kind == PrincipalKind::User)
+            else {
+                return Ok(false);
+            };
+            tx.set_password_hash(admin.id, Some(&hash))?;
+            Ok(true)
+        })
+        .await?;
+    if !found {
+        return Err(ServerError::NoAdmin);
+    }
+    Ok(())
 }
 
 /// Opens an initialized data directory and builds the shared state.

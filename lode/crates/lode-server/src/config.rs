@@ -72,6 +72,12 @@ checks = false
 # Unreferenced objects younger than this are kept (24 hours).
 grace_seconds = 86400
 
+# Scheduled backups while the server runs, like `loded backup`. Off unless `every` is set.
+# [backup]
+# every = "24h"       # s, m, h or d; at least 1m
+# keep = 7            # complete backups kept; older ones are removed
+# dir = "backups"     # relative to this file; best on another disk
+
 # Webhooks module, when enabled in [modules].
 [webhooks]
 # Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
@@ -124,6 +130,9 @@ pub struct ServerConfig {
     /// Garbage collection.
     #[serde(default)]
     pub gc: GcConfig,
+    /// Scheduled backups.
+    #[serde(default)]
+    pub backup: BackupConfig,
     /// Webhooks module settings.
     #[serde(default)]
     pub webhooks: WebhooksConfig,
@@ -135,6 +144,87 @@ pub struct ServerConfig {
 pub struct WebhooksConfig {
     /// Accept `http://` hook URLs. Off by default: hooks must use `https://`.
     pub allow_http: bool,
+}
+
+/// The `[backup]` table.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "RawBackup")]
+pub struct BackupConfig {
+    /// Time between backups; `None` turns scheduled backups off.
+    pub every: Option<std::time::Duration>,
+    /// Complete backups kept. Default 7.
+    pub keep: usize,
+    /// Where backups go. Resolved against the config file's directory by
+    /// [`ServerConfig::load`]. Default `backups`.
+    pub dir: PathBuf,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            every: None,
+            keep: 7,
+            dir: PathBuf::from("backups"),
+        }
+    }
+}
+
+impl BackupConfig {
+    /// The schedule, when backups are on.
+    pub fn schedule(&self) -> Option<crate::maintenance::BackupSchedule> {
+        self.every.map(|every| crate::maintenance::BackupSchedule {
+            every,
+            keep: self.keep,
+            dir: self.dir.clone(),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBackup {
+    every: Option<String>,
+    keep: Option<usize>,
+    dir: Option<PathBuf>,
+}
+
+impl TryFrom<RawBackup> for BackupConfig {
+    type Error = String;
+
+    fn try_from(raw: RawBackup) -> Result<Self, String> {
+        let defaults = Self::default();
+        let every = raw.every.as_deref().map(parse_interval).transpose()?;
+        let keep = raw.keep.unwrap_or(defaults.keep);
+        if keep == 0 {
+            return Err("[backup] keep must be at least 1".into());
+        }
+        Ok(Self {
+            every,
+            keep,
+            dir: raw.dir.unwrap_or(defaults.dir),
+        })
+    }
+}
+
+/// `"90s"`, `"30m"`, `"24h"` or `"7d"`; at least one minute.
+pub fn parse_interval(text: &str) -> Result<std::time::Duration, String> {
+    let bad = || format!("{text:?} is not an interval such as \"24h\" (s, m, h or d)");
+    let t = text.trim();
+    let split = t.find(|c: char| !c.is_ascii_digit()).ok_or_else(bad)?;
+    let (n, unit) = t.split_at(split);
+    let n: u64 = n.parse().map_err(|_| bad())?;
+    let secs = match unit {
+        "s" => Some(n),
+        "m" => n.checked_mul(60),
+        "h" => n.checked_mul(3600),
+        "d" => n.checked_mul(86_400),
+        _ => None,
+    }
+    .ok_or_else(bad)?;
+    if secs < 60 {
+        return Err(format!("{text:?} is shorter than one minute"));
+    }
+    Ok(std::time::Duration::from_secs(secs))
 }
 
 /// The `[gc]` table.
@@ -381,6 +471,7 @@ impl ServerConfig {
             }
             None => {}
         }
+        cfg.backup.dir = base.join(&cfg.backup.dir);
         Ok(cfg)
     }
 
@@ -404,6 +495,7 @@ impl ServerConfig {
             connections: ConnectionsConfig::default(),
             limits: Limits::default(),
             gc: GcConfig::default(),
+            backup: BackupConfig::default(),
             modules: ModulesConfig::default(),
             webhooks: WebhooksConfig::default(),
         }
@@ -468,6 +560,32 @@ mod tests {
         };
         assert_eq!(cert, Path::new("/etc/lode/c.pem"));
         assert_eq!(key, Path::new("/abs/k.pem"));
+    }
+
+    #[test]
+    fn backup_intervals_and_defaults() {
+        let parse = |text: &str| {
+            ServerConfig::parse(
+                &format!("data_dir = '.'\n{text}"),
+                Path::new("/srv/lode"),
+                Path::new("x"),
+            )
+        };
+        let cfg = parse("").unwrap();
+        assert!(cfg.backup.schedule().is_none());
+        assert_eq!(cfg.backup.dir, Path::new("/srv/lode/backups"));
+        let cfg = parse("[backup]\nevery = '24h'\nkeep = 3\ndir = '/mnt/b'").unwrap();
+        let s = cfg.backup.schedule().unwrap();
+        assert_eq!(s.every, std::time::Duration::from_secs(86_400));
+        assert_eq!((s.keep, s.dir), (3, PathBuf::from("/mnt/b")));
+        assert_eq!(parse_interval("90s").unwrap().as_secs(), 90);
+        assert_eq!(parse_interval("30m").unwrap().as_secs(), 1_800);
+        assert_eq!(parse_interval("7d").unwrap().as_secs(), 604_800);
+        for bad in ["10s", "1w", "h", "", "-1h", "1.5h"] {
+            assert!(parse_interval(bad).is_err(), "{bad}");
+        }
+        assert!(parse("[backup]\nevery = '1h'\nkeep = 0").is_err());
+        assert!(parse("[backup]\nwhen = '1h'").is_err());
     }
 
     #[test]

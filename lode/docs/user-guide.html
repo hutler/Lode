@@ -444,22 +444,36 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
   <li><strong>Software:</strong> none. <code>loded</code> is one executable with its database built in.</li>
   <li><strong>Disk:</strong> the data directory holds everything. Plan for the size of your content plus history; identical content is stored once and compressed. Use a local filesystem, not a network share.</li>
   <li><strong>Memory and CPU:</strong> modest. Memory use does not grow with file size. A small virtual machine serves a team of 100.</li>
-  <li><strong>Network:</strong> one TCP port (7480 by default), reachable by all clients.</li>
+  <li><strong>Network:</strong> one TCP port, reachable by all clients: 443 with a Let's Encrypt certificate, 7480 by default otherwise.</li>
 </ul>
 
 <h1>2. Installing and first start</h1>
-<p>Unpack the release archive for the server's platform (Part I, chapter 1) and put <code>loded</code> somewhere on the <code>PATH</code>. Then create the data directory:</p>
-<pre><code>loded init /var/lib/lode
-Initialized Lode data directory /var/lib/lode
-Wrote default configuration /var/lib/lode/loded.toml
+<p>Unpack the release archive for the server's platform (Part I, chapter 1) and put <code>loded</code> somewhere on the <code>PATH</code>. Then, as administrator (Windows) or root (Linux), run the setup:</p>
+<pre><code>loded setup
+Data directory [/var/lib/lode]:
+Domain name for HTTPS with Let's Encrypt (empty: this machine only): lode.example.com
+Email for certificate notices (optional): admin@example.com
+Listen address [0.0.0.0:443]:
+Daily backups into (a path, best on another disk, or "none") [/var/lib/lode/backups]: /mnt/backup/lode
+Admin password (at least 8 characters):
+Admin password again:
 
-Admin token (shown only now; store it safely):
-lode_3q…</code></pre>
-<p><code>init</code> creates the data directory, a commented configuration file, and an administrator account named <code>admin</code>. It prints the admin token once. Store it in your password manager.</p>
-<pre><code>loded serve --config /var/lib/lode/loded.toml
-loded listening on http://127.0.0.1:7480</code></pre>
-<p>From your own machine, sign in with the token and set the server up:</p>
-<pre><code>lode login https://lode.example.com --token-stdin &lt; admin-token.txt
+Lode is set up in /var/lib/lode
+Server address for clients: https://lode.example.com
+Admin token (shown only now; you can also sign in as admin with the password):
+lode_3q…
+
+loded service install --config /var/lib/lode/loded.toml
+loded service start</code></pre>
+<p><code>setup</code> writes a commented <code>loded.toml</code> with your answers, checks it, creates the data directory and an administrator account named <code>admin</code> with your password, and prints the admin token once. With a domain, the server gets its HTTPS certificate from Let's Encrypt when it starts (chapter 4); the name must already point at the machine. Without one, it serves plain HTTP on this machine only, for a single user or behind your own proxy.</p>
+<p>Every answer can be a flag, for scripted installs; <code>--yes</code> (or no terminal) takes the defaults for the rest:</p>
+<pre><code>loded setup --yes --data-dir /var/lib/lode --domain lode.example.com \
+    --email admin@example.com --backup-dir /mnt/backup/lode --admin-password-file pw.txt
+loded setup --yes --local --no-backup --admin-password-file -     # password on standard input</code></pre>
+<p><code>loded service install</code> registers the server to start at boot (chapter 5). To try it in a terminal first, run <code>loded serve --config /var/lib/lode/loded.toml</code> and stop it with Ctrl-C.</p>
+<p>The older way still works: <code>loded init /var/lib/lode</code> creates the data directory with the default configuration (plain HTTP on 127.0.0.1:7480) and prints the admin token, and you edit <code>loded.toml</code> yourself.</p>
+<p>From your own machine, sign in as <code>admin</code> with the password (or the token) and set the server up:</p>
+<pre><code>lode login https://lode.example.com
 lode admin depot create game
 lode admin user create alice                       # prompts for her first password
 lode admin acl add allow write user:alice --depot game</code></pre>
@@ -529,28 +543,25 @@ location / {
 }</code></pre>
 
 <h1>5. Running as a service</h1>
-<p>Run the server as a dedicated account that owns the data directory and nothing else. The server shuts down cleanly on a stop signal and finishes requests in progress. The release archive has ready files in <code>packaging/</code>.</p>
+<p>Run as administrator (Windows) or root (Linux):</p>
+<pre><code>loded service install --config /var/lib/lode/loded.toml
+loded service start
+loded service stop
+loded service uninstall          # removes the service; the data directory is kept</code></pre>
+<p>Add <code>--dry-run</code> to <code>install</code> or <code>uninstall</code> to see what would be done. The server shuts down cleanly on stop and finishes requests in progress.</p>
 <h3>Linux (systemd)</h3>
+<p><code>install</code> writes <code>/etc/systemd/system/loded.service</code>, gives the data and backup directories to the service account, and enables the unit. The service runs as the account <code>lode</code> (<code>--user</code> for another), which must exist:</p>
 <pre><code>useradd --system --home-dir /var/lib/lode --shell /usr/sbin/nologin lode
-install -m 0755 loded lode /usr/local/bin/
-install -d -o lode -g lode -m 0750 /var/lib/lode
-sudo -u lode loded init /var/lib/lode            # prints the admin token once
-install -m 0644 packaging/systemd/loded.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now loded
+loded service install --config /var/lib/lode/loded.toml
+loded service start
 journalctl -u loded                              # logs</code></pre>
-<p>The unit restarts the server if it fails, gives it 60 seconds to finish requests on stop, and limits it to its data directory.</p>
+<p>The unit restarts the server if it fails, gives it 60 seconds to finish requests on stop, may write only its data and backup directories, and may bind port 443 without running as root. <code>packaging/systemd/loded.service</code> in the release archive is the same unit for installing by hand.</p>
 <h3>Windows</h3>
-<p><code>loded.exe</code> is a console program. To run it as a service, use the small wrapper WinSW with the configuration in <code>packaging\windows\loded-service.xml</code>:</p>
-<ol>
-  <li>Put <code>loded.exe</code>, <code>lode.exe</code> and <code>WinSW-x64.exe</code> (from the WinSW releases page) in <code>C:\Program Files\Lode</code>.</li>
-  <li>Rename <code>WinSW-x64.exe</code> to <code>loded-service.exe</code> and copy <code>loded-service.xml</code> next to it.</li>
-  <li>In an administrator PowerShell:</li>
-</ol>
-<pre><code>&amp; "C:\Program Files\Lode\loded.exe" init C:\ProgramData\Lode
-&amp; "C:\Program Files\Lode\loded-service.exe" install
-Start-Service loded</code></pre>
-<p>Logs go to <code>C:\ProgramData\Lode\logs</code>. Without WinSW, a Task Scheduler task that runs <code>loded.exe serve --config C:\ProgramData\Lode\loded.toml</code> at startup, whether or not anyone is signed in, also works, but is not restarted on failure.</p>
+<p><code>install</code> registers <code>loded</code> as a Windows service named <code>loded</code> ("Lode server") that starts automatically, runs as LocalSystem and is restarted if it fails. No wrapper program is needed. In an administrator PowerShell:</p>
+<pre><code>&amp; "C:\Program Files\Lode\loded.exe" setup
+&amp; "C:\Program Files\Lode\loded.exe" service install --config C:\ProgramData\Lode\loded.toml
+&amp; "C:\Program Files\Lode\loded.exe" service start</code></pre>
+<p>The service also appears in the Services console and works with <code>Start-Service loded</code> and <code>Stop-Service loded</code>. Its log is <code>logs\loded.log</code> in the data directory. Allow the listen port through Windows Firewall for other machines to connect.</p>
 <h3>Container</h3>
 <p>The image <code>ghcr.io/hutler/loded</code> runs the server as an unprivileged user (uid 10001) and keeps all data in the volume <code>/var/lib/lode</code>. On first start it runs <code>loded init</code> and prints the admin token to the log, once.</p>
 <pre><code>docker run -d --name lode --restart unless-stopped \
@@ -725,7 +736,14 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
 <p>The same scopes and permissions apply as everywhere else: an agent sees only what its account may read, and tools it may not use are not offered to it. Large files and diffs are cut off at a size limit and marked as truncated.</p>
 
 <h1>13. Backup and restore</h1>
-<p>Everything is in the data directory: a database file (<code>meta.db</code>) and the stored content (<code>depots/</code>).</p>
+<p>Everything is in the data directory: a database file (<code>meta.db</code>) and the stored content (<code>depots/</code>). A certificate from Let's Encrypt (<code>acme/</code>) is not backed up; the server obtains a new one if it is lost.</p>
+<h3>Scheduled backups</h3>
+<p>With a <code>[backup]</code> table, the running server makes a backup on a schedule and keeps the newest few:</p>
+<pre><code>[backup]
+every = "24h"          # s, m, h or d
+keep = 7
+dir = "/mnt/backup/lode"</code></pre>
+<p>Each backup is a folder <code>lode-backup-&lt;UTC time&gt;</code>, the same as <code>loded backup</code> makes. It is written under a <code>.partial</code> name first, so a backup cut short by a restart never counts and is cleared on the next run. The newest backup's time decides when the next is due, so restarts do not shift the schedule. Older backups beyond <code>keep</code> are deleted; other files in the folder are left alone. <code>loded setup</code> turns this on (daily, seven kept) unless told <code>none</code>. Put the folder on another disk, and copy it off the machine regularly.</p>
 <h3>Backup while running</h3>
 <pre><code>loded backup --config /var/lib/lode/loded.toml /backups/lode-2026-11-12</code></pre>
 <p>This makes a consistent copy without stopping the server. Stored content never changes once written, so repeated backups to the same destination with a tool such as <code>rsync</code> copy only what is new.</p>
@@ -756,11 +774,11 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 
 <h1>15. Upgrading</h1>
 <ol>
-  <li>Take a backup.</li>
-  <li>Stop the server, replace the <code>loded</code> executable, start it. The database is upgraded automatically on start.</li>
+  <li>Take a backup (<code>loded backup</code>).</li>
+  <li>Stop the server (<code>loded service stop</code>), replace the <code>loded</code> executable, start it (<code>loded service start</code>). The database is upgraded automatically on start.</li>
   <li>A server refuses to start on a database written by a newer version, so to go back, restore the backup taken in step 1.</li>
 </ol>
-<p>Clients and servers of the same major version work together. Upgrade the server first, then clients.</p>
+<p>Clients and servers of the same major version work together. Upgrade the server first, then clients. <code>docs/UPGRADING.md</code> in the source tree has the details and what changed between releases.</p>
 
 <h1>16. Security checklist</h1>
 <ul>

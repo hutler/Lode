@@ -2,6 +2,12 @@
 
 #![forbid(unsafe_code)]
 
+mod service;
+mod setup;
+#[cfg(windows)]
+mod winsvc;
+
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -55,11 +61,33 @@ enum Command {
         /// Path to loded.toml.
         #[arg(long)]
         config: PathBuf,
+        /// Run under the Windows service manager (set by `loded service install`).
+        #[arg(long, hide = true)]
+        service: bool,
     },
+    /// First run: ask a few questions, write a checked loded.toml, initialize the data
+    /// directory and set the admin password. Every answer can be given as a flag.
+    Setup(setup::SetupArgs),
+    /// Register loded as a system service (Windows service, or systemd on Linux).
+    #[command(subcommand)]
+    Service(service::ServiceCommand),
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if let Command::Serve {
+        config,
+        service: true,
+    } = &cli.command
+    {
+        #[cfg(windows)]
+        return winsvc::run(config.clone());
+        #[cfg(not(windows))]
+        {
+            let _ = config;
+            anyhow::bail!("--service is for Windows; on Linux, systemd runs `loded serve`");
+        }
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("LODED_LOG")
@@ -150,40 +178,60 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             );
             Ok(())
         }
-        Command::Serve { config } => {
+        Command::Serve { config, .. } => {
             let cfg = ServerConfig::load(&config)?;
-            let modules = lode_server::module::select_enabled(&cfg.modules, available_modules());
-            let state =
-                lode_server::open_state(cfg.clone(), Arc::new(SystemClock), modules).await?;
-            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-            let dispatcher = lode_server::events::Dispatcher::spawn(state.clone(), async move {
-                let _ = stop_rx.await;
-            });
-            let (stop_workers, stop) = lode_server::module::Stop::new();
-            let workers = lode_server::module::spawn_workers(&state, &stop);
-            let router = lode_server::router(state);
-            let server = BoundServer::bind(&cfg, router).await?;
-            // Tests and wrapper scripts read this line to find the port.
-            println!(
-                "loded listening on {}://{}",
-                server.scheme(),
-                server.local_addr()
-            );
-            tracing::info!(addr = %server.local_addr(), scheme = server.scheme(), "listening");
-            server
-                .run(lode_server::shutdown_signal())
-                .await
-                .context("server error")?;
-            let _ = stop_tx.send(());
-            let _ = stop_workers.send(true);
-            let _ = dispatcher.await;
-            for w in workers {
-                let _ = w.await;
-            }
-            tracing::info!("stopped");
-            Ok(())
+            serve(cfg, lode_server::shutdown_signal()).await
         }
+        Command::Setup(args) => setup::run(args).await,
+        Command::Service(cmd) => service::run(cmd),
     }
+}
+
+/// Runs the server until `shutdown` completes: modules' workers, the event dispatcher and
+/// scheduled backups start and stop with it.
+pub(crate) async fn serve(
+    cfg: ServerConfig,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
+    let modules = lode_server::module::select_enabled(&cfg.modules, available_modules());
+    let state = lode_server::open_state(cfg.clone(), Arc::new(SystemClock), modules).await?;
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let dispatcher = lode_server::events::Dispatcher::spawn(state.clone(), async move {
+        let _ = stop_rx.await;
+    });
+    let (stop_workers, stop) = lode_server::module::Stop::new();
+    let mut workers = lode_server::module::spawn_workers(&state, &stop);
+    if let Some(schedule) = cfg.backup.schedule() {
+        tracing::info!(
+            dir = %schedule.dir.display(),
+            every_seconds = schedule.every.as_secs(),
+            keep = schedule.keep,
+            "scheduled backups on"
+        );
+        workers.push(tokio::spawn(lode_server::maintenance::run_backups(
+            state.clone(),
+            schedule,
+            stop.clone(),
+        )));
+    }
+    let router = lode_server::router(state);
+    let server = BoundServer::bind(&cfg, router).await?;
+    // Tests and wrapper scripts read this line to find the port.
+    println!(
+        "loded listening on {}://{}",
+        server.scheme(),
+        server.local_addr()
+    );
+    tracing::info!(addr = %server.local_addr(), scheme = server.scheme(), "listening");
+    server.run(shutdown).await.context("server error")?;
+    let _ = stop_tx.send(());
+    let _ = stop_workers.send(true);
+    let _ = dispatcher.await;
+    for w in workers {
+        let _ = w.await;
+    }
+    tracing::info!("stopped");
+    Ok(())
 }
 
 /// Every module compiled into this build. `[modules]` decides which are enabled. Keep in step

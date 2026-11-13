@@ -906,6 +906,16 @@ absorbs.
   immutable; any object referenced by the copied database is already on disk).
   `loded backup --config <file> <dest>` runs beside a live server; `dest` must be missing or
   empty and becomes a data directory, including `loded.toml`.
+- **Scheduled backups** (T082): with `[backup] every`, `loded serve` runs the same backup on
+  a schedule into `[backup] dir`, as `lode-backup-<UTC time>` (written as `.partial` and
+  renamed when complete). The newest complete backup's name says when the next is due, so
+  restarts keep the schedule; complete backups beyond `keep` (7) are removed, oldest first.
+  The scheduler checks at least hourly, by the server clock.
+- **Setup and services** (T082): `loded setup` writes a checked `loded.toml` from the answers
+  and initializes the data directory with an admin password. `loded service install` writes a
+  systemd unit on Linux, or registers a native Windows service whose process is
+  `loded serve --config <file> --service` (stop and shutdown requests stop the server
+  gracefully; the log goes to `<data_dir>/logs/loded.log`).
 
 ## 12. Testing strategy
 

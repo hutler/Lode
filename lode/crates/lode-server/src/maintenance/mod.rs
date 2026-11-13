@@ -3,10 +3,12 @@
 mod backup;
 mod fsck;
 mod gc;
+mod schedule;
 
 pub use backup::{backup, BackupError, BackupReport};
 pub use fsck::{fsck, FsckOptions};
 pub use gc::{collect_garbage, GcOptions};
+pub use schedule::{backup_tick, run_backups, BackupSchedule, BackupTick, BACKUP_PREFIX};
 
 use axum::extract::State;
 use axum::routing::post;
