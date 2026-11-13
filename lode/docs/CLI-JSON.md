@@ -77,6 +77,8 @@ distinct blobs fetched from the server.
 
 ```json
 {
+  "branch": "main",
+  "rev": 12,
   "files": [
     { "path": "c/2.txt", "status": "added", "copy_from": { "path": "a/2.txt", "rev": 7 },
       "moved": true, "changelist": null, "locked": false, "needs_lock": false }
@@ -217,6 +219,22 @@ side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
 Outcomes: `added`, `updated`, `merged`, `conflicted`, `deleted`, `kept` (no longer visible
 after a full sync and modified locally: left on disk, untracked). `full` is true when the
 access epoch changed and the whole manifest was compared.
+
+### `lode branch list [--all]` / `create <name> [--from B[@REV]] [--switch]` / `archive <name>`
+
+A branch is `{ "name", "head_rev", "created_rev", "parent": { "branch", "rev" } | null,
+"state": "active"|"archived" }`. `list` prints `{ "current", "branches": [branch] }`;
+`create` prints the branch (from this workspace's branch at its revision by default), plus
+`"switch"` with the switch result when `--switch`; `archive` prints the branch.
+
+### `lode switch <branch> [-r REV]`
+
+The `update` result plus `"branch"`, `"switched_from"` (null when already on it) and
+`"locks_left"` (paths whose locks stay on the old branch). Local changes are carried over as
+an update carries them; a switch compares the target's full manifest with the workspace, so
+it is right after commits too. An interrupted switch is finished by `lode switch` to the same
+branch or `lode update`. `update` prints `"branch"`, `"switched_from": null` and
+`"locks_left": []` too.
 
 ### `lode resolve <paths> --mine|--theirs|--merged`
 

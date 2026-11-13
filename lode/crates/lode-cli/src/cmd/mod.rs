@@ -1,5 +1,6 @@
 //! Subcommands.
 
+pub mod branch;
 pub mod changelist;
 pub mod checkout;
 pub mod commit;

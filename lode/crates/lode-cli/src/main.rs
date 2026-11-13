@@ -81,6 +81,10 @@ enum Command {
     Commit(cmd::commit::CommitArgs),
     /// Bring the workspace to a newer (or older) revision, merging local changes.
     Update(cmd::update::UpdateArgs),
+    /// List, create or archive branches.
+    Branch(cmd::branch::BranchArgs),
+    /// Move the workspace to another branch.
+    Switch(cmd::branch::SwitchArgs),
     /// Settle a conflict left by an update.
     Resolve(cmd::update::ResolveArgs),
     /// Take exclusive locks on files.
@@ -142,6 +146,8 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Clean(a)) => cmd::revert::clean(&ctx, a).await,
         Some(Command::Commit(a)) => cmd::commit::commit(&ctx, a).await,
         Some(Command::Update(a)) => cmd::update::update(&ctx, a).await,
+        Some(Command::Branch(a)) => cmd::branch::branch(&ctx, a).await,
+        Some(Command::Switch(a)) => cmd::branch::switch(&ctx, a).await,
         Some(Command::Resolve(a)) => cmd::update::resolve(&ctx, a).await,
         Some(Command::Lock(a)) => cmd::locks::lock(&ctx, a).await,
         Some(Command::Unlock(a)) => cmd::locks::unlock(&ctx, a).await,

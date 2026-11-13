@@ -120,7 +120,9 @@ async fn a_locks_b_is_refused_a_commits_b_can_lock() {
     force_write(&b, "art/door.psd", "door by bob");
     let st = status_of(&b, "art/door.psd");
     assert_eq!(st["needs_lock"], true);
-    let text = String::from_utf8(b.lode(&["status"]).get_output().stdout.clone()).unwrap();
+    let text = without_branch_line(
+        String::from_utf8(b.lode(&["status"]).get_output().stdout.clone()).unwrap(),
+    );
     assert!(text.contains("M  art/door.psd  (needs lock)"), "{text}");
     let (code, v) = b.json_status(&["commit", "-m", "mine"]);
     assert_eq!((code, v["error"]["code"].clone()), (1, json!("locked")));
@@ -128,7 +130,9 @@ async fn a_locks_b_is_refused_a_commits_b_can_lock() {
     // A commits; the lock goes and the file is read-only again.
     a.write("art/door.psd", "door 2");
     a.json(&["status"]);
-    let line = String::from_utf8(a.lode(&["status"]).get_output().stdout.clone()).unwrap();
+    let line = without_branch_line(
+        String::from_utf8(a.lode(&["status"]).get_output().stdout.clone()).unwrap(),
+    );
     assert_eq!(line, "ML art/door.psd\n");
     a.json(&["commit", "-m", "new door"]);
     assert!(read_only(&a, "art/door.psd"));
@@ -185,7 +189,9 @@ async fn keep_locks_and_a_broken_lock() {
         "{stderr}"
     );
     assert!(read_only(&a, "art/door.psd"));
-    let line = String::from_utf8(a.lode(&["status"]).get_output().stdout.clone()).unwrap();
+    let line = without_branch_line(
+        String::from_utf8(a.lode(&["status"]).get_output().stdout.clone()).unwrap(),
+    );
     assert_eq!(line, "");
 
     // Without force, nobody but the holder can unlock.
@@ -248,4 +254,11 @@ async fn team_without_lock_scope(options: TestServerOptions) -> Team {
         bob: String::new(),
         ana,
     }
+}
+
+/// Human `status` output without its first line, `On branch … at r…`.
+fn without_branch_line(text: String) -> String {
+    let (first, rest) = text.split_once('\n').unwrap_or((&text, ""));
+    assert!(first.starts_with("On branch main at r"), "{text}");
+    rest.to_owned()
 }

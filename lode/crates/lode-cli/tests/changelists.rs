@@ -83,7 +83,9 @@ async fn two_changelists_commit_as_two_revisions() {
             ("new.txt".into(), json!("art")),
         ]
     );
-    let text = String::from_utf8(ws.lode(&["status"]).get_output().stdout.clone()).unwrap();
+    let text = without_branch_line(
+        String::from_utf8(ws.lode(&["status"]).get_output().stdout.clone()).unwrap(),
+    );
     assert_eq!(
         text,
         "M  c.txt\n\nChangelist art:\nM  b.txt\nA  new.txt\n\nChangelist ui: Button work\nM  a.txt\n"
@@ -214,4 +216,11 @@ async fn moving_files_and_deleting_changelists() {
     let rest: Vec<String> = lists(&ws).into_iter().map(|(p, _)| p).collect();
     assert_eq!(rest, vec!["a.txt", "d/e.txt"]);
     assert_eq!(names(&ws), vec!["default"]);
+}
+
+/// Human `status` output without its first line, `On branch … at r…`.
+fn without_branch_line(text: String) -> String {
+    let (first, rest) = text.split_once('\n').unwrap_or((&text, ""));
+    assert!(first.starts_with("On branch main at r"), "{text}");
+    rest.to_owned()
 }

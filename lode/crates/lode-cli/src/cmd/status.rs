@@ -70,6 +70,11 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
     let all_lists = ws.db().changelists()?;
     let required = crate::cmd::locks::required(&ws);
     let lists: HashMap<i64, String> = all_lists.iter().map(|c| (c.id, c.name.clone())).collect();
+    let branch = ws.db().config(lode_workspace::db::keys::BRANCH)?;
+    let rev = ws.db().config_u64(lode_workspace::db::keys::SYNCED_REV)?;
+    if let (Some(b), Some(r)) = (&branch, rev) {
+        ctx.out.line(format!("On branch {b} at r{r}"));
+    }
 
     let mut files = Vec::new();
     let mut groups: HashMap<Option<i64>, Vec<String>> = HashMap::new();
@@ -141,5 +146,5 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
         .iter()
         .map(|i| json!({ "local": i.local, "reason": i.reason }))
         .collect();
-    Ok(json!({ "files": files, "invalid": invalid }))
+    Ok(json!({ "branch": branch, "rev": rev, "files": files, "invalid": invalid }))
 }

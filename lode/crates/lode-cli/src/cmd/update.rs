@@ -29,6 +29,9 @@ use crate::materialize::{fetch_entries, place_file, prepare_target, remove_and_p
 /// Config key: the revision an unfinished update is going to.
 pub const UPDATE_REV: &str = "update_rev";
 
+/// Config key: the branch an unfinished `switch` is going to.
+pub const SWITCH_BRANCH: &str = "switch_branch";
+
 /// `lode update` options.
 #[derive(Debug, clap::Args)]
 pub struct UpdateArgs {
@@ -289,6 +292,18 @@ impl Run<'_> {
 
 /// Runs `lode update`.
 pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
+    sync(ctx, args.rev, None).await
+}
+
+/// Brings the workspace to `rev` (default: the head) of its branch, or of `switch_to`. A
+/// switch is an update whose target is on another branch: the same delta, merge and
+/// conflict rules, then the workspace's branch changes. An interrupted switch is finished
+/// by the next `update` or `switch` to the same branch.
+pub(crate) async fn sync(
+    ctx: &Ctx,
+    rev: Option<u64>,
+    switch_to: Option<String>,
+) -> CliResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     if ws.db().config(PENDING_COMMIT)?.is_some() {
@@ -309,16 +324,34 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
     let client = ctx.client(&server)?;
     let synced = local::synced_rev(&ws)?;
 
+    let unfinished_switch = ws.db().config(SWITCH_BRANCH)?;
+    let switching = match (unfinished_switch, switch_to) {
+        (Some(p), Some(s)) if p != s => {
+            return Err(CliError::usage(format!(
+                "a switch to `{p}` did not finish; run `lode switch {p}` to complete it first"
+            )))
+        }
+        (Some(p), _) => Some(p),
+        (None, Some(s)) if s == branch => None,
+        (None, s) => s,
+    };
+    let target_branch = switching.clone().unwrap_or_else(|| branch.clone());
+
     let resuming = ws.db().config_u64(UPDATE_REV)?;
-    let target = match (resuming, args.rev) {
+    let target = match (resuming, rev) {
         (Some(r), Some(asked)) if r != asked => {
             return Err(CliError::usage(format!(
                 "an update to r{r} did not finish; run `lode update` (or `-r {r}`) to complete it first"
             )))
         }
         (Some(r), _) => r,
-        (None, Some(r)) => r,
-        (None, None) => client.branch(&depot, &branch).await?.head_rev,
+        (None, Some(r)) => {
+            if switching.is_some() {
+                check_on_branch(&client, &depot, &target_branch, r).await?;
+            }
+            r
+        }
+        (None, None) => client.branch(&depot, &target_branch).await?.head_rev,
     };
     if resuming.is_none() {
         let conflicts = ws.db().conflicts()?;
@@ -344,7 +377,9 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
         .manifest_delta(&depot, synced, target, &view.include, &view.exclude)
         .await?;
     let mut epoch = delta.access_epoch();
-    let full = epoch.is_some() && epoch != stored_epoch;
+    // A switch compares the target's whole manifest with the rows: after a commit the
+    // workspace holds files newer than its synced revision, which a delta would miss.
+    let full = switching.is_some() || (epoch.is_some() && epoch != stored_epoch);
     let mut incoming: Vec<Incoming> = Vec::new();
     if full {
         drop(delta);
@@ -383,7 +418,7 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
     }
 
     let report = local::scan(ctx, &mut ws, &[], true)?;
-    if target < synced && resuming.is_none() {
+    if target < synced && resuming.is_none() && switching.is_none() {
         let touched: Vec<String> = incoming
             .iter()
             .filter_map(|i| report.get(i.path()))
@@ -401,8 +436,39 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
             .with_details(json!({ "paths": touched })));
         }
     }
-    ws.db_mut()
-        .write(|tx| tx.set_config(UPDATE_REV, &target.to_string()))?;
+    // Locks belong to a branch: those held here stay on the old one and are only reported.
+    let mut locks_left: Vec<String> = Vec::new();
+    if switching.is_some() {
+        let held: Vec<FileRow> = ws
+            .db()
+            .files()?
+            .into_iter()
+            .filter(|r| r.lock_held)
+            .collect();
+        for r in &held {
+            locks_left.push(r.path.as_str().to_owned());
+        }
+        ws.db_mut().write(|tx| {
+            for r in &held {
+                let mut r = r.clone();
+                r.lock_held = false;
+                tx.put_file(&r)?;
+            }
+            Ok(())
+        })?;
+        for p in &locks_left {
+            ctx.out.warn(format!(
+                "your lock on {p} stays on branch `{branch}`; unlock it there when done"
+            ));
+        }
+    }
+    ws.db_mut().write(|tx| {
+        tx.set_config(UPDATE_REV, &target.to_string())?;
+        if let Some(b) = &switching {
+            tx.set_config(SWITCH_BRANCH, b)?;
+        }
+        Ok(())
+    })?;
 
     let mut run = Run {
         ctx,
@@ -512,6 +578,10 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
         if let Some(e) = epoch {
             tx.set_config(keys::ACCESS_EPOCH, &e.to_string())?;
         }
+        if let Some(b) = &switching {
+            tx.set_config(keys::BRANCH, b)?;
+            tx.remove_config(SWITCH_BRANCH)?;
+        }
         tx.remove_config(UPDATE_REV)
     })?;
     crate::cmd::locks::reconcile_after_update(ctx, &mut ws, &client).await?;
@@ -527,6 +597,10 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
         }
     }
     let summary: Vec<String> = counts.iter().map(|(k, v)| format!("{v} {k}")).collect();
+    if switching.is_some() {
+        ctx.out
+            .line(format!("Switched from `{branch}` to `{target_branch}`"));
+    }
     ctx.out.line(format!(
         "Updated to r{target}{}{}",
         if summary.is_empty() {
@@ -534,7 +608,11 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
         } else {
             format!(": {}", summary.join(", "))
         },
-        if full { " (full sync)" } else { "" }
+        if full && switching.is_none() {
+            " (full sync)"
+        } else {
+            ""
+        }
     ));
     if counts.contains_key("conflicted") {
         ctx.out
@@ -547,12 +625,39 @@ pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
         .collect();
     Ok(json!({
         "rev": target,
+        "branch": target_branch,
+        "switched_from": switching.as_ref().map(|_| branch.clone()),
+        "locks_left": locks_left,
         "from": synced,
         "full": full,
         "files": files,
         "counts": counts,
         "downloaded": fetched.downloaded,
     }))
+}
+
+/// Fails unless revision `rev` is in the history of `branch`.
+async fn check_on_branch(
+    client: &lode_client::Client,
+    depot: &str,
+    branch: &str,
+    rev: u64,
+) -> CliResult<()> {
+    let q = lode_proto::read::RevisionListQuery {
+        branch: Some(branch.to_owned()),
+        before: Some(rev.saturating_add(1)),
+        limit: Some(1),
+        ..Default::default()
+    };
+    let list = client.revisions(depot, &q).await?;
+    if list.revisions.first().map(|r| r.rev) == Some(rev) {
+        Ok(())
+    } else {
+        Err(CliError::failed(
+            "not_found",
+            format!("r{rev} is not in the history of branch `{branch}`"),
+        ))
+    }
 }
 
 /// Runs `lode resolve`.
