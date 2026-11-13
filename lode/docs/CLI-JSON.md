@@ -81,6 +81,16 @@ Needs `--name` with `--password-stdin`, or `--token-stdin`.
 `files` counts the files in the view, `fetched` those placed by this run, `downloaded` the
 distinct blobs fetched from the server.
 
+### `lode init <url>/<depot> [--template T] [--dry-run] [-m MSG]`
+
+Run in the folder to import. `{"depot","server","workspace","template","rev","files","resumed"}`:
+`rev` is the import revision (2 for a new depot), `files` the number of files committed (`null`
+when a rerun found the commit already done). With `--dry-run`:
+`{"dry_run":true,"root","template","files","bytes","writes":[...],"invalid":[...]}`, where
+`writes` names the template files that would be written and `invalid` the paths a depot would
+refuse. Codes: `depot_not_empty` (the depot has revisions), `already_a_workspace`, `usage`
+(unknown template, exit 2).
+
 ### `lode view show|include|exclude`
 
 - `show`: `{ "view": { "include": [..], "exclude": [..] } }`

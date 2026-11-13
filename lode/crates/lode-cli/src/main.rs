@@ -16,6 +16,7 @@ mod local;
 mod materialize;
 mod output;
 mod paths_from;
+mod templates;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -64,6 +65,8 @@ enum Command {
     Whoami,
     /// Create a workspace from a depot.
     Checkout(cmd::checkout::CheckoutArgs),
+    /// Turn the current folder into a new depot and its workspace, and commit its files.
+    Init(cmd::init::InitArgs),
     /// Show or change which paths are checked out.
     #[command(subcommand)]
     View(cmd::view::ViewCmd),
@@ -152,6 +155,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
         Some(Command::Admin(a)) => cmd::admin::admin(&ctx, a).await,
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
+        Some(Command::Init(a)) => cmd::init::init(&ctx, a).await,
         Some(Command::View(c)) => cmd::view::view(&ctx, c).await,
         Some(Command::Status(a)) => cmd::status::status(&ctx, a).await,
         Some(Command::Add(a)) => cmd::files::add(&ctx, a).await,

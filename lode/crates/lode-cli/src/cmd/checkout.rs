@@ -36,7 +36,7 @@ pub struct CheckoutArgs {
 }
 
 /// Splits `https://host/prefix/depot` into the server and the depot.
-fn split_target(ctx: &Ctx, target: &str) -> CliResult<(ServerUrl, String)> {
+pub(crate) fn split_target(ctx: &Ctx, target: &str) -> CliResult<(ServerUrl, String)> {
     if target.contains("://") {
         let trimmed = target.trim_end_matches('/');
         let (server, depot) = trimmed

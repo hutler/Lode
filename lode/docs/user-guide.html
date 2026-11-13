@@ -161,6 +161,23 @@ cd mygame</code></pre>
   <tr><td><code>--exclude "art/raw/**"</code></td><td>Leave matching paths out. May be repeated.</td></tr>
 </table>
 <p>If a checkout is interrupted, run the same command again. It continues where it stopped.</p>
+<h3>Starting a depot from a folder you already have</h3>
+<p>To put an existing project into Lode, run <code>lode init</code> in its folder. It needs an administrator account, because it creates the depot:</p>
+<pre><code>cd MyGame
+lode init https://lode.example.com/mygame --template unreal --dry-run   # count only
+Would commit 812 files (1.4 GiB) from /home/ana/MyGame with template unreal, writing .lodeignore and .lodeconfig.
+lode init https://lode.example.com/mygame --template unreal</code></pre>
+<p>It creates the depot, writes <code>.lodeignore</code> and <code>.lodeconfig</code> from the template (a file that already exists is kept), makes the folder the depot's first workspace, and commits every file that is not ignored as revision <code>r2</code>. Others then check it out as usual. If it is interrupted, run the same command again; it finishes the same commit.</p>
+<table>
+  <tr><th style="width:18%">Template</th><th>Ignores</th><th>Needs a lock</th></tr>
+  <tr><td><code>generic</code></td><td>Operating system and editor leftovers (also part of every template below)</td><td>nothing</td></tr>
+  <tr><td><code>unreal</code></td><td><code>Binaries/</code>, <code>Intermediate/</code>, <code>Saved/</code>, <code>DerivedDataCache/</code>, plugin build output, Visual Studio files</td><td><code>*.uasset</code>, <code>*.umap</code></td></tr>
+  <tr><td><code>unity</code></td><td><code>Library/</code>, <code>Temp/</code>, <code>Obj/</code>, <code>Build/</code>, <code>Logs/</code>, <code>UserSettings/</code>, project files</td><td><code>*.unity</code>, <code>*.prefab</code>, <code>*.psd</code>, <code>*.fbx</code></td></tr>
+  <tr><td><code>godot</code></td><td><code>.godot/</code>, <code>.import/</code>, <code>android/</code></td><td><code>*.blend</code>, <code>*.psd</code>, <code>*.kra</code></td></tr>
+  <tr><td><code>rust</code></td><td><code>target/</code></td><td>nothing</td></tr>
+  <tr><td><code>node</code></td><td><code>node_modules/</code>, <code>dist/</code>, <code>build/</code>, <code>coverage/</code>, <code>.env</code></td><td>nothing</td></tr>
+</table>
+<p>Both files are ordinary depot files: edit and commit them later as the project needs.</p>
 
 <h1>4. The daily cycle</h1>
 <p>Most work is four commands: update, edit, review, commit.</p>
@@ -410,6 +427,7 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
   <tr><th style="width:44%">Command</th><th>Purpose</th></tr>
   <tr><td><code>lode login</code> · <code>logout</code> · <code>whoami</code></td><td>Sign in and out; show the current account</td></tr>
   <tr><td><code>lode checkout URL/DEPOT [DIR]</code></td><td>Create a workspace</td></tr>
+  <tr><td><code>lode init URL/DEPOT [--template T] [--dry-run]</code></td><td>Make the current folder a new depot</td></tr>
   <tr><td><code>lode status [PATHS]</code></td><td>Show pending changes</td></tr>
   <tr><td><code>lode add</code> · <code>rm</code> · <code>mv</code> · <code>cp</code></td><td>Track, remove, move, copy</td></tr>
   <tr><td><code>lode diff [PATHS]</code></td><td>Show changes to text files</td></tr>

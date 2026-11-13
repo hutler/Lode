@@ -52,6 +52,32 @@ impl IgnoreStack {
         )
     }
 
+    /// The stack for `dir` with the rules of `text`, as if it were `dir/.lodeignore`: for
+    /// judging a folder by rules not written yet (`lode init --dry-run`).
+    pub fn with_text(parent: &Arc<Self>, dir: &Path, text: &str) -> (Arc<Self>, Option<String>) {
+        let mut builder = GitignoreBuilder::new(dir);
+        let mut problem = None;
+        for line in text.lines() {
+            if let Err(e) = builder.add_line(None, line) {
+                problem = Some(e.to_string());
+            }
+        }
+        let rules = match builder.build() {
+            Ok(g) => Some(g),
+            Err(e) => {
+                problem = Some(e.to_string());
+                None
+            }
+        };
+        (
+            Arc::new(Self {
+                parent: Some(parent.clone()),
+                rules,
+            }),
+            problem,
+        )
+    }
+
     /// Whether `path` (absolute, under the directory of this stack) is ignored. The deepest
     /// file with a matching pattern decides, so a nested `!pattern` can re-include.
     pub fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {

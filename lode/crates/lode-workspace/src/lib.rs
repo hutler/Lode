@@ -27,6 +27,7 @@ pub use cache::{BlobCache, DEFAULT_CACHE_CAP, DEFAULT_SHARED_CACHE_CAP};
 pub use classify::FileClass;
 pub use db::{ChangelistRow, ConflictRow, DbTx, FileRow, FileState, WorkspaceDb};
 pub use error::{Result, WorkspaceError};
+pub use ignore_rules::IgnoreStack;
 pub use layout::Layout;
 pub use lock::WorkspaceLock;
 pub use scan::{scan, DiskInfo, InvalidName, ScanEntry, ScanOptions, ScanReport, Status};
