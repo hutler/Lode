@@ -103,6 +103,7 @@ fn provenance() -> Provenance {
             ("tool".to_owned(), "create_shelf".to_owned()),
         ])),
         submitted_shelf: None,
+        imported: None,
     }
 }
 
@@ -281,6 +282,7 @@ fn commit_types() {
                 via: None,
                 agent: None,
                 submitted_shelf: None,
+                imported: None,
             }),
             extensions,
         }

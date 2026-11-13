@@ -13,6 +13,7 @@ members = [
     "crates/lode-mod-checks",
     "crates/lode-client",
     "crates/lode-workspace",
+    "crates/lode-import",
     "crates/lode-cli",
     "crates/loded",
     "crates/lode-testkit",
@@ -40,6 +41,7 @@ lode-mod-webhooks = { path = "crates/lode-mod-webhooks" }
 lode-mod-checks = { path = "crates/lode-mod-checks" }
 lode-client = { path = "crates/lode-client" }
 lode-workspace = { path = "crates/lode-workspace" }
+lode-import = { path = "crates/lode-import" }
 lode-testkit = { path = "crates/lode-testkit" }
 
 # Third-party crates (allow-list in AGENTS.md)

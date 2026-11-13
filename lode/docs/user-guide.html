@@ -178,6 +178,20 @@ lode init https://lode.example.com/mygame --template unreal</code></pre>
   <tr><td><code>node</code></td><td><code>node_modules/</code>, <code>dist/</code>, <code>build/</code>, <code>coverage/</code>, <code>.env</code></td><td>nothing</td></tr>
 </table>
 <p>Both files are ordinary depot files: edit and commit them later as the project needs.</p>
+<h3>Moving a Git project with its history</h3>
+<p>To bring a Git project over with its history, run <code>lode import git</code> with a folder of the repository, the depot and the Git branch. Git must be installed. Like <code>lode init</code>, it creates the depot, so it needs an administrator account:</p>
+<pre><code>lode import git ~/src/mygame https://lode.example.com/mygame --branch main
+Created depot mygame.
+Imported 1,204 commits of main into https://lode.example.com/mygame; the head is r1199.
+Skipped 6 commits that change nothing a depot holds (empty or submodule-only).</code></pre>
+<ul>
+  <li>Each Git commit on the branch's first-parent line becomes one revision on <code>main</code>, with the same message. A merge commit brings in the merged changes as one revision; the commits of the merged branch are not imported separately.</li>
+  <li>You are the author of the revisions. The original author, date and commit id are kept with each revision, and <code>lode log</code> shows them: <code>imported from git 3f9c2a1b7d04, Ana &lt;ana@example.com&gt;, 2025-03-04T10:15:00+01:00</code>.</li>
+  <li>Renames that Git detects are imported as Lode renames, so <code>lode log --follow</code> follows the file through them.</li>
+  <li>Git LFS files are imported with their content when it is in the repository's local LFS store. Run <code>git lfs fetch --all</code> first; files whose content is missing are imported as pointers and listed at the end.</li>
+  <li>Submodules are not imported; they are listed at the end. No <code>.lodeignore</code> is applied: everything Git tracks comes over. Add <code>.lodeignore</code> and <code>.lodeconfig</code> afterwards (<code>lode init --dry-run</code> in a checkout shows what a template would ignore).</li>
+  <li>If the import stops, run the same command again. It continues after the last imported commit. Later commits on the Git branch can be brought over the same way, as long as nobody has committed to the depot in between.</li>
+</ul>
 
 <h1>4. The daily cycle</h1>
 <p>Most work is four commands: update, edit, review, commit.</p>
@@ -428,6 +442,7 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
   <tr><td><code>lode login</code> · <code>logout</code> · <code>whoami</code></td><td>Sign in and out; show the current account</td></tr>
   <tr><td><code>lode checkout URL/DEPOT [DIR]</code></td><td>Create a workspace</td></tr>
   <tr><td><code>lode init URL/DEPOT [--template T] [--dry-run]</code></td><td>Make the current folder a new depot</td></tr>
+  <tr><td><code>lode import git REPO URL/DEPOT --branch B</code></td><td>Import a Git branch with its history</td></tr>
   <tr><td><code>lode status [PATHS]</code></td><td>Show pending changes</td></tr>
   <tr><td><code>lode add</code> · <code>rm</code> · <code>mv</code> · <code>cp</code></td><td>Track, remove, move, copy</td></tr>
   <tr><td><code>lode diff [PATHS]</code></td><td>Show changes to text files</td></tr>

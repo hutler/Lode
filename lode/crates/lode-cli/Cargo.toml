@@ -23,6 +23,7 @@ diffy.workspace = true
 futures.workspace = true
 lode-client.workspace = true
 lode-core.workspace = true
+lode-import.workspace = true
 lode-proto.workspace = true
 lode-workspace.workspace = true
 rmcp = { workspace = true, features = ["server", "transport-io"] }

@@ -223,6 +223,11 @@ pub(crate) fn format_time(t: time::OffsetDateTime) -> String {
     }
 }
 
+/// The first 12 characters of a commit id from another system.
+fn short_id(id: &str) -> &str {
+    id.char_indices().nth(12).map_or(id, |(i, _)| &id[..i])
+}
+
 pub(crate) fn who(name: &str, kind: PrincipalKind) -> String {
     match kind {
         PrincipalKind::Agent => format!("{name} [agent]"),
@@ -252,6 +257,13 @@ fn print_revision(ctx: &Ctx, r: &RevisionView, verbose: bool) {
             "    merged {} r{}..r{}",
             m.branch, m.from_rev, m.to_rev
         ));
+    }
+    if let Some(i) = r.provenance.as_ref().and_then(|p| p.imported.as_ref()) {
+        let mut from = format!("    imported from {} {}", i.system, short_id(&i.id));
+        for part in [&i.author, &i.date].into_iter().flatten() {
+            from.push_str(&format!(", {part}"));
+        }
+        ctx.out.line(from);
     }
     for line in r.message.lines() {
         if line.trim().is_empty() {

@@ -48,6 +48,7 @@ One Cargo workspace. Library crates never depend on binaries; arrows point downw
 | `lode-mod-checks` | lib | Checks module and submit gate (optional, off by default) |
 | `lode-client` | lib | Typed HTTP client, blob transfer, retry |
 | `lode-workspace` | lib | Workspace database, scanner, sync, merge, changelists, client side of locks and shelves |
+| `lode-import` | lib | Imports history from other systems: Git through the `git` command (first-parent replay, renames, LFS content) |
 | `lode-cli` | bin `lode` | Argument parsing, output formatting (human and `--json`), local MCP server |
 | `loded` | bin | Wires `lode-server` and enabled modules together |
 | `lode-testkit` | lib (dev) | Starts an in-process server on a temp directory; helpers to drive CLI workspaces |

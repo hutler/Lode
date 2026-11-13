@@ -91,6 +91,20 @@ when a rerun found the commit already done). With `--dry-run`:
 refuse. Codes: `depot_not_empty` (the depot has revisions), `already_a_workspace`, `usage`
 (unknown template, exit 2).
 
+### `lode import git <repo> <url>/<depot> --branch B`
+
+`{"depot","server","git_branch","total","already","imported","skipped","rev","last_commit",
+"lfs_replaced","lfs_missing":[...],"submodules":[...]}`: `total` is the number of commits in
+the branch's first-parent history, `already` how many an earlier run imported, `imported` the
+revisions this run made, `skipped` the commits that change nothing a depot holds (empty or
+submodule-only), `rev` the branch head and `last_commit` the last Git commit now in the depot.
+`lfs_missing` lists files whose LFS content is not in the local store (imported as pointers);
+`submodules` lists submodule paths, which are not imported. Each revision's `provenance` has
+`imported: {"system":"git","id","author","date"}`. Codes: `git_not_found`,
+`not_a_git_repository`, `unknown_git_branch`, `git_failed`, `depot_not_empty` (the depot has
+revisions that were not imported), `import_diverged` (the last imported commit is not in the
+branch's history), `invalid_path`, `import_mismatch`.
+
 ### `lode view show|include|exclude`
 
 - `show`: `{ "view": { "include": [..], "exclude": [..] } }`

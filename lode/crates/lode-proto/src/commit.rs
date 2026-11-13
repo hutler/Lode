@@ -48,6 +48,26 @@ pub struct Provenance {
     /// removed from direct commits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submitted_shelf: Option<u64>,
+    /// Where an imported revision came from (`lode import git`). Self-reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<ImportedFrom>,
+}
+
+/// The source of an imported revision: the commit in another version control system and its
+/// original author, date and message. Reported by the importer and stored as given; the
+/// importer also reads it back to continue an interrupted import.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ImportedFrom {
+    /// Source system, such as `git`.
+    pub system: String,
+    /// The commit's id in that system.
+    pub id: String,
+    /// The original author, such as `Ada <ada@example.com>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// The original author date, RFC 3339 with its offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
 }
 
 /// `POST /depots/{d}/branches/{b}/commits`.

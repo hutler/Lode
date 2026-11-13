@@ -254,6 +254,11 @@ What can be trusted: `via` is set by the server and says which server endpoint w
 `lode mcp` server. `client` and everything under `agent` are reported by the client and stored
 as given; show them, but do not base decisions on them.
 
+A revision made by `lode import git` adds `imported`:
+`{ "system": "git", "id": "<commit id>", "author": "Name <email>", "date": "<RFC 3339>" }`,
+the original commit, its author and its author date. It is reported by the importer like
+`agent`; the importer reads it back from the branch head to continue an interrupted import.
+
 A revision made by `shelf submit` takes `via` from the submit request (usually `api`), keeps
 the shelf's `client` and `agent`, and adds `submitted_shelf` with the shelf's id.
 

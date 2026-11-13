@@ -1418,6 +1418,7 @@ dependencies = [
  "insta",
  "lode-client",
  "lode-core",
+ "lode-import",
  "lode-proto",
  "lode-server",
  "lode-testkit",
@@ -1469,6 +1470,20 @@ dependencies = [
  "thiserror",
  "toml",
  "unicode-normalization",
+]
+
+[[package]]
+name = "lode-import"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "futures",
+ "lode-client",
+ "lode-core",
+ "lode-proto",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

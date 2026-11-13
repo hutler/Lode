@@ -67,6 +67,9 @@ enum Command {
     Checkout(cmd::checkout::CheckoutArgs),
     /// Turn the current folder into a new depot and its workspace, and commit its files.
     Init(cmd::init::InitArgs),
+    /// Import history from another version control system into a depot.
+    #[command(subcommand)]
+    Import(cmd::import::ImportCmd),
     /// Show or change which paths are checked out.
     #[command(subcommand)]
     View(cmd::view::ViewCmd),
@@ -156,6 +159,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Admin(a)) => cmd::admin::admin(&ctx, a).await,
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
         Some(Command::Init(a)) => cmd::init::init(&ctx, a).await,
+        Some(Command::Import(c)) => cmd::import::import(&ctx, c).await,
         Some(Command::View(c)) => cmd::view::view(&ctx, c).await,
         Some(Command::Status(a)) => cmd::status::status(&ctx, a).await,
         Some(Command::Add(a)) => cmd::files::add(&ctx, a).await,
