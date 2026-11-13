@@ -671,7 +671,13 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
   In `pre_commit`, if `origin` is `Module { "shelves", … }` and the branch matches, then for
   every required entry there must be a check on that shelf id and shelf version with that
   name, state `success`, and a reporter whose principal name equals `reporter`. Otherwise the
-  commit is rejected `checks_required` with the missing names in `details`.
+  commit is rejected `checks_required` with `details: {shelf_id, shelf_version, missing}`;
+  each `missing` entry has `name`, the required `reporter` and `reason`: `absent`,
+  `not_success` (with `state`) or `wrong_reporter` (with `state` and `reported_by`). A shelf
+  submit whose origin lacks the two attributes is refused the same way. The gate reads only
+  the module's own table; the coupling to the shelves module is the origin name `shelves`
+  and the attribute keys `shelf_id` and `shelf_version`, so with the shelves module off the
+  gate never fires.
 - The rule is read from the branch head (the configuration in `CommitCtx`), never from the
   shelf being submitted, so a shelf cannot remove the rule it must satisfy.
 - Binding each name to a reporter is what makes the gate meaningful: holding the `checks`

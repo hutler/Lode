@@ -320,7 +320,7 @@ Everything else in sections 5–7 and 9 is covered by the scenario suite
 
 | Section | Deviation |
 | --- | --- |
-| 6.6 Checks | Not implemented: no check reports, no `lode checks`, no MCP `list_checks`, and the `[checks]` submit gate is parsed in `.lodeconfig` but not enforced. Planned for M6. |
+| 6.6 Checks | Reports, listing over HTTP and the submit gate work; `lode checks` and the MCP tool `list_checks` are not built yet (T063). |
 | 5.4 Merge | After a single-revision pick (`-r`), a later full merge starts again from the merge base before the gap and re-applies the picked change. Usually `unchanged`; a conflict if the file changed since. Follows from the v1 base rule. |
 | 6.1 Locks | `lode switch` leaves this workspace's locks on the old branch (they are per branch) and reports them; it does not release them. |
 | 6.4 MCP | The server endpoint also offers `list_depots`, and `submit_shelf` to tokens with `write`. Large files, diffs and blame are cut off at fixed sizes (`truncated`, `next_line`). |

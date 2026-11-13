@@ -143,7 +143,7 @@ impl H {
                 "/api/v1/admin/acl",
                 &self.admin,
                 json!({ "depot": "game", "subject": { "kind": "user", "name": name },
-                        "branch": "*", "path": "**", "effect": "allow", "level": level }),
+                        "branch": "**", "path": "**", "effect": "allow", "level": level }),
             )
             .await;
         assert!(s.is_success(), "{v}");
@@ -212,7 +212,10 @@ impl H {
         let changes = self.changes(files).await;
         self.send(
             "POST",
-            &format!("/api/v1/depots/game/branches/{branch}/commits"),
+            &format!(
+                "/api/v1/depots/game/branches/{}/commits",
+                branch.replace('/', "%2F")
+            ),
             token,
             json!({ "request_id": format!("r{}", next()), "message": "m",
                     "changes": changes, "extensions": extensions }),
@@ -224,7 +227,10 @@ impl H {
         let (s, v) = self
             .send(
                 "GET",
-                &format!("/api/v1/depots/game/branches/{branch}"),
+                &format!(
+                    "/api/v1/depots/game/branches/{}",
+                    branch.replace('/', "%2F")
+                ),
                 &self.admin,
                 Value::Null,
             )

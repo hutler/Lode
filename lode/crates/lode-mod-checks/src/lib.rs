@@ -11,7 +11,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
-use lode_core::DepotId;
+use lode_core::{DepotId, ErrorCode};
 use lode_meta::{MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads};
 use lode_proto::checks::{
     CheckList, CheckState, CheckTarget, CheckTargetKind, CheckView, ChecksQuery,
@@ -20,6 +20,7 @@ use lode_proto::checks::{
 use lode_proto::consts::paths;
 use lode_proto::PrincipalRef;
 use lode_server::auth::{ms_to_time, SCOPE_READ};
+use lode_server::commit::{CommitCtx, Origin};
 use lode_server::module::{Module, ModuleCtx, ScopeDef};
 use lode_server::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult, Caller};
 use rusqlite::params;
@@ -377,6 +378,81 @@ pub async fn list_checks(
     Ok(CheckList { checks })
 }
 
+/// The origin name shelf submits carry (ARCHITECTURE §8). The gate's only coupling to the
+/// shelves module, together with the two attribute names below.
+pub const SHELVES_ORIGIN: &str = "shelves";
+/// Origin attribute holding the shelf id.
+pub const ATTR_SHELF_ID: &str = "shelf_id";
+/// Origin attribute holding the shelf version being submitted.
+pub const ATTR_SHELF_VERSION: &str = "shelf_version";
+
+/// The shelf id and version of a shelf submit, or `None` for any other commit.
+fn submitted_shelf(origin: &Origin) -> Option<(u64, u64)> {
+    let Origin::Module { name, attrs } = origin else {
+        return None;
+    };
+    if name != SHELVES_ORIGIN {
+        return None;
+    }
+    let num = |k: &str| attrs.get(k).and_then(|v| v.parse::<u64>().ok());
+    Some((num(ATTR_SHELF_ID)?, num(ATTR_SHELF_VERSION)?))
+}
+
+/// The submit gate: every check the branch head's `[checks] required` names must be
+/// `success` on this shelf version, reported by the named principal.
+fn gate(tx: &dyn Reads, ctx: &CommitCtx<'_>) -> Result<(), ApiError> {
+    let config = ctx.branch_config;
+    if config.checks_required.is_empty() || !config.checks_branches.matches_str(&ctx.branch.name) {
+        return Ok(());
+    }
+    let Some((shelf, version)) = submitted_shelf(ctx.origin) else {
+        if matches!(ctx.origin, Origin::Module { name, .. } if name == SHELVES_ORIGIN) {
+            // A shelf submit without its attributes cannot be checked; refuse rather than
+            // let it through.
+            return Err(ApiError::new(
+                ErrorCode::ChecksRequired,
+                "this shelf submit does not name its shelf version, so its checks cannot be verified",
+            ));
+        }
+        return Ok(());
+    };
+    let rows = target_checks(tx.db(), ctx.depot, CheckTargetKind::Shelf, shelf, version)?;
+    let mut missing = Vec::new();
+    for req in &config.checks_required {
+        let found = rows.iter().find(|r| r.name == req.name);
+        let entry = match found {
+            None => Some(json!({ "name": req.name, "reason": "absent", "reporter": req.reporter })),
+            Some(r) => {
+                let reporter = principal_ref(tx, r.reporter_id)?.name;
+                if reporter != req.reporter {
+                    Some(json!({ "name": req.name, "reason": "wrong_reporter",
+                                 "state": r.state, "reported_by": reporter,
+                                 "reporter": req.reporter }))
+                } else if r.state != CheckState::Success.as_str() {
+                    Some(json!({ "name": req.name, "reason": "not_success",
+                                 "state": r.state, "reporter": req.reporter }))
+                } else {
+                    None
+                }
+            }
+        };
+        missing.extend(entry);
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let names: Vec<&str> = missing.iter().filter_map(|m| m["name"].as_str()).collect();
+    Err(ApiError::new(
+        ErrorCode::ChecksRequired,
+        format!(
+            "shelf {shelf} version {version} has not passed the checks `{}` requires: {}",
+            ctx.branch.name,
+            names.join(", ")
+        ),
+    )
+    .with_details(json!({ "shelf_id": shelf, "shelf_version": version, "missing": missing })))
+}
+
 impl Module for Checks {
     fn name(&self) -> &'static str {
         NAME
@@ -396,5 +472,9 @@ impl Module for Checks {
                 .route(paths::CHECKS, get(list).post(report))
                 .with_state(ctx),
         )
+    }
+
+    fn pre_commit(&self, tx: &dyn Reads, ctx: &CommitCtx<'_>) -> Result<(), ApiError> {
+        gate(tx, ctx)
     }
 }
