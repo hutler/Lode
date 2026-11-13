@@ -574,6 +574,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
     let msg = message(ctx, &ws, &args, &summary, default_msg.as_deref())?;
 
     let uploaded = upload(ctx, &client, &depot, &out).await?;
+    crate::crash::point("commit.uploaded");
 
     let pending = Pending {
         request: CommitRequest {
@@ -598,6 +599,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
         serde_json::to_string(&pending).map_err(|e| CliError::failed("internal", e.to_string()))?;
     ws.db_mut()
         .write(|tx| tx.set_config(PENDING_COMMIT, &stored))?;
+    crate::crash::point("commit.stored");
 
     let resp = match client.commit(&depot, &branch, &pending.request).await {
         Ok(r) => r,
@@ -615,6 +617,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             return Err(explain(e));
         }
     };
+    crate::crash::point("commit.sent");
     apply(&mut ws, &pending, true)?;
     let n = pending.request.changes.len();
     ctx.out.line(format!(

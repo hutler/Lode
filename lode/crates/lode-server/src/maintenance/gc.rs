@@ -165,6 +165,7 @@ pub async fn collect_garbage(
     };
     mark.revisions(state).await?;
     mark.module_roots(state).await?;
+    state.failpoints().check(crate::failpoint::GC_AFTER_MARK)?;
 
     // List after marking: anything stored later is not a candidate.
     let grace = Duration::from_secs(state.config().gc.grace_seconds);
@@ -216,6 +217,7 @@ pub async fn collect_garbage(
             }
             report.objects_affected += 1;
             report.bytes_affected += size;
+            state.failpoints().check(crate::failpoint::GC_IN_BATCH)?;
         }
     }
     tracing::info!(

@@ -40,6 +40,9 @@ mcp_max_edits = 500
 # Most file content, in bytes, inline in one MCP shelf tool call (16 MiB). Larger work uses
 # the HTTP blob API.
 mcp_max_inline_bytes = 16777216
+# Seconds a request body may go without data before the request fails (slow or stalled
+# uploads).
+body_idle_seconds = 60
 
 # Optional features compiled into loded. Webhooks and checks are off by default.
 [modules]
@@ -141,6 +144,8 @@ pub struct Limits {
     pub mcp_max_edits: usize,
     /// Most inline file content, in bytes, in one MCP shelf tool call.
     pub mcp_max_inline_bytes: u64,
+    /// Seconds a request body may go without data before the request fails.
+    pub body_idle_seconds: u64,
 }
 
 impl Default for Limits {
@@ -152,6 +157,7 @@ impl Default for Limits {
             max_changes_listed: lode_proto::consts::MAX_CHANGES_LISTED,
             mcp_max_edits: 500,
             mcp_max_inline_bytes: 16 * 1024 * 1024,
+            body_idle_seconds: 60,
         }
     }
 }
@@ -262,6 +268,7 @@ mod tests {
         assert_eq!(cfg.limits.max_changes_listed, 1_000);
         assert_eq!(cfg.limits.mcp_max_edits, 500);
         assert_eq!(cfg.limits.mcp_max_inline_bytes, 16 * 1024 * 1024);
+        assert_eq!(cfg.limits.body_idle_seconds, 60);
         assert!(cfg.modules.locks && cfg.modules.shelves && cfg.modules.mcp);
         assert!(!cfg.modules.webhooks && !cfg.modules.checks);
     }

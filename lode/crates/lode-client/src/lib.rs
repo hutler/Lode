@@ -21,6 +21,7 @@ mod retry;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
 use lode_core::{DepotPath, ObjectId};
 use lode_proto::admin::{
     AccessCheck, AclList, AclRule, CreateGroupRequest, CreatePrincipalRequest, GroupList,
@@ -60,6 +61,14 @@ pub use retry::RetryPolicy;
 /// `User-Agent` of every request: `lode-client/<version>`, after the product a caller names.
 pub const USER_AGENT: &str = concat!("lode-client/", env!("CARGO_PKG_VERSION"));
 
+/// Default [`ClientBuilder::read_timeout`]: generous, since a large commit can take a while
+/// before the server answers.
+pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Largest JSON response accepted. Real answers are far smaller; this stops a hostile or
+/// broken server from making the client buffer without bound.
+pub const MAX_JSON_RESPONSE: usize = 64 * 1024 * 1024;
+
 /// zstd level used for uploads unless configured otherwise.
 pub const DEFAULT_UPLOAD_LEVEL: i32 = 3;
 
@@ -74,6 +83,7 @@ pub struct ClientBuilder {
     upload_level: Option<i32>,
     root_certs_pem: Vec<Vec<u8>>,
     connect_timeout: Duration,
+    read_timeout: Duration,
 }
 
 impl ClientBuilder {
@@ -89,6 +99,7 @@ impl ClientBuilder {
             upload_level: Some(DEFAULT_UPLOAD_LEVEL),
             root_certs_pem: Vec::new(),
             connect_timeout: Duration::from_secs(15),
+            read_timeout: DEFAULT_READ_TIMEOUT,
         }
     }
 
@@ -136,6 +147,13 @@ impl ClientBuilder {
         self
     }
 
+    /// Longest wait for the next bytes of a response (the server stalling mid-body, or
+    /// taking that long to answer at all).
+    pub fn read_timeout(mut self, timeout: Duration) -> Self {
+        self.read_timeout = timeout;
+        self
+    }
+
     /// Checks the URL and builds the client.
     pub fn build(self) -> Result<Client> {
         let base = parse_server_url(&self.url, self.allow_insecure)?;
@@ -146,6 +164,7 @@ impl ClientBuilder {
         let mut http = reqwest::Client::builder()
             .user_agent(user_agent)
             .connect_timeout(self.connect_timeout)
+            .read_timeout(self.read_timeout)
             // Redirects could carry the token elsewhere or downgrade to http; the API never
             // redirects.
             .redirect(reqwest::redirect::Policy::none());
@@ -975,7 +994,21 @@ async fn api_error(resp: Response) -> Error {
 
 async fn decode<T: DeserializeOwned>(resp: Response) -> Result<T> {
     let status = resp.status();
-    let bytes = resp.bytes().await.map_err(Error::Transport)?;
+    if resp
+        .content_length()
+        .is_some_and(|n| n > MAX_JSON_RESPONSE as u64)
+    {
+        return Err(Error::Protocol("the JSON response is too large".into()));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(Error::Transport)?;
+        if bytes.len() + chunk.len() > MAX_JSON_RESPONSE {
+            return Err(Error::Protocol("the JSON response is too large".into()));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     // A 204 for an endpoint that returns JSON would be a server bug; say so plainly.
     if status == StatusCode::NO_CONTENT {
         return Err(Error::Protocol("expected a JSON body, got none".into()));

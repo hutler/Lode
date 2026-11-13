@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use lode_core::{DepotPath, EntryKind, ObjectId};
-use lode_proto::consts::{ENCODING_ZSTD, HEADER_EXECUTABLE, HEADER_ID, HEADER_KIND};
+use lode_proto::consts::{ENCODING_ZSTD, HEADER_EXECUTABLE, HEADER_ID, HEADER_KIND, MAX_BLOB_SIZE};
 use lode_proto::depot::PutBlobResponse;
 use reqwest::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH};
 use reqwest::{Body, Method, Response};
@@ -89,7 +89,25 @@ impl Client {
     where
         W: AsyncWrite + Unpin + ?Sized,
     {
-        self.get_blob_once(depot, id, out, Retry::Yes).await
+        self.get_blob_once(depot, id, out, Retry::Yes, MAX_BLOB_SIZE)
+            .await
+    }
+
+    /// [`Client::get_blob_to`] that fails as soon as more than `max_len` bytes arrive (after
+    /// decompression), so a hostile server cannot make the caller hold or write more than it
+    /// expects.
+    pub async fn get_blob_to_max<W>(
+        &self,
+        depot: &str,
+        id: &ObjectId,
+        out: &mut W,
+        max_len: u64,
+    ) -> Result<u64>
+    where
+        W: AsyncWrite + Unpin + ?Sized,
+    {
+        self.get_blob_once(depot, id, out, Retry::Yes, max_len)
+            .await
     }
 
     async fn get_blob_once<W>(
@@ -98,6 +116,7 @@ impl Client {
         id: &ObjectId,
         out: &mut W,
         retry: Retry,
+        max_len: u64,
     ) -> Result<u64>
     where
         W: AsyncWrite + Unpin + ?Sized,
@@ -111,7 +130,7 @@ impl Client {
             })
             .await?;
         let reader = body_reader(resp)?;
-        copy_verified(reader, out, id).await
+        copy_verified(reader, out, id, max_len).await
     }
 
     /// Downloads blob `id` to `dest`: written to a temporary file next to it, verified, then
@@ -119,6 +138,18 @@ impl Client {
     /// is untouched) and the temporary file is removed. Retries transient failures with a
     /// fresh temporary file.
     pub async fn download_blob(&self, depot: &str, id: &ObjectId, dest: &Path) -> Result<u64> {
+        self.download_blob_max(depot, id, dest, MAX_BLOB_SIZE).await
+    }
+
+    /// [`Client::download_blob`] that fails once more than `max_len` bytes arrive, such as
+    /// the size the manifest gave.
+    pub async fn download_blob_max(
+        &self,
+        depot: &str,
+        id: &ObjectId,
+        dest: &Path,
+        max_len: u64,
+    ) -> Result<u64> {
         let dir = match dest.parent() {
             Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
             _ => std::path::PathBuf::from("."),
@@ -126,7 +157,7 @@ impl Client {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            match self.download_once(depot, id, &dir, dest).await {
+            match self.download_once(depot, id, &dir, dest, max_len).await {
                 Err(e) if e.is_transient() && attempt < self.retry.max_attempts => {
                     tokio::time::sleep(self.retry.delay(attempt, None)).await;
                 }
@@ -141,13 +172,16 @@ impl Client {
         id: &ObjectId,
         dir: &Path,
         dest: &Path,
+        max_len: u64,
     ) -> Result<u64> {
         let tmp = tempfile::Builder::new()
             .prefix(".lode-download-")
             .tempfile_in(dir)?;
         let len = {
             let mut file = tokio::fs::File::from_std(tmp.as_file().try_clone()?);
-            let len = self.get_blob_once(depot, id, &mut file, Retry::No).await?;
+            let len = self
+                .get_blob_once(depot, id, &mut file, Retry::No, max_len)
+                .await?;
             file.flush().await?;
             file.sync_all().await?;
             len
@@ -219,7 +253,7 @@ impl FileContent {
     {
         let id = self.id;
         let reader = body_reader(self.resp)?;
-        copy_verified(reader, out, &id).await
+        copy_verified(reader, out, &id, self.size.unwrap_or(MAX_BLOB_SIZE)).await
     }
 }
 
@@ -242,7 +276,12 @@ fn body_reader(resp: Response) -> Result<BoxRead> {
     })
 }
 
-async fn copy_verified<W>(mut reader: BoxRead, out: &mut W, expected: &ObjectId) -> Result<u64>
+async fn copy_verified<W>(
+    mut reader: BoxRead,
+    out: &mut W,
+    expected: &ObjectId,
+    max_len: u64,
+) -> Result<u64>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
@@ -254,9 +293,14 @@ where
         if n == 0 {
             break;
         }
+        total += n as u64;
+        if total > max_len {
+            return Err(Error::Protocol(format!(
+                "blob {expected} is larger than the {max_len} bytes expected"
+            )));
+        }
         hasher.update(&buf[..n]);
         out.write_all(&buf[..n]).await?;
-        total += n as u64;
     }
     out.flush().await?;
     let actual = ObjectId::from_bytes(*hasher.finalize().as_bytes());

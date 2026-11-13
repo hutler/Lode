@@ -293,7 +293,9 @@ pub async fn fetch_entries(
                 format!("symlink {} is too long", e.path),
             ));
         }
-        client.get_blob_to(depot, &e.id, &mut target_text).await?;
+        client
+            .get_blob_to_max(depot, &e.id, &mut target_text, MAX_SYMLINK)
+            .await?;
         let text = String::from_utf8(target_text).map_err(|_| {
             CliError::failed("protocol", format!("symlink {} is not UTF-8", e.path))
         })?;
@@ -320,7 +322,9 @@ pub async fn fetch_entries(
                     fs::copy(&cached, &tmp)?;
                 }
                 None => {
-                    client.download_blob(&depot, &id, &tmp).await?;
+                    // The manifest's size bounds what the server may send.
+                    let size = group.first().map_or(0, |e| e.size);
+                    client.download_blob_max(&depot, &id, &tmp, size).await?;
                     from_server = true;
                     if let Some(c) = &cache {
                         if let Err(e) = c.insert_file(&id, &tmp) {

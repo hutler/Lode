@@ -9,6 +9,7 @@
 
 mod cmd;
 mod context;
+mod crash;
 mod error;
 mod external;
 mod local;

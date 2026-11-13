@@ -82,15 +82,23 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
     view.compile()?;
     let client = ctx.client(&server)?;
 
-    let resuming = dir
-        .join(lode_workspace::layout::DOT_LODE)
-        .join(lode_workspace::layout::DB_FILE)
-        .is_file();
+    let init = WorkspaceInit {
+        server_url: server.to_string(),
+        depot: depot.clone(),
+        branch: args.branch.clone(),
+        view: view.clone(),
+    };
+    let dot_lode = dir.join(lode_workspace::layout::DOT_LODE);
+    let resuming = dot_lode.join(lode_workspace::layout::DB_FILE).is_file();
     let mut ws = if resuming {
-        let ws = Workspace::open(&lode_workspace::paths::canonical(&dir)?)?;
-        let same = ws.db().config(keys::DEPOT)?.as_deref() == Some(depot.as_str())
+        let mut ws = Workspace::open(&lode_workspace::paths::canonical(&dir)?)?;
+        // A checkout that never finished has no synced revision; one stopped while the
+        // workspace was being created has no configuration yet either.
+        let configured = ws.db().config(keys::DEPOT)?;
+        let same = configured.as_deref() == Some(depot.as_str())
             && ws.db().config(keys::BRANCH)?.as_deref() == Some(args.branch.as_str());
-        if ws.db().config(CHECKOUT_REV)?.is_none() || !same {
+        let finished = ws.db().config(keys::SYNCED_REV)?.is_some();
+        if finished || !(same || configured.is_none()) {
             return Err(CliError::failed(
                 "already_a_workspace",
                 format!(
@@ -99,9 +107,17 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
                 ),
             ));
         }
+        if configured.is_none() {
+            ws.initialize(&init)?;
+        }
         ws
     } else {
-        if dir.exists() && std::fs::read_dir(&dir)?.next().is_some() {
+        // Only a `.lode` left by a checkout stopped before its database existed may be here.
+        if dir.exists()
+            && std::fs::read_dir(&dir)?
+                .filter_map(Result::ok)
+                .any(|e| e.file_name() != lode_workspace::layout::DOT_LODE)
+        {
             return Err(CliError::failed(
                 "not_empty",
                 format!("{} exists and is not empty", dir.display()),
@@ -109,15 +125,8 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
         }
         // Ask the server first, so a wrong depot or branch leaves nothing behind.
         let head = client.branch(&depot, &args.branch).await?.head_rev;
-        let mut ws = Workspace::create(
-            &dir,
-            &WorkspaceInit {
-                server_url: server.to_string(),
-                depot: depot.clone(),
-                branch: args.branch.clone(),
-                view: view.clone(),
-            },
-        )?;
+        let mut ws = Workspace::create(&dir, &init)?;
+        crate::crash::point("checkout.created");
         ws.db_mut()
             .write(|tx| tx.set_config(CHECKOUT_REV, &head.to_string()))?;
         ws
@@ -136,7 +145,9 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
     let view = ws.view_spec()?;
     let (entries, epoch) = full_manifest(&client, &depot, rev, &view).await?;
     let count = entries.len();
+    crate::crash::point("checkout.planned");
     let fetched = fetch_entries(&mut ws, &client, &depot, entries, &ctx.out).await?;
+    crate::crash::point("checkout.fetched");
     ws.db_mut().write(|tx| {
         tx.set_config(keys::SYNCED_REV, &rev.to_string())?;
         if let Some(e) = epoch {

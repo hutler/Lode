@@ -110,3 +110,96 @@ fn parse<T: DeserializeOwned>(line: &[u8]) -> Result<Option<T>> {
         .map(Some)
         .map_err(|e| Error::Protocol(format!("bad manifest line: {e}")))
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+
+    use futures::TryStreamExt;
+    use lode_proto::read::ManifestEntry;
+    use proptest::prelude::*;
+
+    use super::lines;
+
+    /// `body` delivered in pieces cut at `cuts`.
+    fn chunked(
+        body: Vec<u8>,
+        cuts: Vec<prop::sample::Index>,
+    ) -> Vec<reqwest::Result<bytes::Bytes>> {
+        let mut at: Vec<usize> = cuts.iter().map(|c| c.index(body.len() + 1)).collect();
+        at.push(0);
+        at.push(body.len());
+        at.sort_unstable();
+        at.dedup();
+        at.windows(2)
+            .map(|w| Ok(bytes::Bytes::copy_from_slice(&body[w[0]..w[1]])))
+            .collect()
+    }
+
+    fn run(chunks: Vec<reqwest::Result<bytes::Bytes>>) -> crate::Result<Vec<ManifestEntry>> {
+        futures::executor::block_on(lines(futures::stream::iter(chunks)).try_collect())
+    }
+
+    fn line(i: usize) -> String {
+        let id = lode_core::blob_id(format!("{i}").as_bytes()).unwrap();
+        serde_json::json!({ "path": format!("d/f{i}.txt"), "kind": "file", "id": id, "size": i })
+            .to_string()
+    }
+
+    proptest! {
+        #[test]
+        fn any_split_gives_the_same_entries(
+            n in 0usize..20,
+            cuts in proptest::collection::vec(any::<prop::sample::Index>(), 0..12),
+            blank in any::<bool>(),
+            final_newline in any::<bool>(),
+        ) {
+            let mut body = String::new();
+            for i in 0..n {
+                if i > 0 {
+                    body.push('\n');
+                    if blank {
+                        body.push('\n');
+                    }
+                }
+                body.push_str(&line(i));
+            }
+            if final_newline && n > 0 {
+                body.push('\n');
+            }
+            let got = run(chunked(body.into_bytes(), cuts)).unwrap();
+            prop_assert_eq!(got.len(), n);
+            for (i, e) in got.iter().enumerate() {
+                prop_assert_eq!(e.path.as_str(), format!("d/f{i}.txt"));
+            }
+        }
+
+        #[test]
+        fn any_bytes_end_in_entries_or_an_error(
+            body in proptest::collection::vec(any::<u8>(), 0..2048),
+            cuts in proptest::collection::vec(any::<prop::sample::Index>(), 0..6),
+        ) {
+            let _ = run(chunked(body, cuts));
+        }
+
+        #[test]
+        fn hostile_paths_never_come_out(path in "(\\.\\./|/|[a-z]{1,2}/|\\\\|\\./|[A-Z]:){1,4}[a-z]{0,2}") {
+            let id = lode_core::blob_id(&b"x"[..]).unwrap();
+            let body = serde_json::json!({ "path": path, "kind": "file", "id": id, "size": 1 })
+                .to_string();
+            if let Ok(entries) = run(chunked(body.into_bytes(), vec![])) {
+                for e in entries {
+                    prop_assert!(lode_core::DepotPath::parse(e.path.as_str()).is_ok());
+                    prop_assert!(!e.path.segments().any(|s| s == ".." || s == "."));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_endless_line_is_refused() {
+        let chunk = bytes::Bytes::from(vec![b'a'; 64 * 1024]);
+        let chunks: Vec<_> = (0..40).map(|_| Ok(chunk.clone())).collect();
+        assert!(matches!(run(chunks), Err(crate::Error::Protocol(_))));
+    }
+}

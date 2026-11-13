@@ -339,6 +339,12 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
   rather than writing through it. A hostile or buggy server therefore cannot write outside the
   workspace root. A local process racing the client between the check and the rename is out of
   scope.
+- **Limits against hostile peers** (T054, details in [HARDENING.md](HARDENING.md)). The
+  server fails a request body after `[limits] body_idle_seconds` (60) without data, and
+  bounds JSON bodies, blob sizes (after decompression) and changes per commit. The client
+  times out a response after 300 s without data, stops a download once it passes the size the
+  manifest gave, caps JSON answers at 64 MiB and manifest lines at 1 MiB. Slow request
+  headers are not timed out by `loded`; a reverse proxy should do that.
 - **Bootstrap.** `loded init` creates the data directory and prints a one-time admin token.
   `loded reset-admin` (offline, on the server machine) revokes the `admin` user's tokens and
   prints a new one.
@@ -851,12 +857,17 @@ absorbs.
 - Unit tests beside the code. Property tests (`proptest`) for tree encoding round-trips and for
   "apply changes to tree == rebuild tree from scratch".
 - Integration tests through `lode-testkit`: real server on a temp directory, real CLI workspaces.
-- Concurrency test: N clients committing overlapping and disjoint changes; history must be a
-  valid serial order and no update lost.
-- Crash tests: abort the server at injected points in the commit path; `fsck` must pass after
-  restart. The points are named failpoints on `AppState::failpoints()`
-  (`commit.before_trees`, `commit.in_transaction`, `commit.after_transaction`); nothing arms
-  them outside tests.
+- Concurrency test: N clients committing overlapping and disjoint changes, locking and
+  shelving; history must be a valid serial order, no update lost, locks exclusive.
+- Crash tests: abort the server at injected points in the commit path and in GC; `fsck` must
+  pass after restart (`TestServer::restart`). The points are named failpoints on
+  `AppState::failpoints()` (`commit.before_trees`, `commit.in_transaction`,
+  `commit.after_transaction`, `gc.after_mark`, `gc.in_batch`); nothing arms them outside
+  tests. The client has named crash points too (`LODE_TEST_CRASH_AT=<point>` exits with code
+  86), and a test kills `checkout`, `update` and `commit` after random delays.
+- Soak and fuzz: `lode-cli/tests/soak.rs` (bounded by `LODE_SOAK_SECS`) and property tests on
+  every decoder that sees outside bytes. [HARDENING.md](HARDENING.md) lists them and their
+  long forms.
 - `TestWorkspace` runs `lode` with `LODE_CONFIG_DIR` and the home directories pointed at a
   temporary directory, so tests never read or write the developer's credentials.
 - CI on Linux, Windows and macOS: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.

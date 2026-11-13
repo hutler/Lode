@@ -50,6 +50,10 @@ pub fn finish(routes: Router<AppState>, state: AppState) -> Router {
     app.fallback(fallback)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(limit))
+        .layer(axum::middleware::map_request_with_state(
+            state.clone(),
+            crate::idle::limit_idle,
+        ))
         .layer(
             ServiceBuilder::new()
                 .layer(SetRequestIdLayer::new(request_id.clone(), MakeRequestUuid))

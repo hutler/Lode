@@ -66,17 +66,24 @@ impl Workspace {
             return Err(WorkspaceError::AlreadyAWorkspace(root));
         }
         layout.create_dirs()?;
-        let mut db = WorkspaceDb::open(&layout.db())?;
+        let db = WorkspaceDb::open(&layout.db())?;
+        let mut ws = Self { layout, db };
+        ws.initialize(init)?;
+        Ok(ws)
+    }
+
+    /// Writes the configuration of a new workspace: what [`Workspace::create`] does after
+    /// creating the database. A checkout stopped between the two finishes with this.
+    pub fn initialize(&mut self, init: &WorkspaceInit) -> Result<()> {
         let view = serde_json::to_string(&init.view)
             .map_err(|e| WorkspaceError::Corrupt(e.to_string()))?;
-        db.write(|tx| {
+        self.db.write(|tx| {
             tx.set_config(keys::SERVER_URL, &init.server_url)?;
             tx.set_config(keys::DEPOT, &init.depot)?;
             tx.set_config(keys::BRANCH, &init.branch)?;
             tx.set_config(keys::WORKSPACE_ID, &uuid::Uuid::new_v4().to_string())?;
             tx.set_config(keys::VIEW, &view)
-        })?;
-        Ok(Self { layout, db })
+        })
     }
 
     /// Opens the workspace whose root is `root`.

@@ -469,6 +469,7 @@ pub(crate) async fn sync(
         }
         Ok(())
     })?;
+    crate::crash::point("update.planned");
 
     let mut run = Run {
         ctx,
@@ -572,7 +573,9 @@ pub(crate) async fn sync(
         remove_and_prune(&root, p)?;
         ws.db_mut().write(|tx| tx.remove_file(p))?;
     }
+    crate::crash::point("update.deleted");
     let fetched = fetch_entries(&mut ws, &client, &depot, downloads, &ctx.out).await?;
+    crate::crash::point("update.fetched");
     ws.db_mut().write(|tx| {
         tx.set_config(keys::SYNCED_REV, &target.to_string())?;
         if let Some(e) = epoch {

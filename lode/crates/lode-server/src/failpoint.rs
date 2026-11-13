@@ -1,4 +1,4 @@
-//! Named failpoints, so tests can make the commit path fail at a chosen step and check that
+//! Named failpoints, so tests can make the commit path and GC fail at a chosen step and check that
 //! nothing is left inconsistent (SPEC §10). Nothing arms them in a running server; an unarmed
 //! check is one atomic load.
 
@@ -17,11 +17,18 @@ pub const COMMIT_IN_TRANSACTION: &str = "commit.in_transaction";
 /// sees an error, like a timeout after the server committed.
 pub const COMMIT_AFTER_TRANSACTION: &str = "commit.after_transaction";
 
+/// GC: after marking, before anything is deleted.
+pub const GC_AFTER_MARK: &str = "gc.after_mark";
+/// GC: inside a deletion batch, after one object was deleted.
+pub const GC_IN_BATCH: &str = "gc.in_batch";
+
 /// Every failpoint, for tests that try them all.
 pub const ALL: &[&str] = &[
     COMMIT_BEFORE_TREES,
     COMMIT_IN_TRANSACTION,
     COMMIT_AFTER_TRANSACTION,
+    GC_AFTER_MARK,
+    GC_IN_BATCH,
 ];
 
 /// The armed failpoints of one server.

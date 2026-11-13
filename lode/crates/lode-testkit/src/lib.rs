@@ -106,6 +106,8 @@ pub struct TestServer {
     clock: ManualClock,
     requests: RequestLog,
     shutdown: Option<oneshot::Sender<()>>,
+    config: ServerConfig,
+    task: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
 }
 
 impl std::fmt::Debug for TestServer {
@@ -146,22 +148,11 @@ impl TestServer {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let clock = ManualClock::new(now);
-        let modules = lode_server::module::select_enabled(&config.modules, available_modules());
-        let state = must(
-            open_state(config.clone(), Arc::new(clock.clone()), modules).await,
-            "open server state",
-        );
         let requests = RequestLog::default();
-        let log = requests.clone();
-        let app = router(state.clone()).layer(middleware::from_fn(move |req, next| {
-            record(log.clone(), req, next)
-        }));
-        let bound = must(BoundServer::bind(&config, app).await, "bind");
-        let url = format!("{}://{}", bound.scheme(), bound.local_addr());
-        let (tx, rx) = oneshot::channel::<()>();
-        tokio::spawn(bound.run(async {
-            let _ = rx.await;
-        }));
+        let (state, url, tx, task) = launch(&config, &clock, &requests).await;
+        if let Some(addr) = url.rsplit("//").next().and_then(|a| a.parse().ok()) {
+            config.listen = addr;
+        }
         Self {
             dir,
             url,
@@ -170,7 +161,37 @@ impl TestServer {
             clock,
             requests,
             shutdown: Some(tx),
+            config,
+            task: Some(task),
         }
+    }
+
+    /// Stops the server abruptly, as a crash would (no graceful shutdown; in-flight requests
+    /// are dropped), then starts it again on the same data directory, port and clock. Armed
+    /// failpoints do not survive.
+    pub async fn restart(&mut self) {
+        self.shutdown.take();
+        if let Some(task) = self.task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+        let mut last = None;
+        for _ in 0..50 {
+            match try_launch(&self.config, &self.clock, &self.requests).await {
+                Ok((state, url, tx, task)) => {
+                    self.state = state;
+                    self.url = url;
+                    self.shutdown = Some(tx);
+                    self.task = Some(task);
+                    return;
+                }
+                Err(e) => {
+                    last = Some(e);
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+        must(Err(last.unwrap_or_default()), "restart the server")
     }
 
     /// Base URL, such as `http://127.0.0.1:41234`.
@@ -361,6 +382,44 @@ fn lode_binary() -> std::io::Result<PathBuf> {
             )
         })?
         .canonicalize()
+}
+
+type Launched = (
+    AppState,
+    String,
+    oneshot::Sender<()>,
+    tokio::task::JoinHandle<std::io::Result<()>>,
+);
+
+async fn try_launch(
+    config: &ServerConfig,
+    clock: &ManualClock,
+    requests: &RequestLog,
+) -> Result<Launched, String> {
+    let modules = lode_server::module::select_enabled(&config.modules, available_modules());
+    let state = open_state(config.clone(), Arc::new(clock.clone()), modules)
+        .await
+        .map_err(|e| format!("open server state: {e}"))?;
+    let log = requests.clone();
+    let app = router(state.clone()).layer(middleware::from_fn(move |req, next| {
+        record(log.clone(), req, next)
+    }));
+    let bound = BoundServer::bind(config, app)
+        .await
+        .map_err(|e| format!("bind: {e}"))?;
+    let url = format!("{}://{}", bound.scheme(), bound.local_addr());
+    let (tx, rx) = oneshot::channel::<()>();
+    let task = tokio::spawn(bound.run(async {
+        let _ = rx.await;
+    }));
+    Ok((state, url, tx, task))
+}
+
+async fn launch(config: &ServerConfig, clock: &ManualClock, requests: &RequestLog) -> Launched {
+    must(
+        try_launch(config, clock, requests).await,
+        "start the server",
+    )
 }
 
 impl Drop for TestServer {

@@ -104,6 +104,10 @@ pub fn synced_rev(ws: &Workspace) -> CliResult<u64> {
 /// conflicts with it.
 pub const FROM_SHELF: u64 = 0;
 
+/// Largest base content [`Bases::read`] holds in memory (texts to diff or merge, symlink
+/// targets); callers only read small files.
+pub const MAX_IN_MEMORY: u64 = 256 * 1024 * 1024;
+
 /// The local file holding the incoming side of a binary conflict: `.theirs-r<N>`, or
 /// `.theirs-shelf` for a conflict left by `unshelve`.
 pub fn theirs_path(local: &Path, rev: u64) -> PathBuf {
@@ -180,14 +184,17 @@ impl<'a> Bases<'a> {
             .ok_or_else(|| CliError::failed("internal", "no client"))
     }
 
-    /// The content of `id` in memory, cached for later diffs and merges.
+    /// The content of `id` in memory, cached for later diffs and merges. At most
+    /// [`MAX_IN_MEMORY`] bytes.
     pub async fn read(&mut self, id: &ObjectId) -> CliResult<Vec<u8>> {
         if let Some(p) = self.cache.get(id)? {
             return Ok(fs::read(p)?);
         }
         let depot = self.depot.clone();
         let mut buf = Vec::new();
-        self.client()?.get_blob_to(&depot, id, &mut buf).await?;
+        self.client()?
+            .get_blob_to_max(&depot, id, &mut buf, MAX_IN_MEMORY)
+            .await?;
         if let Err(e) = self.cache.insert_reader(id, &buf[..]) {
             self.ctx.out.warn(format!("blob cache: {e}"));
         }

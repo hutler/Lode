@@ -15,6 +15,7 @@ pub mod error;
 pub mod events;
 pub mod extract;
 pub mod failpoint;
+mod idle;
 pub mod lru;
 pub mod maintenance;
 pub mod module;
