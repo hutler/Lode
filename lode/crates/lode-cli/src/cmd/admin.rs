@@ -11,6 +11,7 @@ use lode_proto::admin::{
     MaintenanceReport, PatchPrincipalRequest,
 };
 use lode_proto::auth::{CreateTokenRequest, PrincipalView, TokenView};
+use lode_proto::webhooks::{CreateWebhookRequest, DeliveryState, DeliveryView, WebhookView};
 use lode_proto::PrincipalKind;
 use serde_json::{json, Value};
 
@@ -72,6 +73,55 @@ pub enum AdminCmd {
         /// Also re-hash every object.
         #[arg(long)]
         full: bool,
+    },
+    /// Manage webhooks (needs the webhooks module on the server).
+    #[command(subcommand)]
+    Webhook(WebhookCmd),
+}
+
+/// `lode admin webhook`.
+#[derive(Debug, clap::Subcommand)]
+pub enum WebhookCmd {
+    /// Register a URL for events of a depot. Prints the signing secret once, on stdout.
+    Add {
+        /// Depot.
+        depot: String,
+        /// Receiver URL (https://, or http:// if the server allows it).
+        url: String,
+        /// Events, comma-separated: revision.created, branch.created, branch.archived,
+        /// lock.acquired, lock.released, shelf.created, shelf.updated, shelf.deleted,
+        /// shelf.submitted, check.updated.
+        #[arg(long, value_delimiter = ',', required = true)]
+        events: Vec<String>,
+        /// Only events on branches matching this glob.
+        #[arg(long)]
+        branch: Option<String>,
+    },
+    /// List the hooks of a depot.
+    List {
+        /// Depot.
+        depot: String,
+    },
+    /// Remove a hook and its delivery history.
+    Remove {
+        /// Depot.
+        depot: String,
+        /// Hook id.
+        id: i64,
+    },
+    /// Show the recent deliveries of a hook, newest first.
+    Deliveries {
+        /// Depot.
+        depot: String,
+        /// Hook id.
+        id: i64,
+    },
+    /// Queue a `ping` event for a hook, to test the receiver.
+    Ping {
+        /// Depot.
+        depot: String,
+        /// Hook id.
+        id: i64,
     },
 }
 
@@ -432,6 +482,113 @@ fn print_check(ctx: &Ctx, c: &AccessCheck) {
     ));
 }
 
+fn webhook_line(h: &WebhookView) -> String {
+    format!(
+        "{:>4}  {}  events {}{}{}",
+        h.id,
+        h.url,
+        h.events.join(","),
+        h.branch
+            .as_deref()
+            .map(|b| format!("  branch {b}"))
+            .unwrap_or_default(),
+        if h.active { "" } else { "  (inactive)" }
+    )
+}
+
+fn delivery_line(d: &DeliveryView) -> String {
+    let state = match d.state {
+        DeliveryState::Pending => "pending",
+        DeliveryState::Ok => "ok",
+        DeliveryState::Failed => "failed",
+    };
+    let mut line = format!(
+        "{:>6}  {:<16} {:<7} attempts {}  queued {}",
+        d.id,
+        d.event,
+        state,
+        d.attempts,
+        format_time(d.created_at)
+    );
+    if let Some(s) = d.last_status {
+        line.push_str(&format!("  status {s}"));
+    }
+    if let Some(e) = &d.last_error {
+        line.push_str(&format!("  ({e})"));
+    }
+    if let Some(n) = d.next_attempt_at {
+        line.push_str(&format!("  next {}", format_time(n)));
+    }
+    line
+}
+
+async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> CliResult<Value> {
+    match cmd {
+        WebhookCmd::Add {
+            depot,
+            url,
+            events,
+            branch,
+        } => {
+            if let Some(b) = &branch {
+                check_glob("branch", b)?;
+            }
+            let events: Vec<String> = events
+                .into_iter()
+                .map(|e| e.trim().to_owned())
+                .filter(|e| !e.is_empty())
+                .collect();
+            let created = c
+                .create_webhook(
+                    &depot,
+                    &CreateWebhookRequest {
+                        url,
+                        events,
+                        branch,
+                    },
+                )
+                .await?;
+            // The secret goes to stdout once; the rest is commentary on stderr.
+            ctx.out.line(&created.secret);
+            if !ctx.g.json {
+                eprintln!(
+                    "Webhook {} on {}: {}. The secret above is shown only now; receivers check \
+                     X-Lode-Signature with it.",
+                    created.hook.id,
+                    created.hook.depot,
+                    webhook_line(&created.hook).trim()
+                );
+            }
+            to_json(&created)
+        }
+        WebhookCmd::List { depot } => {
+            let list = c.webhooks(&depot).await?;
+            for h in &list.webhooks {
+                ctx.out.line(webhook_line(h));
+            }
+            to_json(&list)
+        }
+        WebhookCmd::Remove { depot, id } => {
+            c.delete_webhook(&depot, id).await?;
+            ctx.out.line(format!("Removed webhook {id}"));
+            Ok(json!({ "removed": id }))
+        }
+        WebhookCmd::Deliveries { depot, id } => {
+            let list = c.webhook_deliveries(&depot, id).await?;
+            for d in &list.deliveries {
+                ctx.out.line(delivery_line(d));
+            }
+            to_json(&list)
+        }
+        WebhookCmd::Ping { depot, id } => {
+            let d = c.ping_webhook(&depot, id).await?;
+            ctx.out
+                .line(format!("Queued ping delivery {} for webhook {id}", d.id));
+            to_json(&d)
+        }
+    }
+}
+
 fn print_report(ctx: &Ctx, what: &str, r: &MaintenanceReport) {
     for p in &r.problems {
         ctx.out.line(p);
@@ -666,6 +823,7 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> CliResult<Value> {
             print_check(ctx, &check);
             to_json(&check)
         }
+        AdminCmd::Webhook(cmd) => webhook(ctx, &c, cmd).await,
         AdminCmd::Gc { depot, dry_run } => {
             let r = c.gc(&depot, dry_run).await?;
             print_report(ctx, "gc", &r);

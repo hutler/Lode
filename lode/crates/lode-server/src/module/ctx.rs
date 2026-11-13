@@ -71,6 +71,12 @@ impl ModuleCtx {
         self.state.tools()
     }
 
+    /// The server configuration (`loded.toml`), for a module's own section such as
+    /// `[webhooks]`.
+    pub fn config(&self) -> &crate::config::ServerConfig {
+        self.state.config()
+    }
+
     /// Size and count limits from `[limits]`.
     pub fn limits(&self) -> &crate::config::Limits {
         &self.state.config().limits

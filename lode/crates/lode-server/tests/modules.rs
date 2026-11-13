@@ -172,7 +172,11 @@ impl Module for Example {
         Ok(())
     }
 
-    fn on_event<'a>(&'a self, event: &'a Event) -> BoxFuture<'a, Result<(), BoxError>> {
+    fn on_event<'a>(
+        &'a self,
+        _ctx: &'a ModuleCtx,
+        event: &'a Event,
+    ) -> BoxFuture<'a, Result<(), BoxError>> {
         Box::pin(async move {
             // A plain compare-exchange: `fetch_update` is deprecated on newer toolchains and its
             // replacement is newer than the minimum supported Rust version.

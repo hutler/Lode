@@ -16,6 +16,7 @@ pub mod error;
 pub mod locks;
 pub mod read;
 pub mod shelves;
+pub mod webhooks;
 
 pub use lode_core::{Change, ChangeAction, CopyFrom, DepotPath, EntryKind, ErrorCode, ObjectId};
 

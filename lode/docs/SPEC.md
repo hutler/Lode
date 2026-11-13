@@ -198,8 +198,9 @@ from the shelves module); the MCP module hosts them and adds the tools that read
 
 ### 6.5 Webhooks (off by default)
 
-- An admin registers a URL per depot, with the events it wants and an optional branch pattern.
-  `lode admin webhook add|list|remove|deliveries|ping`.
+- A depot administrator registers a URL per depot, with the events it wants and an optional
+  branch pattern: `lode admin webhook add|list|remove|deliveries|ping`. The URL must be
+  `https://` unless the server allows plain HTTP (`[webhooks] allow_http`).
 - Lode sends a signed `POST` for each matching event: new revision, branch created or
   archived, shelf created, updated, submitted or deleted, lock taken or released, check updated.
 - Events carry identifiers only, never file content or paths. The receiver fetches details
@@ -291,7 +292,7 @@ lode view show|include|exclude
 lode checks <rN | shelf-id[@version]>          (planned, with the checks module)
 lode mcp
 lode admin depot|user|agent|group|token|acl|gc|fsck …
-lode admin webhook …                           (planned, with the webhooks module)
+lode admin webhook add|list|remove|deliveries|ping …   (with the webhooks module)
 ```
 
 Every command honours the environment variables `LODE_SERVER` and `LODE_TOKEN_FILE` (a path
@@ -319,7 +320,6 @@ Everything else in sections 5–7 and 9 is covered by the scenario suite
 
 | Section | Deviation |
 | --- | --- |
-| 6.5 Webhooks | Not implemented. The module is a scaffold; `[modules] webhooks = true` has no effect and `lode admin webhook` does not exist. Planned for M6. |
 | 6.6 Checks | Not implemented: no check reports, no `lode checks`, no MCP `list_checks`, and the `[checks]` submit gate is parsed in `.lodeconfig` but not enforced. Planned for M6. |
 | 5.4 Merge | After a single-revision pick (`-r`), a later full merge starts again from the merge base before the gap and re-applies the picked change. Usually `unchanged`; a conflict if the file changed since. Follows from the v1 base rule. |
 | 6.1 Locks | `lode switch` leaves this workspace's locks on the old branch (they are per branch) and reports them; it does not release them. |

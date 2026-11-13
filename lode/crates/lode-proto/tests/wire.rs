@@ -15,6 +15,7 @@ use lode_proto::error::ErrorBody;
 use lode_proto::locks::*;
 use lode_proto::read::*;
 use lode_proto::shelves::*;
+use lode_proto::webhooks::*;
 use lode_proto::*;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -616,6 +617,70 @@ fn shelves_types() {
         SubmitShelfRequest {
             expected_version: 3,
             message: None,
+        }
+    );
+}
+
+#[test]
+fn webhooks_types() {
+    snap!(
+        "create_webhook_request",
+        CreateWebhookRequest {
+            url: "https://ci.example.com/hooks/lode".into(),
+            events: vec!["revision.created".into(), "shelf.updated".into()],
+            branch: Some("release/*".into()),
+        }
+    );
+    let hook = WebhookView {
+        id: 3,
+        depot: "game".into(),
+        url: "https://ci.example.com/hooks/lode".into(),
+        events: vec!["revision.created".into()],
+        branch: None,
+        active: true,
+        created_by: ana(),
+        created_at: T,
+    };
+    snap!(
+        "created_webhook",
+        CreatedWebhook {
+            hook: hook.clone(),
+            secret: "5f".repeat(32),
+        }
+    );
+    snap!(
+        "webhook_list",
+        WebhookList {
+            webhooks: vec![hook]
+        }
+    );
+    snap!(
+        "delivery_list",
+        DeliveryList {
+            deliveries: vec![
+                DeliveryView {
+                    id: 12,
+                    hook_id: 3,
+                    event: "revision.created".into(),
+                    state: DeliveryState::Pending,
+                    attempts: 2,
+                    next_attempt_at: Some(T + time::Duration::minutes(1)),
+                    last_status: Some(503),
+                    last_error: Some("HTTP 503".into()),
+                    created_at: T,
+                },
+                DeliveryView {
+                    id: 11,
+                    hook_id: 3,
+                    event: "ping".into(),
+                    state: DeliveryState::Ok,
+                    attempts: 1,
+                    next_attempt_at: None,
+                    last_status: Some(204),
+                    last_error: None,
+                    created_at: T,
+                },
+            ],
         }
     );
 }

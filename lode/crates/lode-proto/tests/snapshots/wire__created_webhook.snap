@@ -1,0 +1,21 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "hook": {
+    "id": 3,
+    "depot": "game",
+    "url": "https://ci.example.com/hooks/lode",
+    "events": [
+      "revision.created"
+    ],
+    "active": true,
+    "created_by": {
+      "name": "ana",
+      "kind": "user"
+    },
+    "created_at": "2026-11-12T10:30:00Z"
+  },
+  "secret": "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f"
+}

@@ -57,6 +57,7 @@ clap = { version = "4", features = ["derive"] }
 futures = "0.3"
 globset = "0.4"
 hex = "0.4"
+hmac = "0.12"
 ignore = "0.4"
 rand = "0.8"
 # The official Rust MCP SDK. 3.x needs Rust 1.88.

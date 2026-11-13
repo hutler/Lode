@@ -55,6 +55,12 @@ checks = false
 [gc]
 # Unreferenced objects younger than this are kept (24 hours).
 grace_seconds = 86400
+
+# Webhooks module, when enabled in [modules].
+[webhooks]
+# Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
+# network: the signature proves who sent a request, but not that nobody read it.
+allow_http = false
 "#;
 
 /// Errors reading the configuration.
@@ -99,6 +105,17 @@ pub struct ServerConfig {
     /// Garbage collection.
     #[serde(default)]
     pub gc: GcConfig,
+    /// Webhooks module settings.
+    #[serde(default)]
+    pub webhooks: WebhooksConfig,
+}
+
+/// The `[webhooks]` table, read by the webhooks module.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct WebhooksConfig {
+    /// Accept `http://` hook URLs. Off by default: hooks must use `https://`.
+    pub allow_http: bool,
 }
 
 /// The `[gc]` table.
@@ -246,6 +263,7 @@ impl ServerConfig {
             limits: Limits::default(),
             gc: GcConfig::default(),
             modules: ModulesConfig::default(),
+            webhooks: WebhooksConfig::default(),
         }
     }
 }
@@ -271,6 +289,7 @@ mod tests {
         assert_eq!(cfg.limits.body_idle_seconds, 60);
         assert!(cfg.modules.locks && cfg.modules.shelves && cfg.modules.mcp);
         assert!(!cfg.modules.webhooks && !cfg.modules.checks);
+        assert!(!cfg.webhooks.allow_http);
     }
 
     #[test]
@@ -279,6 +298,7 @@ mod tests {
             "data_dir = '.'\nlisten_addr = '1.2.3.4:5'",
             "data_dir = '.'\n[limits]\nmax_json = 1",
             "data_dir = '.'\n[modules]\nfrobnicate = true",
+            "data_dir = '.'\n[webhooks]\nallow_ftp = true",
             "data_dir = '.'\n[tls]\ncert='a'\nkey='b'\npassword='c'",
         ] {
             let err = ServerConfig::parse(text, Path::new("."), Path::new("x")).unwrap_err();

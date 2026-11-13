@@ -80,6 +80,7 @@ pub fn available_modules() -> lode_server::module::Modules {
         lode_mod_locks::Locks::module(),
         lode_mod_shelves::Shelves::module(),
         lode_mod_mcp::Mcp::module(),
+        lode_mod_webhooks::Webhooks::module(),
     ]
 }
 
@@ -108,6 +109,33 @@ pub struct TestServer {
     shutdown: Option<oneshot::Sender<()>>,
     config: ServerConfig,
     task: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
+    background: Background,
+}
+
+/// The event dispatcher and module workers of a running test server.
+struct Background {
+    stop: tokio::sync::watch::Sender<bool>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl Background {
+    fn start(state: &AppState) -> Self {
+        let (stop, signal) = lode_server::module::Stop::new();
+        let mut tasks = lode_server::module::spawn_workers(state, &signal);
+        let mut wait = signal;
+        tasks.push(lode_server::events::Dispatcher::spawn(
+            state.clone(),
+            async move { wait.wait().await },
+        ));
+        Self { stop, tasks }
+    }
+
+    /// Stops everything at once, as a crash would.
+    fn abort(&mut self) {
+        for t in self.tasks.drain(..) {
+            t.abort();
+        }
+    }
 }
 
 impl std::fmt::Debug for TestServer {
@@ -153,7 +181,9 @@ impl TestServer {
         if let Some(addr) = url.rsplit("//").next().and_then(|a| a.parse().ok()) {
             config.listen = addr;
         }
+        let background = Background::start(&state);
         Self {
+            background,
             dir,
             url,
             admin_token,
@@ -171,6 +201,7 @@ impl TestServer {
     /// failpoints do not survive.
     pub async fn restart(&mut self) {
         self.shutdown.take();
+        self.background.abort();
         if let Some(task) = self.task.take() {
             task.abort();
             let _ = task.await;
@@ -179,6 +210,7 @@ impl TestServer {
         for _ in 0..50 {
             match try_launch(&self.config, &self.clock, &self.requests).await {
                 Ok((state, url, tx, task)) => {
+                    self.background = Background::start(&state);
                     self.state = state;
                     self.url = url;
                     self.shutdown = Some(tx);
@@ -424,6 +456,7 @@ async fn launch(config: &ServerConfig, clock: &ManualClock, requests: &RequestLo
 
 impl Drop for TestServer {
     fn drop(&mut self) {
+        let _ = self.background.stop.send(true);
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }

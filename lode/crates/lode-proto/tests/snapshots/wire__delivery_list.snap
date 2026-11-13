@@ -1,0 +1,28 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "deliveries": [
+    {
+      "id": 12,
+      "hook_id": 3,
+      "event": "revision.created",
+      "state": "pending",
+      "attempts": 2,
+      "next_attempt_at": "2026-11-12T10:31:00Z",
+      "last_status": 503,
+      "last_error": "HTTP 503",
+      "created_at": "2026-11-12T10:30:00Z"
+    },
+    {
+      "id": 11,
+      "hook_id": 3,
+      "event": "ping",
+      "state": "ok",
+      "attempts": 1,
+      "last_status": 204,
+      "created_at": "2026-11-12T10:30:00Z"
+    }
+  ]
+}

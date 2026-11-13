@@ -1,0 +1,12 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "url": "https://ci.example.com/hooks/lode",
+  "events": [
+    "revision.created",
+    "shelf.updated"
+  ],
+  "branch": "release/*"
+}

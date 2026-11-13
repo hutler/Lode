@@ -940,6 +940,71 @@ impl Client {
         self.json(Retry::No, Method::POST, url).await
     }
 
+    // ---- webhooks module ----
+
+    /// `GET /depots/{d}/webhooks`.
+    pub async fn webhooks(&self, depot: &str) -> Result<lode_proto::webhooks::WebhookList> {
+        self.json(
+            Retry::Yes,
+            Method::GET,
+            self.url(&["depots", depot, "webhooks"])?,
+        )
+        .await
+    }
+
+    /// `POST /depots/{d}/webhooks`. Not retried: a repeat would make a second hook. The
+    /// answer carries the secret, which is shown only this once.
+    pub async fn create_webhook(
+        &self,
+        depot: &str,
+        req: &lode_proto::webhooks::CreateWebhookRequest,
+    ) -> Result<lode_proto::webhooks::CreatedWebhook> {
+        self.json_body(
+            Retry::No,
+            Method::POST,
+            self.url(&["depots", depot, "webhooks"])?,
+            req,
+        )
+        .await
+    }
+
+    /// `DELETE /depots/{d}/webhooks/{id}`.
+    pub async fn delete_webhook(&self, depot: &str, id: i64) -> Result<()> {
+        self.no_content(
+            Method::DELETE,
+            self.url(&["depots", depot, "webhooks", &id.to_string()])?,
+        )
+        .await
+    }
+
+    /// `GET /depots/{d}/webhooks/{id}/deliveries`.
+    pub async fn webhook_deliveries(
+        &self,
+        depot: &str,
+        id: i64,
+    ) -> Result<lode_proto::webhooks::DeliveryList> {
+        self.json(
+            Retry::Yes,
+            Method::GET,
+            self.url(&["depots", depot, "webhooks", &id.to_string(), "deliveries"])?,
+        )
+        .await
+    }
+
+    /// `POST /depots/{d}/webhooks/{id}/ping`.
+    pub async fn ping_webhook(
+        &self,
+        depot: &str,
+        id: i64,
+    ) -> Result<lode_proto::webhooks::DeliveryView> {
+        self.json(
+            Retry::No,
+            Method::POST,
+            self.url(&["depots", depot, "webhooks", &id.to_string(), "ping"])?,
+        )
+        .await
+    }
+
     /// `POST /admin/depots/{d}/fsck`.
     pub async fn fsck(&self, depot: &str, full: bool) -> Result<MaintenanceReport> {
         let mut url = self.url(&["admin", "depots", depot, "fsck"])?;

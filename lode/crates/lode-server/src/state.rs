@@ -138,6 +138,12 @@ impl AppState {
         &self.inner.modules
     }
 
+    /// The context a module gets, for running a module's own functions outside a request
+    /// (tests, embedding).
+    pub fn module_ctx(&self, module: &'static str) -> ModuleCtx {
+        ModuleCtx::new(self.clone(), module)
+    }
+
     /// Names of the enabled modules.
     pub fn module_names(&self) -> &[String] {
         &self.inner.module_names

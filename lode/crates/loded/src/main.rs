@@ -159,6 +159,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let dispatcher = lode_server::events::Dispatcher::spawn(state.clone(), async move {
                 let _ = stop_rx.await;
             });
+            let (stop_workers, stop) = lode_server::module::Stop::new();
+            let workers = lode_server::module::spawn_workers(&state, &stop);
             let router = lode_server::router(state);
             let server = BoundServer::bind(&cfg, router).await?;
             // Tests and wrapper scripts read this line to find the port.
@@ -173,7 +175,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 .await
                 .context("server error")?;
             let _ = stop_tx.send(());
+            let _ = stop_workers.send(true);
             let _ = dispatcher.await;
+            for w in workers {
+                let _ = w.await;
+            }
             tracing::info!("stopped");
             Ok(())
         }
@@ -187,5 +193,6 @@ fn available_modules() -> lode_server::module::Modules {
         lode_mod_locks::Locks::module(),
         lode_mod_shelves::Shelves::module(),
         lode_mod_mcp::Mcp::module(),
+        lode_mod_webhooks::Webhooks::module(),
     ]
 }

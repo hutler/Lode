@@ -67,6 +67,7 @@ async fn catch_up(
     depot_names: &HashMap<i64, String>,
 ) -> Result<usize, ()> {
     let name = module.name();
+    let ctx = state.module_ctx(name);
     let mut delivered = 0;
     loop {
         let rows = state
@@ -89,7 +90,7 @@ async fn catch_up(
         for row in rows {
             let id = row.id;
             let event = to_event(row, depot_names);
-            if let Err(e) = module.on_event(&event).await {
+            if let Err(e) = module.on_event(&ctx, &event).await {
                 tracing::warn!(error = %e, subscriber = name, event = id, "event handler failed; will retry");
                 return Err(());
             }

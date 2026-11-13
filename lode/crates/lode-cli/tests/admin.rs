@@ -212,3 +212,103 @@ async fn scripted_setup_then_behaviour() {
     let fsck = admin.json(&["admin", "fsck", "game"]);
     assert_eq!(fsck["objects_affected"], 0);
 }
+
+/// T060: `lode admin webhook` against a server whose worker really sends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn webhooks_from_the_command_line() {
+    use std::sync::{Arc, Mutex};
+
+    let server = TestServer::start_with(lode_testkit::TestServerOptions {
+        configure: Box::new(|c| {
+            c.modules.webhooks = true;
+            c.webhooks.allow_http = true;
+        }),
+    })
+    .await;
+    let admin = TestWorkspace::new(&server).with_token(server.admin_token());
+    admin.json(&["admin", "depot", "create", "game"]);
+
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let record = seen.clone();
+    let app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let record = record.clone();
+        async move {
+            let event = req
+                .headers()
+                .get("x-lode-event")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned();
+            record.lock().unwrap().push(event);
+            axum::http::StatusCode::NO_CONTENT
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/hook", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    // Human output prints the secret alone on stdout.
+    let out = admin
+        .cmd()
+        .args([
+            "admin",
+            "webhook",
+            "add",
+            "game",
+            &url,
+            "--events",
+            "revision.created,branch.created",
+            "--branch",
+            "main",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(stdout.trim().len(), 64, "{stdout}");
+
+    let list = admin.json(&["admin", "webhook", "list", "game"]);
+    let hook = &list["webhooks"][0];
+    assert_eq!(hook["url"], url.as_str());
+    assert_eq!(hook["branch"], "main");
+    assert!(!list.to_string().contains(stdout.trim()));
+    let id = hook["id"].as_i64().unwrap().to_string();
+
+    let ping = admin.json(&["admin", "webhook", "ping", "game", &id]);
+    assert_eq!(ping["event"], "ping");
+    server
+        .commit_files("game", "main", &[("a.txt", b"a\n")])
+        .await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let d = admin.json(&["admin", "webhook", "deliveries", "game", &id]);
+        let ok = d["deliveries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|x| x["state"] == "ok")
+            .count();
+        if ok == 2 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{d}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let mut got = seen.lock().unwrap().clone();
+    got.sort();
+    assert_eq!(got, ["ping", "revision.created"]);
+
+    // An unknown event is a usage error reported by the server.
+    let (code, err) =
+        admin.json_status(&["admin", "webhook", "add", "game", &url, "--events", "x.y"]);
+    assert_ne!(code, 0);
+    assert_eq!(err["error"]["code"], "invalid_request");
+
+    admin.json(&["admin", "webhook", "remove", "game", &id]);
+    let list = admin.json(&["admin", "webhook", "list", "game"]);
+    assert_eq!(list["webhooks"].as_array().unwrap().len(), 0);
+}

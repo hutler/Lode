@@ -28,7 +28,9 @@ pub mod tls;
 
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
-pub use config::{ConfigError, GcConfig, Limits, ModulesConfig, ServerConfig, TlsConfig};
+pub use config::{
+    ConfigError, GcConfig, Limits, ModulesConfig, ServerConfig, TlsConfig, WebhooksConfig,
+};
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};
 pub use perm::{BranchAccess, DepotAccess, Level, Permissions};

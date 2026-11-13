@@ -28,6 +28,32 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// An error from a module's event handler; the dispatcher logs it and retries later.
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// Tells a module's background worker that the server is shutting down.
+#[derive(Debug, Clone)]
+pub struct Stop(tokio::sync::watch::Receiver<bool>);
+
+impl Stop {
+    /// A stop signal and the sender that fires it.
+    pub fn new() -> (tokio::sync::watch::Sender<bool>, Self) {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        (tx, Self(rx))
+    }
+
+    /// Whether shutdown has begun.
+    pub fn is_stopped(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    /// Completes when shutdown begins, or when the sender is dropped.
+    pub async fn wait(&mut self) {
+        while !*self.0.borrow_and_update() {
+            if self.0.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
 /// A scope a module adds to the registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScopeDef {
@@ -157,8 +183,13 @@ pub trait Module: Send + Sync + 'static {
     }
 
     /// Handles one event after it was committed, at least once and in order. Return
-    /// quickly; slow work belongs in the module's own queue.
-    fn on_event<'a>(&'a self, _event: &'a Event) -> BoxFuture<'a, Result<(), BoxError>> {
+    /// quickly; slow work belongs in the module's own queue. `ctx` gives access to the
+    /// module's own tables.
+    fn on_event<'a>(
+        &'a self,
+        _ctx: &'a ModuleCtx,
+        _event: &'a Event,
+    ) -> BoxFuture<'a, Result<(), BoxError>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -176,6 +207,26 @@ pub trait Module: Send + Sync + 'static {
     fn mcp_tools(&self, _ctx: ModuleCtx) -> Vec<ToolDef> {
         Vec::new()
     }
+
+    /// A background worker that runs while the server does, such as webhook delivery. It
+    /// must return soon after `stop` fires. Started by [`spawn_workers`].
+    fn worker(&self, _ctx: ModuleCtx, _stop: Stop) -> Option<BoxFuture<'static, ()>> {
+        None
+    }
+}
+
+/// Starts the background worker of every enabled module that has one. Fire the sender of
+/// `stop` and await the handles to shut them down.
+pub fn spawn_workers(
+    state: &crate::state::AppState,
+    stop: &Stop,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    state
+        .modules()
+        .iter()
+        .filter_map(|m| m.worker(state.module_ctx(m.name()), stop.clone()))
+        .map(tokio::spawn)
+        .collect()
 }
 
 /// The enabled modules, in registration order.
