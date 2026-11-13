@@ -171,16 +171,24 @@ impl<'a> Viewer<'a> {
         }
         let p = self.tx.principal(PrincipalId(id))?;
         let r = match p {
-            Some(p) => PrincipalRef {
-                name: p.name,
-                kind: match p.kind {
-                    PrincipalKind::User => lode_proto::PrincipalKind::User,
-                    PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
-                },
-            },
+            Some(p) => {
+                let owner = match (p.kind, p.owner_id) {
+                    (PrincipalKind::Agent, Some(o)) => self.tx.principal(o)?.map(|o| o.name),
+                    _ => None,
+                };
+                PrincipalRef {
+                    name: p.name,
+                    kind: match p.kind {
+                        PrincipalKind::User => lode_proto::PrincipalKind::User,
+                        PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
+                    },
+                    owner,
+                }
+            }
             None => PrincipalRef {
                 name: format!("#{id}"),
                 kind: lode_proto::PrincipalKind::User,
+                owner: None,
             },
         };
         self.owners.insert(id, r.clone());

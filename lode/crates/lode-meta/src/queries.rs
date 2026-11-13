@@ -490,6 +490,16 @@ pub trait Reads {
             }
             sql.push(')');
         }
+        if let Some(a) = f.author {
+            arg(&mut sql, " AND r.author_id = ?", Value::Integer(a.0));
+        }
+        if let Some(k) = f.author_kind {
+            arg(
+                &mut sql,
+                " AND r.author_id IN (SELECT id FROM principal WHERE kind = ?)",
+                Value::Text(k.as_str().to_owned()),
+            );
+        }
         if let Some(path) = &f.path {
             arg(
                 &mut sql,

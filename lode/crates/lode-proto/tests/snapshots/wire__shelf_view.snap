@@ -9,7 +9,8 @@ expression: v
   "base_rev": 1042,
   "owner": {
     "name": "fixer-bot",
-    "kind": "agent"
+    "kind": "agent",
+    "owner": "ana"
   },
   "agent_owner": "ana",
   "description": "Fix door",

@@ -325,4 +325,8 @@ pub struct RevisionFilter {
     pub ascending: bool,
     /// Most rows returned.
     pub limit: u32,
+    /// Only revisions by this author.
+    pub author: Option<PrincipalId>,
+    /// Only revisions whose author is of this kind.
+    pub author_kind: Option<PrincipalKind>,
 }

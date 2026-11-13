@@ -10,7 +10,8 @@ expression: v
       "parent": 1042,
       "author": {
         "name": "fixer-bot",
-        "kind": "agent"
+        "kind": "agent",
+        "owner": "ana"
       },
       "submitter": {
         "name": "ana",

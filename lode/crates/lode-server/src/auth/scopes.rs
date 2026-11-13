@@ -60,6 +60,14 @@ impl ScopeRegistry {
         self.agent_defaults.iter().cloned().collect()
     }
 
+    /// The scopes a new agent token gets when none are asked for: `read` plus every
+    /// agent-default module scope (SPEC §7.1).
+    pub fn agent_token_defaults(&self) -> Vec<String> {
+        let mut out = vec![SCOPE_READ.to_owned()];
+        out.extend(self.agent_defaults());
+        out
+    }
+
     /// Whether `name` is registered.
     pub fn contains(&self, name: &str) -> bool {
         self.names.contains(name)

@@ -16,19 +16,10 @@ pub struct MergedFrom {
     pub to_rev: u64,
 }
 
-/// Agent fields of a provenance record. Self-reported.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct AgentProvenance {
-    /// Model name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Session id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session: Option<String>,
-    /// Tool that made the change.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
-}
+/// Agent fields of a provenance record, such as `model`, `session` and `tool`: any string
+/// fields, stored as given (SPEC §7.3). Self-reported. Anything but an object of strings is
+/// refused.
+pub type AgentProvenance = std::collections::BTreeMap<String, String>;
 
 /// Which server endpoint a change came through. Set by the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -41,7 +41,14 @@ pub fn routes() -> Router<AppState> {
             get(list_principals).post(create_principal),
         )
         .route(paths::ADMIN_PRINCIPAL, patch(patch_principal))
-        .route(paths::ADMIN_PRINCIPAL_TOKENS, post(create_token_for))
+        .route(
+            paths::ADMIN_PRINCIPAL_TOKENS,
+            get(list_tokens_for).post(create_token_for),
+        )
+        .route(
+            paths::ADMIN_PRINCIPAL_TOKEN,
+            axum::routing::delete(delete_token_for),
+        )
         .route(paths::ADMIN_GROUPS, get(list_groups).post(create_group))
         .route(
             paths::ADMIN_GROUP_MEMBER,
@@ -241,46 +248,63 @@ async fn list_tokens(State(state): State<AppState>, caller: Caller) -> ApiResult
     }))
 }
 
-/// Validates a token request against the registry and the minting token's own scopes.
+/// Validates a token request and returns its expiry and scopes. `agent` is the agent the
+/// token is for, when it is minted for an agent by an administrator or the agent's owner.
+///
+/// A server administrator may grant any registered scope. The token `loded init` prints
+/// carries only the core scopes, because modules are not known yet at that point; without this
+/// nobody could ever hold a module scope such as `lock` except through `login`. An agent's
+/// owner may grant `read` and the agent-default scopes only (SPEC §7.1); anyone else only
+/// scopes the token making the request has. An agent token asked for without scopes gets
+/// the agent defaults.
 fn check_token_request(
     state: &AppState,
     caller: &Caller,
     req: &CreateTokenRequest,
-) -> ApiResult<Option<i64>> {
+    agent: Option<&PrincipalRow>,
+) -> ApiResult<(Option<i64>, Vec<String>)> {
     if req.name.trim().is_empty() || req.name.len() > MAX_LABEL_LEN {
         return Err(ApiError::invalid_request(format!(
             "token name must have 1 to {MAX_LABEL_LEN} characters"
         )));
     }
-    if req.scopes.is_empty() {
-        return Err(ApiError::invalid_request(
-            "a token needs at least one scope",
-        ));
-    }
-    for s in &req.scopes {
+    let scopes = match (req.scopes.is_empty(), agent) {
+        (true, Some(_)) => state.scopes().agent_token_defaults(),
+        (true, None) => {
+            return Err(ApiError::invalid_request(
+                "a token needs at least one scope",
+            ))
+        }
+        (false, _) => req.scopes.clone(),
+    };
+    for s in &scopes {
         if !state.scopes().contains(s) {
             return Err(ApiError::invalid_request(format!("unknown scope `{s}`")));
         }
     }
-    // A server administrator may grant any registered scope. The token `loded init` prints
-    // carries only the core scopes, because modules are not known yet at that point; without
-    // this nobody could ever hold a module scope such as `lock` except through `login`.
-    let unbounded = state.permissions().is_server_admin(caller);
-    if let Some(missing) = req
-        .scopes
-        .iter()
-        .find(|s| !unbounded && !caller.has_scope(s))
-    {
-        return Err(ApiError::new(
-            ErrorCode::PermissionDenied,
-            format!("cannot grant `{missing}`: the token making this request lacks it"),
-        ));
+    if !state.permissions().is_server_admin(caller) {
+        let missing = match agent {
+            Some(_) => {
+                let allowed = state.scopes().agent_token_defaults();
+                scopes
+                    .iter()
+                    .find(|s| !allowed.contains(s))
+                    .map(|s| format!("only an administrator can grant `{s}` to an agent"))
+            }
+            None => scopes
+                .iter()
+                .find(|s| !caller.has_scope(s))
+                .map(|s| format!("cannot grant `{s}`: the token making this request lacks it")),
+        };
+        if let Some(msg) = missing {
+            return Err(ApiError::new(ErrorCode::PermissionDenied, msg));
+        }
     }
     let expires = req.expires_at.map(time_to_ms);
     if expires.is_some_and(|e| e <= state.clock().now_ms()) {
         return Err(ApiError::invalid_request("expiry must be in the future"));
     }
-    Ok(expires)
+    Ok((expires, scopes))
 }
 
 fn dedup(mut scopes: Vec<String>) -> Vec<String> {
@@ -294,12 +318,12 @@ async fn create_token(
     caller: Caller,
     ApiJson(req): ApiJson<CreateTokenRequest>,
 ) -> ApiResult<(StatusCode, Json<CreateTokenResponse>)> {
-    let expires = check_token_request(&state, &caller, &req)?;
+    let (expires, scopes) = check_token_request(&state, &caller, &req, None)?;
     let (token, row) = issue_token(
         &state,
         caller.principal.id,
         req.name,
-        dedup(req.scopes),
+        dedup(scopes),
         expires,
     )
     .await?;
@@ -479,20 +503,31 @@ async fn patch_principal(
     Ok(Json(result))
 }
 
+/// The principal `name` when the caller may manage its tokens: a server administrator for
+/// anyone, a user for the agents they own. Others get `not_found` or `permission_denied`.
+async fn token_target(state: &AppState, caller: &Caller, name: String) -> ApiResult<PrincipalRow> {
+    let target = state
+        .meta()
+        .read(move |tx| tx.principal_by_name(&name))
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such principal"))?;
+    let owns = target.kind == PrincipalKind::Agent && target.owner_id == Some(caller.principal.id);
+    if !owns {
+        state.permissions().require_server_admin(caller)?;
+    }
+    Ok(target)
+}
+
 async fn create_token_for(
     State(state): State<AppState>,
     caller: Caller,
     Path(name): Path<String>,
     ApiJson(req): ApiJson<CreateTokenRequest>,
 ) -> ApiResult<(StatusCode, Json<CreateTokenResponse>)> {
-    state.permissions().require_server_admin(&caller)?;
-    let expires = check_token_request(&state, &caller, &req)?;
-    let target = state
-        .meta()
-        .read(move |tx| tx.principal_by_name(&name))
-        .await?
-        .ok_or_else(|| ApiError::not_found("no such principal"))?;
-    let (token, row) = issue_token(&state, target.id, req.name, dedup(req.scopes), expires).await?;
+    let target = token_target(&state, &caller, name).await?;
+    let agent = (target.kind == PrincipalKind::Agent).then_some(&target);
+    let (expires, scopes) = check_token_request(&state, &caller, &req, agent)?;
+    let (token, row) = issue_token(&state, target.id, req.name, dedup(scopes), expires).await?;
     Ok((
         StatusCode::CREATED,
         Json(CreateTokenResponse {
@@ -500,6 +535,44 @@ async fn create_token_for(
             info: token_view(&row),
         }),
     ))
+}
+
+async fn list_tokens_for(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(name): Path<String>,
+) -> ApiResult<Json<TokenList>> {
+    let target = token_target(&state, &caller, name).await?;
+    let id = target.id;
+    let rows = state.meta().read(move |tx| tx.tokens_of(id)).await?;
+    Ok(Json(TokenList {
+        tokens: rows.iter().map(token_view).collect(),
+    }))
+}
+
+async fn delete_token_for(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path((name, id)): Path<(String, i64)>,
+) -> ApiResult<StatusCode> {
+    let target = token_target(&state, &caller, name).await?;
+    let owner = target.id;
+    let deleted = state
+        .meta()
+        .write(move |tx| {
+            if tx.tokens_of(owner)?.iter().any(|t| t.id.0 == id) {
+                tx.delete_token(lode_meta::TokenId(id))?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+        .await?;
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found("no such token"))
+    }
 }
 
 async fn list_groups(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<GroupList>> {

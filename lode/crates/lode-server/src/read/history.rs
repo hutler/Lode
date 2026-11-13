@@ -102,16 +102,24 @@ impl<'a> Lookup<'a> {
             return Ok(p.clone());
         }
         let p = match tx.principal(id)? {
-            Some(p) => PrincipalRef {
-                name: p.name,
-                kind: match p.kind {
-                    PrincipalKind::User => lode_proto::PrincipalKind::User,
-                    PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
-                },
-            },
+            Some(p) => {
+                let owner = match (p.kind, p.owner_id) {
+                    (PrincipalKind::Agent, Some(o)) => tx.principal(o)?.map(|o| o.name),
+                    _ => None,
+                };
+                PrincipalRef {
+                    name: p.name,
+                    kind: match p.kind {
+                        PrincipalKind::User => lode_proto::PrincipalKind::User,
+                        PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
+                    },
+                    owner,
+                }
+            }
             None => PrincipalRef {
                 name: String::new(),
                 kind: lode_proto::PrincipalKind::User,
+                owner: None,
             },
         };
         self.principals.insert(id, p.clone());
@@ -351,6 +359,23 @@ pub async fn list_revisions(
                         })
                     }
                 };
+                let author = match &q.author {
+                    None => None,
+                    Some(name) => match tx.principal_by_name(name)? {
+                        Some(p) => Some(p.id),
+                        // Nobody by that name wrote anything.
+                        None => {
+                            return Ok(RevisionList {
+                                revisions: Vec::new(),
+                                more: false,
+                            })
+                        }
+                    },
+                };
+                let author_kind = q.author_kind.map(|k| match k {
+                    lode_proto::PrincipalKind::User => PrincipalKind::User,
+                    lode_proto::PrincipalKind::Agent => PrincipalKind::Agent,
+                });
                 let mut scopes = scopes(tx, d, segments, q.path.clone(), q.follow)?;
                 let ascending = q.after.is_some();
                 if ascending {
@@ -390,6 +415,8 @@ pub async fn list_revisions(
                                 max,
                                 ascending,
                                 limit: want,
+                                author,
+                                author_kind,
                             },
                         )?;
                         let exhausted = rows.len() < want as usize;

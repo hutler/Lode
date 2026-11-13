@@ -34,6 +34,7 @@ fn ana() -> PrincipalRef {
     PrincipalRef {
         name: "ana".into(),
         kind: PrincipalKind::User,
+        owner: None,
     }
 }
 
@@ -41,6 +42,7 @@ fn bot() -> PrincipalRef {
     PrincipalRef {
         name: "fixer-bot".into(),
         kind: PrincipalKind::Agent,
+        owner: Some("ana".into()),
     }
 }
 
@@ -93,11 +95,11 @@ fn provenance() -> Provenance {
     Provenance {
         client: Some("lode-cli/0.1.0".into()),
         via: Some(Via::Mcp),
-        agent: Some(AgentProvenance {
-            model: Some("model-x".into()),
-            session: Some("s-1".into()),
-            tool: Some("create_shelf".into()),
-        }),
+        agent: Some(AgentProvenance::from([
+            ("model".to_owned(), "model-x".to_owned()),
+            ("session".to_owned(), "s-1".to_owned()),
+            ("tool".to_owned(), "create_shelf".to_owned()),
+        ])),
         submitted_shelf: None,
     }
 }

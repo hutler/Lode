@@ -90,6 +90,8 @@ pub mod paths {
     pub const ADMIN_PRINCIPAL: &str = "/api/v1/admin/principals/{name}";
     /// Admin: create a token for another principal (`POST`).
     pub const ADMIN_PRINCIPAL_TOKENS: &str = "/api/v1/admin/principals/{name}/tokens";
+    /// One token of a principal (administrators, or the owner of an agent).
+    pub const ADMIN_PRINCIPAL_TOKEN: &str = "/api/v1/admin/principals/{name}/tokens/{id}";
     /// Admin: groups.
     pub const ADMIN_GROUPS: &str = "/api/v1/admin/groups";
     /// Admin: add (`PUT`) or remove (`DELETE`) a group member.

@@ -106,7 +106,9 @@ pub struct TokenList {
 pub struct CreateTokenRequest {
     /// Label.
     pub name: String,
-    /// Scopes; at most those of the token making the request.
+    /// Scopes; at most those of the token making the request. Empty for an agent token means
+    /// the agent defaults (`read` plus the agent-default module scopes).
+    #[serde(default)]
     pub scopes: Vec<String>,
     /// Expiry.
     #[serde(

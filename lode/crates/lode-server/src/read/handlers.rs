@@ -58,6 +58,17 @@ async fn revisions(
         own: q.flag("own")?,
         follow: q.flag("follow")?,
         changes: q.flag("changes")?,
+        author: q.get("author").filter(|a| !a.is_empty()).map(str::to_owned),
+        author_kind: match q.get("author_kind") {
+            None | Some("") => None,
+            Some("user") => Some(lode_proto::PrincipalKind::User),
+            Some("agent") => Some(lode_proto::PrincipalKind::Agent),
+            Some(k) => {
+                return Err(ApiError::invalid_request(format!(
+                    "author_kind must be `user` or `agent`, not `{k}`"
+                )))
+            }
+        },
         limit: q
             .u64("limit")?
             .map(|l| u32::try_from(l).unwrap_or(u32::MAX)),

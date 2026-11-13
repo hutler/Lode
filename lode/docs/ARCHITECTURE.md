@@ -270,13 +270,13 @@ percent-encoded (`release%2F1.0`).
 | `PUT /depots/{d}/blobs/{id}` | Upload. Body is the raw content, optionally `Content-Encoding: zstd` |
 | `GET /depots/{d}/blobs/{id}` | Download; honours `Accept-Encoding: zstd`; supports `Range` on raw bytes only when stored uncompressed, otherwise full body |
 | `POST /depots/{d}/branches/{b}/commits` | Commit (section 5) |
-| `GET /depots/{d}/revisions?branch=&path=&before=&after=&own=&changes=&limit=` | Revision list, paged. Default order is newest first, paging with `before`. With `after=N` the order is ascending from `N+1`, for polling. Without `branch` the list covers the whole depot; every item names its branch. With `branch`, inherited history (§4.3) is included unless `own=true`. `changes=true` adds each revision's changed paths, capped per revision (`[limits] max_changes_listed`, default 1,000) with a `changes_truncated` flag. With `path`, `follow=true` continues through `copy_from` into the source path's history |
+| `GET /depots/{d}/revisions?branch=&path=&before=&after=&own=&changes=&author=&author_kind=&limit=` | Revision list, paged. `author=<name>` and `author_kind=user|agent` filter by author. Default order is newest first, paging with `before`. With `after=N` the order is ascending from `N+1`, for polling. Without `branch` the list covers the whole depot; every item names its branch. With `branch`, inherited history (§4.3) is included unless `own=true`. `changes=true` adds each revision's changed paths, capped per revision (`[limits] max_changes_listed`, default 1,000) with a `changes_truncated` flag. With `path`, `follow=true` continues through `copy_from` into the source path's history |
 | `GET /depots/{d}/revisions/{n}` | One revision with its changes |
 | `GET /depots/{d}/manifest?rev=N[&base=M][&include=…][&exclude=…]` | NDJSON stream. Without `base`: every file at `N`. With `base`: only differences `M → N`, each line `{"op":"put"|"del", …}` |
 | `GET /depots/{d}/tree?rev=&path=` | List one directory |
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision (M5) |
-| `…/admin/principals[/{name}]` (`GET`/`POST`; `PATCH` `{disabled?, password?}`), `…/admin/principals/{name}/tokens` (`POST`, token for another principal), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
+| `…/admin/principals[/{name}]` (`GET`/`POST`; `PATCH` `{disabled?, password?}`), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
 Manifests and trees are filtered by read permission and by `include`/`exclude` (repeatable
@@ -319,6 +319,16 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
   A token may grant only scopes its maker's token carries, except that a server administrator
   may grant any registered scope: the token `loded init` prints carries only the core scopes,
   because modules are not known at that point.
+- **Agents.** An agent's tokens are minted by an administrator or by the agent's owner. The
+  owner may grant only `read` and the agent-default module scopes (`ScopeDef::agent_default`:
+  `shelve`, `lock`); `write`, `admin` and `checks` need an administrator. A token asked for
+  without scopes gets exactly those defaults, computed from the enabled modules. An agent's
+  token stops working while its owner is disabled. Agents have no access through their owner:
+  ACL rules name them like users. Principal references in views (`author`, `submitter`, lock
+  and shelf owners) carry `owner` for agents.
+- **Provenance** (SPEC §7.3). The server sets `via` and copies `client` from `User-Agent`;
+  `agent` must be an object of string fields and is stored as given. The whole record is
+  capped at 4 KiB (`invalid_request` otherwise).
 - **Client materialization.** Every path from the server is re-validated on the client
   (`DepotPath` rules, and a first segment of `.lode` in any case is refused). Before a file is
   written, each directory component is checked with `lstat`: a symlink or non-directory there

@@ -83,6 +83,9 @@ pub struct PrincipalRef {
     pub name: String,
     /// User or agent.
     pub kind: PrincipalKind,
+    /// For an agent, the user who owns it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
 }
 
 pub(crate) fn is_false(b: &bool) -> bool {

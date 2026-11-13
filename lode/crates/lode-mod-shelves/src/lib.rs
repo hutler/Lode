@@ -191,12 +191,20 @@ impl<'a> Loader<'a> {
                             PrincipalKind::User => lode_proto::PrincipalKind::User,
                             PrincipalKind::Agent => lode_proto::PrincipalKind::Agent,
                         };
-                        (PrincipalRef { name: p.name, kind }, agent_owner)
+                        (
+                            PrincipalRef {
+                                name: p.name,
+                                kind,
+                                owner: agent_owner.clone(),
+                            },
+                            agent_owner,
+                        )
                     }
                     None => (
                         PrincipalRef {
                             name: format!("#{}", row.owner_id),
                             kind: lode_proto::PrincipalKind::User,
+                            owner: None,
                         },
                         None,
                     ),

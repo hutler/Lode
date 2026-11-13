@@ -516,7 +516,10 @@ async fn diff_and_agent_owner() {
         )
         .await;
     assert_eq!(s, StatusCode::CREATED, "{body}");
-    assert_eq!(body["owner"], json!({ "name": "bot", "kind": "agent" }));
+    assert_eq!(
+        body["owner"],
+        json!({ "name": "bot", "kind": "agent", "owner": "ana" })
+    );
     assert_eq!(body["agent_owner"], "ana");
     let shelf = body["id"].as_u64().unwrap();
     assert!(body.get("diff").is_none());
@@ -701,7 +704,10 @@ async fn submit_commits_as_the_owner() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body, json!({ "rev": 3, "branch": "main" }));
     let rev = h.revision(3).await;
-    assert_eq!(rev["author"], json!({ "name": "bot", "kind": "agent" }));
+    assert_eq!(
+        rev["author"],
+        json!({ "name": "bot", "kind": "agent", "owner": "ana" })
+    );
     assert_eq!(rev["submitter"], json!({ "name": "ana", "kind": "user" }));
     assert_eq!(rev["message"], "Fix the door");
     assert_eq!(rev["provenance"]["submitted_shelf"], shelf);

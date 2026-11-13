@@ -111,11 +111,18 @@ pub(crate) async fn authenticate(state: &AppState, token: &str) -> Result<Caller
             let Some(principal) = tx.principal(row.principal_id)? else {
                 return Ok(None);
             };
+            // An agent is disabled with its owner (SPEC §7.1).
+            let owner_disabled = match principal.owner_id {
+                Some(o) if principal.kind == lode_meta::PrincipalKind::Agent => {
+                    tx.principal(o)?.map_or(true, |o| o.disabled)
+                }
+                _ => false,
+            };
             let groups = tx.groups_of(principal.id)?;
-            Ok(Some((row, principal, groups)))
+            Ok(Some((row, principal, groups, owner_disabled)))
         })
         .await?;
-    let Some((row, principal, groups)) = found else {
+    let Some((row, principal, groups, owner_disabled)) = found else {
         return Err(unauthenticated("invalid token"));
     };
     if !ct_eq(&row.hash, &hash) {
@@ -126,6 +133,9 @@ pub(crate) async fn authenticate(state: &AppState, token: &str) -> Result<Caller
     }
     if principal.disabled {
         return Err(unauthenticated("account disabled"));
+    }
+    if owner_disabled {
+        return Err(unauthenticated("the agent's owner is disabled"));
     }
     let stale = match row.last_used_at {
         Some(last) => now - last >= TOUCH_INTERVAL_MS,

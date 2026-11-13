@@ -92,6 +92,12 @@ pub struct RevisionListQuery {
     /// Include changed paths.
     #[serde(default, skip_serializing_if = "crate::is_false")]
     pub changes: bool,
+    /// Only revisions by this principal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// Only revisions whose author is a user, or an agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_kind: Option<crate::PrincipalKind>,
     /// Page size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,

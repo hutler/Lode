@@ -638,6 +638,18 @@ impl Client {
             if let Some(n) = q.after {
                 p.append_pair("after", &n.to_string());
             }
+            if let Some(a) = &q.author {
+                p.append_pair("author", a);
+            }
+            if let Some(k) = q.author_kind {
+                p.append_pair(
+                    "author_kind",
+                    match k {
+                        lode_proto::PrincipalKind::User => "user",
+                        lode_proto::PrincipalKind::Agent => "agent",
+                    },
+                );
+            }
             for (key, on) in [("own", q.own), ("follow", q.follow), ("changes", q.changes)] {
                 if on {
                     p.append_pair(key, "true");
