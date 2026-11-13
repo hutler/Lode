@@ -6,7 +6,7 @@
 <style>
   @page { size: A4; margin: 22mm 18mm 20mm 18mm;
           @bottom-center { content: counter(page); font: 9pt "Segoe UI", Arial, sans-serif; color: #667; }
-          @top-right { content: "Lode User Guide — draft v0.1"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
+          @top-right { content: "Lode User Guide — v0.1"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
   @page :first { @bottom-center { content: none; } @top-right { content: none; } }
   :root { --ink:#1c2530; --muted:#5a6675; --accent:#0b5cad; --rule:#d5dbe3; --code-bg:#f3f5f8; --note-bg:#eef5fc; --warn-bg:#fff6e5; }
   html { font: 10.5pt/1.5 "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
@@ -53,10 +53,10 @@
   <p class="title">Lode</p>
   <p class="sub">User Guide for Client and Server</p>
   <p class="meta">
-    Draft v0.1 · November 2026<br>
+    Version 0.1 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes the planned behaviour of version 1. The software is not yet released;<br>
-    details may change during implementation.
+    Describes Lode 0.1. Sections marked <em>Planned</em> describe features<br>
+    that arrive with a later release.
   </p>
 </section>
 
@@ -122,20 +122,33 @@
 
 <h1>1. Installing the client</h1>
 <p>The client is a single executable named <code>lode</code> (<code>lode.exe</code> on Windows). Download the archive for your platform from the project's releases page, unpack it, and put the executable somewhere on your <code>PATH</code>.</p>
-<pre><code>lode --version</code></pre>
-<p>Supported platforms are Windows, macOS and Linux. There is nothing else to install.</p>
+<table>
+  <tr><th style="width:52%">Archive</th><th>Platform</th></tr>
+  <tr><td><code>lode-0.1.0-x86_64-pc-windows-msvc.zip</code></td><td>Windows, 64-bit</td></tr>
+  <tr><td><code>lode-0.1.0-x86_64-apple-darwin.tar.gz</code></td><td>macOS, Intel</td></tr>
+  <tr><td><code>lode-0.1.0-aarch64-apple-darwin.tar.gz</code></td><td>macOS, Apple silicon</td></tr>
+  <tr><td><code>lode-0.1.0-x86_64-unknown-linux-musl.tar.gz</code></td><td>Linux, 64-bit (any distribution)</td></tr>
+  <tr><td><code>lode-0.1.0-aarch64-unknown-linux-musl.tar.gz</code></td><td>Linux, ARM 64-bit</td></tr>
+</table>
+<p>Each archive holds both programs, <code>lode</code> and <code>loded</code>, and the service files used in Part II. Check the download against <code>SHA256SUMS</code> from the same release:</p>
+<pre><code>sha256sum -c SHA256SUMS --ignore-missing        # Linux
+shasum -a 256 -c SHA256SUMS --ignore-missing    # macOS
+Get-FileHash lode-0.1.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the list
+lode --version</code></pre>
+<p>There is nothing else to install.</p>
 
 <h1>2. Signing in</h1>
 <p>Your administrator gives you a server address and an account name.</p>
 <pre><code>lode login https://lode.example.com
 Name: alice
 Password: ********
-Signed in as alice.</code></pre>
+Signed in to https://lode.example.com as alice.</code></pre>
 <p>The client stores a token for that server in your user profile, readable only by you. It never stores your password. To check or end the session:</p>
 <pre><code>lode whoami
 lode logout</code></pre>
 <p>For automation, pass a token on standard input instead of typing a password:</p>
-<pre><code>lode login https://lode.example.com --token-stdin &lt; token.txt</code></pre>
+<pre><code>lode login https://lode.example.com --token-stdin &lt; token.txt
+lode login https://lode.example.com --name alice --password-stdin &lt; password.txt</code></pre>
 <div class="note">The client refuses plain <code>http://</code> addresses, except for a server on your own machine. This protects your token on the network.</div>
 
 <h1>3. Getting a workspace</h1>
@@ -193,9 +206,9 @@ lode clean                # delete untracked files; add --ignored to delete igno
 
 <h2>Commit</h2>
 <pre><code>lode commit -m "Fix crash when the save file is empty"
-Committed r214.</code></pre>
+Committed r214 (1 file).</code></pre>
 <ul>
-  <li>Without <code>-m</code>, your editor opens for the message. An empty message cancels the commit.</li>
+  <li>Without <code>-m</code>, your editor opens for the message. An empty message cancels the commit. <code>-F file</code> reads the message from a file (<code>-F -</code> from standard input).</li>
   <li>Name paths to commit only some changes: <code>lode commit -m "…" src/</code>.</li>
   <li><code>-A</code> adds all untracked files first.</li>
 </ul>
@@ -268,11 +281,11 @@ lode unlock art/hero.psd      # release without committing</code></pre>
 <h1>10. Shelves</h1>
 <p>A shelf stores your uncommitted changes on the server without committing them. Use it to hand work to a colleague, ask for a review, switch tasks, or back up work in progress.</p>
 <pre><code>lode shelve -m "Half-done inventory refactor"
-Created shelf 37. Local changes reverted.</code></pre>
+Created shelf 37 (version 1): 3 files, reverted in the workspace.</code></pre>
 <p>By default your workspace is clean afterwards. Add <code>--keep</code> to shelve and keep your local changes too.</p>
 <table>
   <tr><th style="width:42%">Command</th><th>Effect</th></tr>
-  <tr><td><code>lode shelves</code></td><td>List open shelves. <code>--mine</code> or <code>--user bob</code> to filter.</td></tr>
+  <tr><td><code>lode shelves</code></td><td>List open shelves. <code>--mine</code>, <code>--user bob</code> or <code>--branch main</code> to filter; <code>--state submitted</code> or <code>deleted</code> for old ones.</td></tr>
   <tr><td><code>lode shelf show 37</code></td><td>Description, owner and file list.</td></tr>
   <tr><td><code>lode shelf diff 37</code></td><td>The changes as a diff.</td></tr>
   <tr><td><code>lode unshelve 37</code></td><td>Apply the shelf to your workspace. Works for other people's shelves. Merges with your local edits like an update.</td></tr>
@@ -296,8 +309,9 @@ lode shelve -c ui-fix -m "For review"</code></pre>
 <h1>12. Branches and merging</h1>
 <h2>Branches</h2>
 <pre><code>lode branch list
-lode branch create feature-inventory          # from the current branch head
+lode branch create feature-inventory          # from your branch, at your workspace's revision
 lode branch create hotfix --from release-1@200
+lode branch create spike --switch             # create and switch in one step
 lode switch feature-inventory</code></pre>
 <p>Creating a branch is instant and uses no extra storage. <code>lode switch</code> changes your workspace to another branch, carrying your uncommitted edits along and merging them if needed. Finished branches can be archived by an administrator; they are hidden and become read-only, but are never deleted.</p>
 
@@ -319,12 +333,12 @@ lode commit -m "Merge feature-inventory"</code></pre>
 <pre><code>lode view show
 lode view exclude "art/raw/**"
 lode view include "art/raw/characters/**"</code></pre>
-<p>Changing the view downloads or removes files to match. Lode refuses to remove files that have uncommitted changes unless you add <code>--force</code>.</p>
+<p>Changing the view downloads or removes files to match. Lode refuses to remove files that have uncommitted changes unless you add <code>--force</code>. <code>--remove</code> takes a pattern out again: <code>lode view exclude --remove "art/raw/**"</code>.</p>
 
 <h1>14. Scripting</h1>
 <p>Every command accepts <code>--json</code>. It then prints exactly one JSON document, shows no progress output and never prompts.</p>
 <pre><code>lode status --json
-{"ok":true,"branch":"main","changes":[{"path":"src/main.rs","status":"modified"}]}
+{"ok":true,"branch":"main","rev":213,"files":[{"path":"src/main.rs","status":"modified",…}],"merges":[],…}
 
 lode commit -m "x" --json
 {"ok":false,"error":{"code":"out_of_date","message":"…","details":{"paths":["src/main.rs"]}}}</code></pre>
@@ -336,7 +350,7 @@ lode commit -m "x" --json
   <tr><td>3</td><td>Not signed in, or not permitted</td></tr>
   <tr><td>4</td><td>Network or server error</td></tr>
 </table>
-<p>Useful global options: <code>-C &lt;dir&gt;</code> runs as if started in that folder; <code>--server</code> and <code>--depot</code> let <code>log</code>, <code>cat</code> and <code>ls</code> work without a workspace.</p>
+<p>Useful global options: <code>-C &lt;dir&gt;</code> runs as if started in that folder; <code>--server</code> and <code>--depot</code> let <code>log</code>, <code>cat</code>, <code>ls</code> and <code>blame</code> work without a workspace. Every JSON shape is listed in <code>docs/CLI-JSON.md</code>.</p>
 <h3>Unattended machines</h3>
 <p>On build machines and in scripts, sign in without a stored login by setting two environment variables: <code>LODE_SERVER</code> (the server address) and <code>LODE_TOKEN_FILE</code> (the path of a file containing a token). Keep that file outside the workspace and readable only by the account that runs <code>lode</code>.</p>
 <p>To bring a reused workspace exactly to a known revision, whatever state the last job left it in:</p>
@@ -349,8 +363,9 @@ lode switch main -r 214</code></pre>
 <h1>15. AI agents on your machine</h1>
 <p>Lode includes a Model Context Protocol (MCP) server so that an AI coding tool can work with your workspace directly. Add this to your tool's MCP configuration:</p>
 <pre><code>{ "mcpServers": {
-    "lode": { "command": "lode", "args": ["mcp", "-C", "/path/to/workspace"] } } }</code></pre>
-<p>The agent can then check status, read diffs, add, move and revert files, update, lock, shelve and unshelve. It can only touch files inside the workspace.</p>
+    "lode": { "command": "lode", "args": ["-C", "/path/to/workspace", "mcp",
+                                          "--agent-tool", "my-editor"] } } }</code></pre>
+<p>The agent can then check status, read diffs, add, move and revert files, update, lock, shelve and unshelve. It can only touch files inside the workspace. <code>--agent-tool</code>, <code>--agent-model</code> and <code>--agent-session</code> are recorded with its commits and shelves. <code>docs/MCP.md</code> covers the setup in detail.</p>
 <h3>Keeping a person in control</h3>
 <ul>
   <li>Sign the agent in with its own agent account, not yours. Ask your administrator to create one.</li>
@@ -365,10 +380,11 @@ lode switch main -r 214</code></pre>
   <tr><td><code>out_of_date</code></td><td>Someone committed a change to a file you are committing or locking. Run <code>lode update</code>, review, try again.</td></tr>
   <tr><td><code>locked</code></td><td>Someone else holds a lock on the file. <code>lode locks</code> shows who.</td></tr>
   <tr><td><code>lock_required</code></td><td>This file type needs a lock before it can be changed. Run <code>lode lock</code> on it, then commit.</td></tr>
-  <tr><td><code>checks_required</code></td><td>The branch requires passing checks before a shelf is submitted. <code>lode checks &lt;shelf&gt;</code> shows which are missing or failing.</td></tr>
+  <tr><td><code>checks_required</code></td><td><em>Planned.</em> The branch requires passing checks before a shelf is submitted. Wait for the checks to pass, or ask your administrator which are required.</td></tr>
   <tr><td><code>permission_denied</code></td><td>Your account or token may not do this here. Ask your administrator.</td></tr>
   <tr><td><code>unauthenticated</code></td><td>You are not signed in or the token expired. Run <code>lode login</code>.</td></tr>
   <tr><td><code>invalid_path</code></td><td>The file name is not allowed (see below), or differs from an existing name only by letter case.</td></tr>
+  <tr><td><code>update_incomplete</code></td><td>An earlier update was interrupted. Run <code>lode update</code> to finish it first.</td></tr>
   <tr><td>"workspace is in use"</td><td>Another <code>lode</code> command is changing this workspace. Wait for it to finish.</td></tr>
   <tr><td>Interrupted command</td><td>Run it again. Checkout, update and commit are safe to repeat and never commit twice.</td></tr>
 </table>
@@ -392,10 +408,9 @@ lode switch main -r 214</code></pre>
   <tr><td><code>lode lock</code> · <code>unlock</code> · <code>locks</code></td><td>Exclusive locks</td></tr>
   <tr><td><code>lode shelve</code> · <code>unshelve</code> · <code>shelves</code> · <code>shelf …</code></td><td>Shelves</td></tr>
   <tr><td><code>lode changelist new|list|move|delete</code></td><td>Changelists</td></tr>
-  <tr><td><code>lode branch list|create|archive</code> · <code>switch</code></td><td>Branches</td></tr>
+  <tr><td><code>lode branch list|create|archive</code> · <code>switch BRANCH [-r REV]</code></td><td>Branches</td></tr>
   <tr><td><code>lode merge BRANCH [-r REV]</code></td><td>Merge from another branch</td></tr>
   <tr><td><code>lode view show|include|exclude</code></td><td>Change what the workspace holds</td></tr>
-  <tr><td><code>lode checks rN</code> · <code>lode checks SHELF[@VERSION]</code></td><td>Show check results (if the server has checks enabled)</td></tr>
   <tr><td><code>lode mcp</code></td><td>MCP server for AI tools</td></tr>
   <tr><td><code>lode admin …</code></td><td>Administration (Part II)</td></tr>
 </table>
@@ -414,72 +429,109 @@ lode switch main -r 214</code></pre>
   <li><strong>Software:</strong> none. <code>loded</code> is one executable with its database built in.</li>
   <li><strong>Disk:</strong> the data directory holds everything. Plan for the size of your content plus history; identical content is stored once and compressed. Use a local filesystem, not a network share.</li>
   <li><strong>Memory and CPU:</strong> modest. Memory use does not grow with file size. A small virtual machine serves a team of 100.</li>
-  <li><strong>Network:</strong> one TCP port, reachable by all clients.</li>
+  <li><strong>Network:</strong> one TCP port (7480 by default), reachable by all clients.</li>
 </ul>
 
 <h1>2. Installing and first start</h1>
+<p>Unpack the release archive for the server's platform (Part I, chapter 1) and put <code>loded</code> somewhere on the <code>PATH</code>. Then create the data directory:</p>
 <pre><code>loded init /var/lib/lode
-Created data directory /var/lib/lode
-Wrote /var/lib/lode/loded.toml
-Admin token (shown once): lode_3q…</code></pre>
+Initialized Lode data directory /var/lib/lode
+Wrote default configuration /var/lib/lode/loded.toml
+
+Admin token (shown only now; store it safely):
+lode_3q…</code></pre>
 <p><code>init</code> creates the data directory, a commented configuration file, and an administrator account named <code>admin</code>. It prints the admin token once. Store it in your password manager.</p>
-<pre><code>loded serve --config /var/lib/lode/loded.toml</code></pre>
+<pre><code>loded serve --config /var/lib/lode/loded.toml
+loded listening on http://127.0.0.1:7480</code></pre>
 <p>From your own machine, sign in with the token and set the server up:</p>
-<pre><code>lode login https://lode.example.com --token-stdin
+<pre><code>lode login https://lode.example.com --token-stdin &lt; admin-token.txt
 lode admin depot create game
-lode admin user create alice
-lode admin acl add --depot game --user alice --level write</code></pre>
+lode admin user create alice                       # prompts for her first password
+lode admin acl add allow write user:alice --depot game</code></pre>
+<p>Alice can now run <code>lode login</code> with her name and password, and check out <code>game</code>.</p>
 
 <h1>3. Configuration</h1>
-<p>All settings are in <code>loded.toml</code>. An unknown key is an error, so typing mistakes are caught at start.</p>
-<pre><code>data_dir = "/var/lib/lode"
+<p>All settings are in <code>loded.toml</code>, which <code>loded init</code> writes with a comment on every key. An unknown key is an error, so typing mistakes are caught at start. The defaults:</p>
+<pre><code>listen = "127.0.0.1:7480"          # address and port
+data_dir = "."                     # relative to this file
 
-[listen]
-address = "0.0.0.0:8443"
-
-[tls]                              # omit this section to serve plain HTTP
-cert = "/etc/lode/fullchain.pem"
-key  = "/etc/lode/privkey.pem"
+# [tls]                            # serve HTTPS directly
+# cert = "cert.pem"
+# key = "key.pem"
 
 [limits]
-max_blob_bytes     = 68719476736   # 64 GiB, largest single file
-max_request_bytes  = 67108864      # 64 MiB, largest JSON request
-max_commit_changes = 500000
-
-[gc]
-grace_hours = 24                   # minimum age before unused data is removed
+max_request_json = 67108864        # 64 MiB, largest JSON request
+max_blob_size = 68719476736        # 64 GiB, largest single file
+max_changes_per_commit = 500000
+max_changes_listed = 1000          # changed paths per revision in a list
+mcp_max_edits = 500                # file edits per MCP shelf call
+mcp_max_inline_bytes = 16777216    # 16 MiB inline content per MCP shelf call
+body_idle_seconds = 60             # a request body that stalls this long fails
 
 [modules]
-locks   = true
+locks = true
 shelves = true
-mcp     = true
+mcp = true
 webhooks = false
-checks   = false</code></pre>
-<div class="note">The setting names above are the proposed defaults for version 1 and will be confirmed when the server is implemented. The file that <code>loded init</code> writes is always the authority.</div>
+checks = false
+
+[gc]
+grace_seconds = 86400              # unused data younger than this is kept</code></pre>
+<p>Restart the server after changing the file. The log level is set with the environment variable <code>LODED_LOG</code> (<code>info</code> by default; <code>debug</code> for more).</p>
 
 <h1>4. TLS</h1>
 <p>Clients refuse unencrypted connections to remote servers, so one of these is required:</p>
 <ul>
   <li><strong>Built-in.</strong> Fill in the <code>[tls]</code> section with a certificate and key in PEM format. Restart the server after renewing the certificate.</li>
-  <li><strong>Reverse proxy.</strong> Leave <code>[tls]</code> out, set <code>address = "127.0.0.1:8080"</code>, and put a web server such as Caddy or nginx in front. The proxy must allow large uploads, must not buffer request bodies, and must pass the <code>Authorization</code> header through.</li>
+  <li><strong>Reverse proxy.</strong> Leave <code>[tls]</code> out, keep <code>listen = "127.0.0.1:7480"</code>, and put a web server such as Caddy or nginx in front. The proxy must allow large uploads, must not buffer request bodies, and must pass the <code>Authorization</code> header through.</li>
 </ul>
+<p>A server reachable from the internet should sit behind a proxy in either case: <code>loded</code> fails request bodies that stall, but it does not time out a client that sends its request headers very slowly. Proxies do that by default.</p>
+<pre><code># Caddy
+lode.example.com {
+    reverse_proxy 127.0.0.1:7480 {
+        flush_interval -1
+    }
+}
+
+# nginx, inside the server block for lode.example.com
+location / {
+    proxy_pass http://127.0.0.1:7480;
+    client_max_body_size 0;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_http_version 1.1;
+}</code></pre>
 
 <h1>5. Running as a service</h1>
+<p>Run the server as a dedicated account that owns the data directory and nothing else. The server shuts down cleanly on a stop signal and finishes requests in progress. The release archive has ready files in <code>packaging/</code>.</p>
 <h3>Linux (systemd)</h3>
-<pre><code>[Unit]
-Description=Lode server
-After=network.target
-
-[Service]
-User=lode
-ExecStart=/usr/local/bin/loded serve --config /var/lib/lode/loded.toml
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target</code></pre>
+<pre><code>useradd --system --home-dir /var/lib/lode --shell /usr/sbin/nologin lode
+install -m 0755 loded lode /usr/local/bin/
+install -d -o lode -g lode -m 0750 /var/lib/lode
+sudo -u lode loded init /var/lib/lode            # prints the admin token once
+install -m 0644 packaging/systemd/loded.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now loded
+journalctl -u loded                              # logs</code></pre>
+<p>The unit restarts the server if it fails, gives it 60 seconds to finish requests on stop, and limits it to its data directory.</p>
+<h3>Windows</h3>
+<p><code>loded.exe</code> is a console program. To run it as a service, use the small wrapper WinSW with the configuration in <code>packaging\windows\loded-service.xml</code>:</p>
+<ol>
+  <li>Put <code>loded.exe</code>, <code>lode.exe</code> and <code>WinSW-x64.exe</code> (from the WinSW releases page) in <code>C:\Program Files\Lode</code>.</li>
+  <li>Rename <code>WinSW-x64.exe</code> to <code>loded-service.exe</code> and copy <code>loded-service.xml</code> next to it.</li>
+  <li>In an administrator PowerShell:</li>
+</ol>
+<pre><code>&amp; "C:\Program Files\Lode\loded.exe" init C:\ProgramData\Lode
+&amp; "C:\Program Files\Lode\loded-service.exe" install
+Start-Service loded</code></pre>
+<p>Logs go to <code>C:\ProgramData\Lode\logs</code>. Without WinSW, a Task Scheduler task that runs <code>loded.exe serve --config C:\ProgramData\Lode\loded.toml</code> at startup, whether or not anyone is signed in, also works, but is not restarted on failure.</p>
 <h3>Container</h3>
-<pre><code>docker run -d --name lode -p 8443:8443 -v lode-data:/data &lt;image&gt; serve --config /data/loded.toml</code></pre>
-<p>Run the server as a dedicated account that owns the data directory and nothing else. The server shuts down cleanly on a stop signal and finishes requests in progress.</p>
+<p>The image <code>ghcr.io/hutler/loded</code> runs the server as an unprivileged user (uid 10001) and keeps all data in the volume <code>/var/lib/lode</code>. On first start it runs <code>loded init</code> and prints the admin token to the log, once.</p>
+<pre><code>docker run -d --name lode --restart unless-stopped \
+    -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.1.0
+docker logs lode                                  # the admin token, on first start only
+docker exec lode loded fsck --config /var/lib/lode/loded.toml</code></pre>
+<p>Publish the port on the host's loopback address and put the TLS proxy in front, as in chapter 4. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>
 
 <h1>6. Depots</h1>
 <pre><code>lode admin depot create game
@@ -487,17 +539,22 @@ lode admin depot list</code></pre>
 <p>A new depot has one branch, <code>main</code>, at revision <code>r1</code> with no files. Depots are independent: each has its own revision numbers, storage and permissions. Use separate depots for unrelated projects, and one depot for things that change together.</p>
 
 <h1>7. Users, groups and tokens</h1>
-<pre><code>lode admin user create bob            # prompts for an initial password
+<pre><code>lode admin user create bob --display-name "Bob Brown"   # prompts for an initial password
 lode admin user passwd bob
-lode admin user disable bob           # blocks sign-in, keeps history
+lode admin user disable bob           # blocks sign-in and every token, keeps history
+lode admin user disable bob --enable  # lets him in again
+lode admin user list
 lode admin group create artists
-lode admin group add artists bob carol</code></pre>
-<p>Accounts are never deleted, because history refers to them. Disable them instead.</p>
+lode admin group add artists bob
+lode admin group add artists carol
+lode admin group list</code></pre>
+<p>Accounts are never deleted, because history refers to them. Disable them instead. In scripts, <code>--password-stdin</code> reads the password from standard input.</p>
 <h3>Tokens</h3>
 <p>Signing in creates a token. Users can also create named tokens for scripts, and administrators can create them for anyone:</p>
-<pre><code>lode admin token create --for buildbot --name ci --scopes read --expires 90d
+<pre><code>lode admin token create --for buildbot --name ci --scope read --expires-in-days 90
 lode admin token list --for buildbot
-lode admin token revoke 12</code></pre>
+lode admin token revoke 12 --for buildbot</code></pre>
+<p>Without <code>--for</code> the commands act on your own tokens. The new token is the only thing printed, so it can be piped straight into a file.</p>
 <table>
   <tr><th style="width:16%">Scope</th><th>Allows</th></tr>
   <tr><td><code>read</code></td><td>Reading files, history, locks and shelves</td></tr>
@@ -511,24 +568,25 @@ lode admin token revoke 12</code></pre>
 
 <h1>8. Permissions</h1>
 <p>Scopes limit what a token can do at all. Permissions decide where. A new account has no access until you grant some.</p>
-<p>A rule grants or denies a level on a depot, a branch pattern and a path pattern, to a user, a group or everyone:</p>
+<p>A rule grants (<code>allow</code>) or refuses (<code>deny</code>) a level to a subject: <code>user:NAME</code> (or just the name, for users and agents), <code>group:NAME</code>, or <code>all</code>. It applies to one depot (or every depot without <code>--depot</code>), a branch pattern and a path pattern, both <code>**</code> by default:</p>
 <pre><code># Everyone signed in can read the whole depot
-lode admin acl add --depot game --all --level read
+lode admin acl add allow read all --depot game
 
 # Artists can commit under art/ on any branch
-lode admin acl add --depot game --group artists --path "art/**" --level write
+lode admin acl add allow write group:artists --depot game --path "art/**"
 
 # Programmers can commit anywhere on main and feature branches
-lode admin acl add --depot game --group programmers --branch "main" --level write
-lode admin acl add --depot game --group programmers --branch "feature-*" --level write
+lode admin acl add allow write group:programmers --depot game --branch main
+lode admin acl add allow write group:programmers --depot game --branch "feature-*"
 
 # Only the release group can commit to release branches
-lode admin acl add --depot game --group release --branch "release-*" --level write
+lode admin acl add allow write group:release --depot game --branch "release-*"
 
 # Contractors must not see the licensed SDK, whatever else they are granted
-lode admin acl add --depot game --group contractors --path "sdk/**" --deny --level read
+lode admin acl add deny read group:contractors --depot game --path "sdk/**"
 
-lode admin acl list --depot game</code></pre>
+lode admin acl list              # every rule, with its id
+lode admin acl remove 7</code></pre>
 <h3>How rules combine</h3>
 <ol>
   <li>With no matching rule, access is refused.</li>
@@ -536,7 +594,7 @@ lode admin acl list --depot game</code></pre>
   <li>A matching <code>deny</code> refuses its level and every higher one, whatever other rules say. <code>deny write</code> still permits reading; <code>deny read</code> blocks everything.</li>
   <li>Otherwise the highest matching <code>allow</code> applies.</li>
 </ol>
-<div class="warn">A deny cannot be overridden by a more specific allow. To restrict an area, grant <code>write</code> narrowly in the first place, as in the release example, and keep <code>deny</code> for true exceptions. Check the outcome of a rule before relying on it:<br><code>lode admin acl add … --check carol release-2 src/main.rs</code></div>
+<div class="warn">A deny cannot be overridden by a more specific allow. To restrict an area, grant <code>write</code> narrowly in the first place, as in the release example, and keep <code>deny</code> for true exceptions. Check the outcome of a rule before relying on it, as you add it or at any time:<br><code>lode admin acl add … --check carol release-2 src/main.rs</code><br><code>lode admin acl check carol game release-2 src/main.rs</code></div>
 <h3>Known limit in version 1</h3>
 <p>File content is authorized per depot, not per path. Someone with any read access to a depot who knows the exact content hash of a file can download it, even from a path hidden from them. Listings and history never reveal hidden paths or their hashes. Put truly confidential material in a separate depot.</p>
 
@@ -544,10 +602,12 @@ lode admin acl list --depot game</code></pre>
 <p>An agent is an account for an automated tool. It belongs to a user, has its own tokens and its own permissions, and never inherits its owner's access.</p>
 <pre><code>lode admin agent create review-bot --owner alice
 lode admin token create --for review-bot --name default
-lode admin acl add --depot game --user review-bot --level read</code></pre>
+lode admin acl add allow read review-bot --depot game
+lode admin agent list</code></pre>
 <ul>
   <li>New agent tokens get the scopes <code>read</code>, <code>shelve</code> and <code>lock</code>. An agent can therefore propose changes as shelves but cannot commit.</li>
-  <li>To let an agent commit directly, an administrator must create its token with <code>--scopes read,write,…</code> and grant it <code>write</code> permission. Do this deliberately and narrowly.</li>
+  <li>To let an agent commit directly, an administrator must create its token with <code>--scope read,write,shelve,lock</code> and grant it <code>write</code> permission. Do this deliberately and narrowly.</li>
+  <li>The owner may also create the agent's tokens, with <code>read</code>, <code>shelve</code> and <code>lock</code> only.</li>
   <li>Disabling a user disables the agents they own.</li>
   <li>Every revision and shelf records who authored it, who submitted it, which client was used and, for agents, the model and session it reported. Find agent work with <code>lode log</code>, where agent authors are marked.</li>
 </ul>
@@ -575,9 +635,10 @@ text   = ["**/*.shader"]     # always treat these as text</code></pre>
   <tr><td><code>webhooks</code></td><td>Notifications to other systems when something happens</td><td>Off by default. Nothing is sent</td></tr>
   <tr><td><code>checks</code></td><td>Results reported by other systems, and required checks before shelf submit</td><td>Off by default. <code>[checks]</code> rules are ignored</td></tr>
 </table>
-<p><code>lode admin</code> and the server's <code>/api/v1/info</code> address show which modules are active.</p>
+<p>The server's <code>/api/v1/info</code> address lists the active modules.</p>
+<div class="warn"><strong>Planned.</strong> The webhooks and checks modules are not in Lode 0.1: switching them on has no effect yet. They arrive with the integration release; the next two sections describe the planned interface.</div>
 
-<h2>Webhooks</h2>
+<h2>Webhooks (planned)</h2>
 <p>A webhook tells another system, such as a build server, that something happened in a depot, so it does not have to keep asking.</p>
 <pre><code>lode admin webhook add game https://ci.example.com/hooks/lode --events revision.created,shelf.created,shelf.updated --branch "main"
 Created webhook 4. Secret (shown once): 9f2c…
@@ -593,11 +654,11 @@ lode admin webhook remove 4</code></pre>
   <li>Addresses must use <code>https://</code> unless you set <code>allow_http = true</code> under <code>[webhooks]</code> in the configuration.</li>
 </ul>
 
-<h2>Checks</h2>
+<h2>Checks (planned)</h2>
 <p>A check is a named result, for example "ci/build: success", that another system attaches to a revision or to one version of a shelf. Lode stores and shows checks; it does not run builds.</p>
 <p>Give the reporting system its own account and a token with the <code>checks</code> scope:</p>
 <pre><code>lode admin user create ci
-lode admin token create --for ci --name reporter --scopes read,checks</code></pre>
+lode admin token create --for ci --name reporter --scope read,checks</code></pre>
 <p>Anyone with read access can see the results:</p>
 <pre><code>lode checks r214        # checks on a revision
 lode checks 37          # checks on the current version of shelf 37</code></pre>
@@ -631,14 +692,14 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
 <h1>13. Backup and restore</h1>
 <p>Everything is in the data directory: a database file (<code>meta.db</code>) and the stored content (<code>depots/</code>).</p>
 <h3>Backup while running</h3>
-<pre><code>loded backup /backups/lode-2026-11-12 --config /var/lib/lode/loded.toml</code></pre>
+<pre><code>loded backup --config /var/lib/lode/loded.toml /backups/lode-2026-11-12</code></pre>
 <p>This makes a consistent copy without stopping the server. Stored content never changes once written, so repeated backups to the same destination with a tool such as <code>rsync</code> copy only what is new.</p>
 <div class="warn">Do not copy <code>meta.db</code> with an ordinary file copy while the server is running; the copy may be unusable. Use <code>loded backup</code>, or stop the server first.</div>
 <h3>Restore</h3>
 <ol>
   <li>Stop the server.</li>
   <li>Replace the data directory with the backup.</li>
-  <li>Run <code>loded fsck --config …</code> and confirm it reports no problems.</li>
+  <li>Run <code>loded fsck --config /var/lib/lode/loded.toml</code> and confirm it reports no problems (add <code>--full</code> to re-read all content).</li>
   <li>Start the server.</li>
 </ol>
 <p>Workspaces that had committed revisions newer than the backup will be ahead of the server. Their owners should check out fresh workspaces and re-apply their work.</p>
@@ -647,15 +708,16 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
 <h1>14. Maintenance</h1>
 <h3>Reclaiming space</h3>
 <p>Content that nothing refers to any more, such as uploads from abandoned commits or deleted shelves, is removed by garbage collection:</p>
-<pre><code>lode admin gc --depot game --dry-run     # report only
-lode admin gc --depot game</code></pre>
+<pre><code>lode admin gc game --dry-run     # report only
+lode admin gc game</code></pre>
 <p>It is safe to run while the team works. Data newer than the grace period (24 hours by default) is never removed. Running it weekly from a scheduler is enough. Garbage collection never removes committed history; version 1 has no way to delete old revisions.</p>
 <h3>Checking integrity</h3>
-<pre><code>lode admin fsck --depot game             # quick: structure and presence
-lode admin fsck --depot game --full      # also re-reads and verifies all content</code></pre>
+<pre><code>lode admin fsck game             # quick: structure and presence
+lode admin fsck game --full      # also re-reads and verifies all content
+loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every depot</code></pre>
 <p>Run the quick check after any unclean shutdown or restore, and the full check occasionally, for example monthly. A reported problem names the revision, path and content affected; restore that content from a backup.</p>
 <h3>Logs</h3>
-<p>The server writes structured logs to standard output. Each request has an id, also returned to the client, which you can use to find the matching log line when a user reports an error. Tokens, passwords and file content are never logged.</p>
+<p>The server writes its log to standard error (the journal under systemd, <code>docker logs</code> in a container). Each request has an id, also returned to the client, which you can use to find the matching log line when a user reports an error. Tokens, passwords and file content are never logged.</p>
 
 <h1>15. Upgrading</h1>
 <ol>
@@ -667,7 +729,7 @@ lode admin fsck --depot game --full      # also re-reads and verifies all conten
 
 <h1>16. Security checklist</h1>
 <ul>
-  <li>Serve only over TLS.</li>
+  <li>Serve only over TLS, and put a reverse proxy in front of a server reachable from the internet (chapter 4).</li>
   <li>Keep the admin token in a password manager. Create a personal administrator account for daily use and keep <code>admin</code> for emergencies.</li>
   <li>Grant <code>read</code> broadly and <code>write</code> narrowly. Use groups, not per-user rules.</li>
   <li>Give every script and agent its own account and token, with the fewest scopes that work and an expiry date.</li>
@@ -681,15 +743,16 @@ lode admin fsck --depot game --full      # also re-reads and verifies all conten
 <h1>17. Troubleshooting</h1>
 <table>
   <tr><th style="width:34%">Symptom</th><th>Likely cause and remedy</th></tr>
-  <tr><td>Server will not start: "uninitialized data directory"</td><td>Wrong <code>data_dir</code>, or <code>loded init</code> was never run there.</td></tr>
-  <tr><td>Server will not start: "unknown key"</td><td>A typing mistake in <code>loded.toml</code>. The message names the key.</td></tr>
-  <tr><td>Server will not start: "newer schema"</td><td>The data was written by a newer <code>loded</code>. Use that version or restore a backup.</td></tr>
+  <tr><td>Server will not start: "is not initialized (no meta.db)"</td><td>Wrong <code>data_dir</code>, or <code>loded init</code> was never run there.</td></tr>
+  <tr><td>Server will not start: "unknown field"</td><td>A typing mistake in <code>loded.toml</code>. The message names the key.</td></tr>
+  <tr><td>Server will not start: "this build knows only up to"</td><td>The data was written by a newer <code>loded</code>. Use that version or restore a backup.</td></tr>
   <tr><td>Clients report certificate errors</td><td>Expired or mismatched certificate. Renew it and restart.</td></tr>
   <tr><td>Large uploads fail behind a proxy</td><td>The proxy limits body size or buffers uploads. Raise the limit and turn buffering off.</td></tr>
-  <tr><td>A user gets <code>permission_denied</code> unexpectedly</td><td>A <code>deny</code> rule matches, or their token lacks the scope. Check with <code>lode admin acl add … --check</code> and <code>lode admin token list</code>.</td></tr>
+  <tr><td>A user gets <code>permission_denied</code> unexpectedly</td><td>A <code>deny</code> rule matches, or their token lacks the scope. Check with <code>lode admin acl check</code> and <code>lode admin token list --for</code>.</td></tr>
   <tr><td>A file stays locked</td><td>The holder has not committed. Ask them, or release it with <code>lode unlock --force</code>.</td></tr>
   <tr><td>Disk filling up</td><td>Run garbage collection. If history itself is the cause, add disk; version 1 cannot remove history.</td></tr>
-  <tr><td>Lost admin token</td><td>Stop the server and run <code>loded reset-admin --config …</code> on the server machine to issue a new one.</td></tr>
+  <tr><td>Uploads fail after a minute without progress</td><td>The request body stalled for <code>body_idle_seconds</code>. Check the network or the proxy; raise the limit for very slow links.</td></tr>
+  <tr><td>Lost admin token</td><td>Stop the server and run <code>loded reset-admin --config /var/lib/lode/loded.toml</code> on the server machine to issue a new one.</td></tr>
 </table>
 
 </body>

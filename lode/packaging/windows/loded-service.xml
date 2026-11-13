@@ -1,0 +1,31 @@
+<!--
+  Runs loded as a Windows service with WinSW (https://github.com/winsw/winsw), a small
+  service wrapper. loded itself is a console program; WinSW starts it, restarts it on
+  failure, and stops it with Ctrl+C so that requests in flight finish.
+
+  1. Put loded.exe, lode.exe and WinSW-x64.exe in C:\Program Files\Lode.
+  2. Rename WinSW-x64.exe to loded-service.exe and put this file next to it as
+     loded-service.xml.
+  3. In an administrator PowerShell:
+       & "C:\Program Files\Lode\loded.exe" init C:\ProgramData\Lode
+       & "C:\Program Files\Lode\loded-service.exe" install
+       Start-Service loded
+  Logs go to C:\ProgramData\Lode\logs. Remove with `loded-service.exe uninstall`.
+-->
+<service>
+  <id>loded</id>
+  <name>Lode server</name>
+  <description>Lode version control server.</description>
+  <executable>%BASE%\loded.exe</executable>
+  <arguments>serve --config "C:\ProgramData\Lode\loded.toml"</arguments>
+  <env name="LODED_LOG" value="info"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <stoptimeout>60 sec</stoptimeout>
+  <logpath>C:\ProgramData\Lode\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

@@ -1,0 +1,140 @@
+name: lode-release
+
+# Builds `lode` and `loded` for every supported platform, with checksums, and publishes them
+# as a GitHub release when a tag `lode-v<version>` is pushed. A manual run builds the same
+# archives and keeps them as workflow artifacts without releasing anything.
+
+on:
+  push:
+    tags: ["lode-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: lode
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Static musl binaries, built in cross's containers (C dependencies included).
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, cross: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, cross: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@v2
+        if: matrix.cross
+        with:
+          tool: cross
+      - name: Build
+        env:
+          # No Visual C++ runtime needed on the target machine.
+          RUSTFLAGS: ${{ contains(matrix.target, 'windows') && '-C target-feature=+crt-static' || '' }}
+        run: |
+          tool=cargo
+          if [ "${{ matrix.cross }}" = "true" ]; then tool=cross; fi
+          $tool build --release --locked --target ${{ matrix.target }} -p lode-cli -p loded
+      - name: Package
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          target=${{ matrix.target }}
+          name="lode-$version-$target"
+          ext=""
+          case "$target" in *windows*) ext=".exe" ;; esac
+          mkdir -p "dist/$name"
+          cp "target/$target/release/lode$ext" "target/$target/release/loded$ext" \
+             LICENSE README.md "dist/$name/"
+          cp -R packaging "dist/$name/packaging"
+          cd dist
+          if [ -n "$ext" ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+            archive="$name.zip"
+          else
+            tar czf "$name.tar.gz" "$name"
+            archive="$name.tar.gz"
+          fi
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          cat "$archive.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lode-${{ matrix.target }}
+          path: |
+            lode/dist/*.tar.gz
+            lode/dist/*.zip
+            lode/dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          cat *.sha256 | sed 's/ \*/  /' > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lode-release
+          path: dist/
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "Lode ${GITHUB_REF_NAME#lode-v}" --generate-notes \
+            ./*.tar.gz ./*.zip SHA256SUMS
+
+  image:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lode
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, test and push the loded image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          owner=$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          version="${GITHUB_REF_NAME#lode-v}"
+          image="ghcr.io/$owner/loded"
+          docker build -t "$image:$version" -t "$image:latest" .
+          packaging/docker/smoke.sh "$image:$version"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$image:$version"
+          docker push "$image:latest"
