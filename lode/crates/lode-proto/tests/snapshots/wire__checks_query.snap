@@ -1,0 +1,8 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "target_kind": "revision",
+  "target_id": 214
+}

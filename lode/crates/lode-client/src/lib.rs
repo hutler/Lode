@@ -940,6 +940,42 @@ impl Client {
         self.json(Retry::No, Method::POST, url).await
     }
 
+    // ---- checks module ----
+
+    /// `POST /depots/{d}/checks`: creates or replaces a check. Retried: a repeat stores the
+    /// same result again.
+    pub async fn report_check(
+        &self,
+        depot: &str,
+        req: &lode_proto::checks::ReportCheckRequest,
+    ) -> Result<lode_proto::checks::CheckView> {
+        self.json_body(
+            Retry::Yes,
+            Method::POST,
+            self.url(&["depots", depot, "checks"])?,
+            req,
+        )
+        .await
+    }
+
+    /// `GET /depots/{d}/checks`: the checks of one revision or shelf version.
+    pub async fn checks(
+        &self,
+        depot: &str,
+        q: &lode_proto::checks::ChecksQuery,
+    ) -> Result<lode_proto::checks::CheckList> {
+        let mut url = self.url(&["depots", depot, "checks"])?;
+        {
+            let mut p = url.query_pairs_mut();
+            p.append_pair("target_kind", q.target_kind.as_str());
+            p.append_pair("target_id", &q.target_id.to_string());
+            if let Some(v) = q.target_version {
+                p.append_pair("target_version", &v.to_string());
+            }
+        }
+        self.json(Retry::Yes, Method::GET, url).await
+    }
+
     // ---- webhooks module ----
 
     /// `GET /depots/{d}/webhooks`.

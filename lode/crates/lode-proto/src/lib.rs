@@ -9,6 +9,7 @@
 
 pub mod admin;
 pub mod auth;
+pub mod checks;
 pub mod commit;
 pub mod consts;
 pub mod depot;

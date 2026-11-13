@@ -116,6 +116,8 @@ pub mod paths {
     pub const SHELF: &str = "/api/v1/depots/{d}/shelves/{id}";
     /// Shelves module: submit.
     pub const SHELF_SUBMIT: &str = "/api/v1/depots/{d}/shelves/{id}/submit";
+    /// Checks module: report (`POST`) and list (`GET`).
+    pub const CHECKS: &str = "/api/v1/depots/{d}/checks";
     /// Webhooks module: list and create.
     pub const WEBHOOKS: &str = "/api/v1/depots/{d}/webhooks";
     /// Webhooks module: delete one hook.

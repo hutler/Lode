@@ -652,7 +652,13 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
   for a revision. Revision targets are validated through `Depots`; shelf targets are stored as
   given, so this module needs nothing from the shelves module. Limits: name
   `[a-z0-9._/-]{1,100}`, summary 1 KiB, url 2 KiB and `http(s)` only.
-- `GET /depots/{d}/checks?target_kind=&target_id=&target_version=` lists; needs scope `read`.
+- `GET /depots/{d}/checks?target_kind=&target_id=&target_version=` lists the checks of one
+  target, most recently reported first, each with its reporter (name, kind, owner for an
+  agent); needs scope `read`. `target_version` is required for a shelf and left out for a
+  revision. A revision the caller cannot read is `not_found`. Shelf checks are visible to
+  anyone who can see the depot, since the module does not know the shelf.
+- `POST` answers `200` with the stored check. A report replaces state, summary, url,
+  reporter and time; leaving `summary` or `url` out clears it.
 - Writes `check.updated`. `mcp_tools`: `list_checks`.
 - **Submit gate.** The branch configuration may require checks:
 

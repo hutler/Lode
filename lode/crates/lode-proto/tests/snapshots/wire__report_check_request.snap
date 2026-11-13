@@ -1,0 +1,15 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "target": {
+    "kind": "shelf",
+    "id": 37,
+    "version": 3
+  },
+  "name": "ci/build",
+  "state": "failure",
+  "summary": "2 tests failed",
+  "url": "https://ci.example.com/b/981"
+}

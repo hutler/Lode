@@ -1,0 +1,39 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "checks": [
+    {
+      "target": {
+        "kind": "shelf",
+        "id": 37,
+        "version": 3
+      },
+      "name": "ci/build",
+      "state": "success",
+      "reporter": {
+        "name": "ci",
+        "kind": "user"
+      },
+      "updated_at": "2026-11-12T10:30:00Z"
+    },
+    {
+      "target": {
+        "kind": "shelf",
+        "id": 37,
+        "version": 3
+      },
+      "name": "ci/lint",
+      "state": "pending",
+      "summary": "queued",
+      "url": "https://ci.example.com/b/982",
+      "reporter": {
+        "name": "fixer-bot",
+        "kind": "agent",
+        "owner": "ana"
+      },
+      "updated_at": "2026-11-12T10:30:00Z"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use insta::assert_json_snapshot;
 use lode_proto::admin::*;
 use lode_proto::auth::*;
+use lode_proto::checks::*;
 use lode_proto::commit::*;
 use lode_proto::depot::*;
 use lode_proto::error::ErrorBody;
@@ -617,6 +618,62 @@ fn shelves_types() {
         SubmitShelfRequest {
             expected_version: 3,
             message: None,
+        }
+    );
+}
+
+#[test]
+fn checks_types() {
+    let shelf = CheckTarget {
+        kind: CheckTargetKind::Shelf,
+        id: 37,
+        version: Some(3),
+    };
+    snap!(
+        "report_check_request",
+        ReportCheckRequest {
+            target: shelf,
+            name: "ci/build".into(),
+            state: CheckState::Failure,
+            summary: Some("2 tests failed".into()),
+            url: Some("https://ci.example.com/b/981".into()),
+        }
+    );
+    snap!(
+        "checks_query",
+        ChecksQuery {
+            target_kind: CheckTargetKind::Revision,
+            target_id: 214,
+            target_version: None,
+        }
+    );
+    snap!(
+        "check_list",
+        CheckList {
+            checks: vec![
+                CheckView {
+                    target: shelf,
+                    name: "ci/build".into(),
+                    state: CheckState::Success,
+                    summary: None,
+                    url: None,
+                    reporter: PrincipalRef {
+                        name: "ci".into(),
+                        kind: PrincipalKind::User,
+                        owner: None,
+                    },
+                    updated_at: T,
+                },
+                CheckView {
+                    target: shelf,
+                    name: "ci/lint".into(),
+                    state: CheckState::Pending,
+                    summary: Some("queued".into()),
+                    url: Some("https://ci.example.com/b/982".into()),
+                    reporter: bot(),
+                    updated_at: T,
+                },
+            ],
         }
     );
 }

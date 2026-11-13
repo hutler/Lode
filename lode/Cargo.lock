@@ -1399,6 +1399,24 @@ dependencies = [
 [[package]]
 name = "lode-mod-checks"
 version = "0.1.0"
+dependencies = [
+ "axum",
+ "http-body-util",
+ "lode-core",
+ "lode-meta",
+ "lode-mod-locks",
+ "lode-mod-shelves",
+ "lode-proto",
+ "lode-server",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tower",
+ "tracing",
+]
 
 [[package]]
 name = "lode-mod-locks"
@@ -1562,6 +1580,7 @@ dependencies = [
  "futures",
  "lode-client",
  "lode-core",
+ "lode-mod-checks",
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",
@@ -1599,6 +1618,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "lode-meta",
+ "lode-mod-checks",
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",
