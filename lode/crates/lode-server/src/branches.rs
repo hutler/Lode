@@ -111,8 +111,20 @@ async fn list(
     q: ApiQuery,
 ) -> ApiResult<Json<BranchList>> {
     caller.require_scope(SCOPE_READ)?;
-    let (d, access) = resolve(&state, &caller, &depot).await?;
     let include_archived = q.flag("all")?;
+    Ok(Json(
+        list_branches(&state, &caller, &depot, include_archived).await?,
+    ))
+}
+
+/// The branches of `depot` that `caller` can read, as `GET /branches` returns them.
+pub async fn list_branches(
+    state: &AppState,
+    caller: &Caller,
+    depot: &str,
+    include_archived: bool,
+) -> ApiResult<BranchList> {
+    let (d, access) = resolve(state, caller, depot).await?;
     let id = d.id;
     let all = state.meta().read(move |tx| tx.branches(id)).await?;
     let visible = all
@@ -122,9 +134,9 @@ async fn list(
                 && access.branch(&b.name).reads_anything()
         })
         .cloned();
-    Ok(Json(BranchList {
+    Ok(BranchList {
         branches: views(&all, visible),
-    }))
+    })
 }
 
 async fn show(

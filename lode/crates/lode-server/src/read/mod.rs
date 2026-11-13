@@ -8,7 +8,9 @@ mod manifest;
 
 pub use handlers::routes;
 pub use history::{list_revisions, revision_detail};
-pub use manifest::{delta_manifest, full_manifest, list_tree, open_file, FileContent};
+pub use manifest::{
+    changed_files, delta_manifest, full_manifest, list_tree, open_file, FileChange, FileContent,
+};
 
 use lode_core::{DepotId, DepotPath, ErrorCode, PathGlobSet};
 use lode_meta::{BranchRow, Reads, RevisionRow};

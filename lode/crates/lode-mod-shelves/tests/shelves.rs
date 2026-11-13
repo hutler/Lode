@@ -560,6 +560,7 @@ async fn diff_and_agent_owner() {
         scopes: vec!["read".into()],
         token_id: TokenId(0),
         groups: Vec::new(),
+        via: lode_proto::commit::Via::Api,
     };
     let out = (list.handler)(caller.clone(), json!({ "depot": "game", "owner": "bot" }))
         .await

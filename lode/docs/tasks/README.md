@@ -99,3 +99,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T033 | review | `lode/T033-shelves-client` | base_rev is the branch head; `shelve -c` (T034 follow-up) done; `merged_from` waits for T051; error codes `nothing_to_shelve`, `update_incomplete` |
 | T035 | review | `lode/T035-shelf-submit` | `Provenance.submitted_shelf` in lode-proto (engine drops it from direct commits); submit answers `CommitResponse`; MCP `submit_shelf` tool left for the MCP task |
 | T040 | review | `lode/T040-agents` | `PrincipalRef.owner`; `AgentProvenance` is a string map; `GET`/`DELETE …/admin/principals/{name}/tokens[/{id}]`; an empty scope list on an agent token means the defaults |
+| T041 | review | `lode/T041-mcp-endpoint` | stateless `rmcp` streamable HTTP; `Caller.via`; `ModuleCtx` gains depot and branch lists, `list_dir`, `open_file`, `changed_files`; the module is registered in `loded` and the test kit; `rmcp` needs Rust 1.88 |

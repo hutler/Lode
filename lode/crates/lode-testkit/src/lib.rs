@@ -79,6 +79,7 @@ pub fn available_modules() -> lode_server::module::Modules {
     vec![
         lode_mod_locks::Locks::module(),
         lode_mod_shelves::Shelves::module(),
+        lode_mod_mcp::Mcp::module(),
     ]
 }
 

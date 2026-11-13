@@ -373,3 +373,109 @@ pub async fn open_file(
         reader: obj.reader,
     })
 }
+
+/// One file that differs between two trees. A side is `None` where the file is absent or
+/// hidden from the caller.
+#[derive(Debug, Clone)]
+pub struct FileChange {
+    /// Path of the file.
+    pub path: DepotPath,
+    /// The entry in the old tree.
+    pub old: Option<TreeEntry>,
+    /// The entry in the new tree.
+    pub new: Option<TreeEntry>,
+}
+
+/// The visible files that differ between the trees at `old_root` and `new_root`, below
+/// `under` when given, sorted by path. Each side is filtered by its own visibility; when
+/// both use the same rules, identical subtrees are skipped by id. Stops after `limit`
+/// changes and reports whether more were left.
+#[allow(clippy::too_many_arguments)]
+pub async fn changed_files(
+    state: &AppState,
+    depot: DepotId,
+    old_root: ObjectId,
+    new_root: ObjectId,
+    old_vis: &Visibility,
+    new_vis: &Visibility,
+    same_rules: bool,
+    under: Option<&DepotPath>,
+    limit: usize,
+) -> ApiResult<(Vec<FileChange>, bool)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<(Option<DepotPath>, Option<ObjectId>, Option<ObjectId>)> = Vec::new();
+    match under {
+        None => stack.push((None, Some(old_root), Some(new_root))),
+        Some(p) => {
+            let o = lookup(state.trees(), depot, &old_root, p)
+                .await
+                .map_err(load_error)?;
+            let n = lookup(state.trees(), depot, &new_root, p)
+                .await
+                .map_err(load_error)?;
+            let dir = |e: &Option<TreeEntry>| {
+                e.as_ref()
+                    .filter(|e| e.kind == EntryKind::Dir)
+                    .map(|e| e.id)
+            };
+            stack.push((Some(p.clone()), dir(&o), dir(&n)));
+            let file = |e: Option<TreeEntry>, vis: &Visibility| {
+                e.filter(|e| e.kind != EntryKind::Dir && vis.shows(p))
+            };
+            push_change(&mut out, p.clone(), file(o, old_vis), file(n, new_vis));
+        }
+    }
+    while let Some((prefix, old_id, new_id)) = stack.pop() {
+        if out.len() > limit {
+            break;
+        }
+        if old_id.is_none() && new_id.is_none() {
+            continue;
+        }
+        if same_rules && old_id == new_id {
+            continue;
+        }
+        let old = load(state, depot, old_id).await.map_err(load_error)?;
+        let new = load(state, depot, new_id).await.map_err(load_error)?;
+        let names: BTreeSet<&str> = old
+            .iter()
+            .chain(new.iter())
+            .flat_map(|t| t.entries().iter().map(|e| e.name.as_str()))
+            .collect();
+        for name in names {
+            let o = old.as_ref().and_then(|t| t.get(name));
+            let n = new.as_ref().and_then(|t| t.get(name));
+            let Some(path) = child(prefix.as_ref(), name) else {
+                continue;
+            };
+            let od = o.filter(|e| e.kind == EntryKind::Dir).map(|e| e.id);
+            let nd = n.filter(|e| e.kind == EntryKind::Dir).map(|e| e.id);
+            if od.is_some() || nd.is_some() {
+                stack.push((Some(path.clone()), od, nd));
+            }
+            let was = o.filter(|e| e.kind != EntryKind::Dir && old_vis.shows(&path));
+            let now = n.filter(|e| e.kind != EntryKind::Dir && new_vis.shows(&path));
+            push_change(&mut out, path, was.cloned(), now.cloned());
+        }
+    }
+    out.sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
+    let more = out.len() > limit;
+    out.truncate(limit);
+    Ok((out, more))
+}
+
+fn push_change(
+    out: &mut Vec<FileChange>,
+    path: DepotPath,
+    old: Option<TreeEntry>,
+    new: Option<TreeEntry>,
+) {
+    let same = match (&old, &new) {
+        (Some(a), Some(b)) => a.id == b.id && a.kind == b.kind && a.flags == b.flags,
+        (None, None) => true,
+        _ => false,
+    };
+    if !same {
+        out.push(FileChange { path, old, new });
+    }
+}

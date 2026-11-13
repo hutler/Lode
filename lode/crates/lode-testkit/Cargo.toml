@@ -17,6 +17,7 @@ axum.workspace = true
 lode-client.workspace = true
 lode-core.workspace = true
 lode-mod-locks.workspace = true
+lode-mod-mcp.workspace = true
 lode-mod-shelves.workspace = true
 lode-proto.workspace = true
 lode-server.workspace = true

@@ -5,6 +5,7 @@ use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use lode_core::ErrorCode;
 use lode_meta::{GroupId, PrincipalKind, PrincipalRow, Reads, TokenId};
+use lode_proto::commit::Via;
 
 use super::token::{ct_eq, hash_token, TOKEN_PREFIX};
 use crate::error::ApiError;
@@ -27,6 +28,9 @@ pub struct Caller {
     pub token_id: TokenId,
     /// Groups the principal belongs to, as of this request.
     pub groups: Vec<GroupId>,
+    /// The endpoint the request came through; the MCP endpoint sets `Mcp`. Recorded in
+    /// provenance.
+    pub via: Via,
 }
 
 impl Caller {
@@ -153,5 +157,6 @@ pub(crate) async fn authenticate(state: &AppState, token: &str) -> Result<Caller
         principal,
         token_id: row.id,
         groups,
+        via: Via::Api,
     })
 }

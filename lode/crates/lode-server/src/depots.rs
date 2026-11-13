@@ -54,13 +54,18 @@ fn view(d: &DepotRow) -> DepotView {
 
 async fn list(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<DepotList>> {
     caller.require_scope(SCOPE_READ)?;
+    Ok(Json(list_depots(&state, &caller).await?))
+}
+
+/// The depots `caller` can see, as `GET /depots` returns them.
+pub async fn list_depots(state: &AppState, caller: &Caller) -> ApiResult<DepotList> {
     let rows = state.meta().read(|tx| tx.depots()).await?;
     let depots = rows
         .iter()
-        .filter(|d| state.permissions().depot(&caller, d.id).is_visible())
+        .filter(|d| state.permissions().depot(caller, d.id).is_visible())
         .map(view)
         .collect();
-    Ok(Json(DepotList { depots }))
+    Ok(DepotList { depots })
 }
 
 fn check_depot_name(name: &str) -> ApiResult<()> {

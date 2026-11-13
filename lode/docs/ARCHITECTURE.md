@@ -529,6 +529,26 @@ only the tools that read core data (branches, history, files, diff, blame). A to
 only when its module is enabled and the token has the scope the tool declares. `read_file` caps output (default 256 KiB)
 and reports truncation; binary content is returned as a summary (size, id), not bytes.
 
+- The endpoint is stateless (no MCP sessions; protocol `2026-07-28` is stateless anyway):
+  every request carries its bearer token, which a middleware resolves before the transport
+  sees the request. No token or a bad one gets `401` with `WWW-Authenticate: Bearer`.
+  Responses are plain JSON where possible. The SDK's `Host` allow-list (a DNS-rebinding
+  guard that defaults to loopback) is off: a browser page cannot send the bearer token.
+- The caller's `via` is `mcp` on this endpoint, so commits and shelves made through it
+  record `via = "mcp"` in provenance.
+- Results are `structuredContent` plus the same JSON as text. A Lode error is a tool error
+  (`isError`) whose content is `{code, message, details?}`; a tool the token lacks the scope
+  for answers `permission_denied`; an unknown tool name is a protocol error.
+- Core tools and their limits: `read_file` takes `rev` or `branch` (default `main`) and an
+  optional line range, returns at most 256 KiB (up to 1 MiB on request) with `truncated` and
+  the last line returned; content with a NUL byte or invalid UTF-8 in its first 8 KiB is
+  `{binary: true, size, id}`. `diff` takes `to_rev` and optional `from_rev` (default: the
+  parent) and `path`, lists up to 1000 changed files, compares only text files up to
+  256 KiB per side (others get `skipped: binary | too_large`) and caps the text at 256 KiB
+  (up to 1 MiB). `search_history` matches message and changed paths case-insensitively and
+  looks through at most 2000 revisions per call, returning `next_before` to continue.
+- Built on `rmcp` 3.x, which needs Rust 1.88.
+
 ### 9.4 Webhooks (`lode-mod-webhooks`)
 
 Tells outside systems that something happened, so they need not poll. Built only on

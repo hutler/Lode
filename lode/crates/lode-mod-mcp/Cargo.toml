@@ -10,3 +10,21 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+axum.workspace = true
+diffy.workspace = true
+lode-core.workspace = true
+lode-meta.workspace = true
+lode-proto.workspace = true
+lode-server.workspace = true
+rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+lode-testkit.workspace = true
+reqwest.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }

@@ -7,8 +7,9 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use lode_core::{DepotId, DepotPath, ObjectId, Tree, TreeEntry};
 use lode_meta::{DepotRow, MetaStore, PrincipalRow, Reads};
-use lode_proto::commit::{CommitRequest, CommitResponse, Via};
-use lode_proto::read::{RevisionList, RevisionListQuery, RevisionView};
+use lode_proto::commit::{CommitRequest, CommitResponse};
+use lode_proto::depot::{BranchList, DepotList};
+use lode_proto::read::{RevisionList, RevisionListQuery, RevisionView, TreeEntryView};
 use lode_store::BlobStore;
 
 use super::ToolRegistry;
@@ -17,7 +18,7 @@ use crate::clock::SharedClock;
 use crate::commit::{self, CommitOptions, Origin, TreeLoadError, TreeSource};
 use crate::error::{ApiError, ApiResult};
 use crate::perm::DepotAccess;
-use crate::read::{self, ReadableRev};
+use crate::read::{self, FileChange, FileContent, ReadableRev, View, Visibility};
 use crate::state::AppState;
 
 /// The context handed to a module: its name and the server's public services.
@@ -164,6 +165,73 @@ impl Depots<'_> {
         read::list_revisions(self.state, caller, depot, q).await
     }
 
+    /// The depots `caller` can see, as `GET /depots` returns them.
+    pub async fn list(&self, caller: &Caller) -> ApiResult<DepotList> {
+        crate::depots::list_depots(self.state, caller).await
+    }
+
+    /// The branches of `depot` that `caller` can read, as `GET /branches` returns them.
+    pub async fn branches(
+        &self,
+        caller: &Caller,
+        depot: &str,
+        include_archived: bool,
+    ) -> ApiResult<BranchList> {
+        crate::branches::list_branches(self.state, caller, depot, include_archived).await
+    }
+
+    /// The visible entries of a directory at revision `rev` (the root when `path` is
+    /// `None`), as `GET /tree` returns them.
+    pub async fn list_dir(
+        &self,
+        caller: &Caller,
+        depot: &DepotRow,
+        rev: u64,
+        path: Option<&DepotPath>,
+    ) -> ApiResult<Vec<TreeEntryView>> {
+        let target = read::readable_rev(self.state, caller, depot.id, rev).await?;
+        let vis = Visibility::new(target.access, View::default());
+        read::list_tree(self.state, depot.id, target.rev.root_tree, path, &vis).await
+    }
+
+    /// A file at revision `rev`, as `GET /files` returns it; `not_found` when hidden.
+    pub async fn open_file(
+        &self,
+        caller: &Caller,
+        depot: &DepotRow,
+        rev: u64,
+        path: &DepotPath,
+    ) -> ApiResult<FileContent> {
+        let target = read::readable_rev(self.state, caller, depot.id, rev).await?;
+        let vis = Visibility::new(target.access, View::default());
+        read::open_file(self.state, depot.id, target.rev.root_tree, path, &vis).await
+    }
+
+    /// The files that differ between revisions `from` and `to` that `caller` can read, below
+    /// `under` when given, sorted by path; at most `limit`, with whether more were left.
+    pub async fn changed_files(
+        &self,
+        caller: &Caller,
+        depot: &DepotRow,
+        from: u64,
+        to: u64,
+        under: Option<&DepotPath>,
+        limit: usize,
+    ) -> ApiResult<(Vec<FileChange>, bool)> {
+        let old = read::readable_rev(self.state, caller, depot.id, from).await?;
+        let new = read::readable_rev(self.state, caller, depot.id, to).await?;
+        let same_rules = old.branch.id == new.branch.id
+            || (old.access.reads_everything() && new.access.reads_everything());
+        let old_root = old.rev.root_tree;
+        let new_root = new.rev.root_tree;
+        let old_vis = Visibility::new(old.access, View::default());
+        let new_vis = Visibility::new(new.access, View::default());
+        read::changed_files(
+            self.state, depot.id, old_root, new_root, &old_vis, &new_vis, same_rules, under, limit,
+        )
+        .await
+    }
+
     /// One revision, as `GET /revisions/{n}` returns it to `caller`.
     pub async fn revision(
         &self,
@@ -200,7 +268,7 @@ impl Commits<'_> {
                 name: self.module.to_owned(),
                 attrs,
             },
-            via: Via::Api,
+            via: caller.via,
             client: None,
         };
         commit::commit(self.state, caller, depot, branch, req, opts).await

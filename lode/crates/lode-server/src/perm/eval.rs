@@ -383,6 +383,7 @@ mod tests {
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
             token_id: TokenId(1),
             groups: groups.to_vec(),
+            via: lode_proto::commit::Via::Api,
         }
     }
 

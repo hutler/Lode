@@ -34,6 +34,7 @@ async fn create(
             .get(USER_AGENT)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned),
+        via: caller.via,
         ..CommitOptions::default()
     };
     let resp = commit(&state, &caller, &d, &branch, req, opts).await?;

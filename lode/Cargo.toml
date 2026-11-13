@@ -58,6 +58,8 @@ globset = "0.4"
 hex = "0.4"
 ignore = "0.4"
 rand = "0.8"
+# The official Rust MCP SDK. 3.x needs Rust 1.88.
+rmcp = { version = "3.10", default-features = false }
 rpassword = "7"
 # rustls with the ring provider: aws-lc-rs needs extra build tools on Windows.
 # reqwest 0.12: 0.13 needs Rust 1.85 and defaults to aws-lc-rs. Native roots with ring, no
