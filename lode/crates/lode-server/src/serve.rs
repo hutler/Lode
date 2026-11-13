@@ -144,7 +144,12 @@ pub(crate) async fn serve<F>(
                 Some(acceptor) => {
                     match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
                         Ok(Ok(stream)) => {
-                            let h2 = stream.get_ref().1.alpn_protocol() == Some(b"h2");
+                            let alpn = stream.get_ref().1.alpn_protocol();
+                            if alpn == Some(crate::acme::ACME_TLS_ALPN) {
+                                // An ACME validation: the handshake was all it needed.
+                                return;
+                            }
+                            let h2 = alpn == Some(b"h2");
                             connection(stream, h2, addr, router, settings, watcher).await;
                         }
                         Ok(Err(e)) => tracing::debug!(%addr, error = %e, "TLS handshake failed"),

@@ -201,7 +201,7 @@ async fn http2_over_tls_is_served_and_silent_clients_are_closed() {
     std::fs::write(dir.path().join("cert.pem"), cert.cert.pem()).unwrap();
     std::fs::write(dir.path().join("key.pem"), cert.signing_key.serialize_pem()).unwrap();
     let server = start(dir.path(), |c| {
-        c.tls = Some(lode_server::TlsConfig {
+        c.tls = Some(lode_server::TlsConfig::Files {
             cert: dir.path().join("cert.pem"),
             key: dir.path().join("key.pem"),
         });

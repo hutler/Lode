@@ -13,13 +13,14 @@ use lode_store::{FsBlobStore, FsBlobStoreConfig};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
+use crate::acme::{Acme, AcmeError};
 use crate::auth::{generate_token, hash_token, ScopeRegistry, ADMIN_USER};
 use crate::clock::{Clock, SharedClock, SystemClock};
-use crate::config::{ServerConfig, CONFIG_FILE_NAME, DEFAULT_CONFIG};
+use crate::config::{ServerConfig, TlsConfig, CONFIG_FILE_NAME, DEFAULT_CONFIG};
 use crate::module::Modules;
 use crate::serve::{self, Settings};
 use crate::state::AppState;
-use crate::tls::{load_server_config, TlsError};
+use crate::tls::{acme_server_config, load_server_config, TlsError};
 
 /// Name of the metadata database inside the data directory.
 pub const META_DB_FILE: &str = "meta.db";
@@ -59,6 +60,9 @@ pub enum ServerError {
     /// TLS setup error.
     #[error(transparent)]
     Tls(#[from] TlsError),
+    /// ACME certificate setup error.
+    #[error(transparent)]
+    Acme(#[from] AcmeError),
 }
 
 fn io_err(context: impl Into<String>) -> impl FnOnce(io::Error) -> ServerError {
@@ -224,6 +228,7 @@ pub struct ClientInfo(pub SocketAddr);
 pub struct BoundServer {
     tcp: TcpListener,
     tls: Option<TlsAcceptor>,
+    acme: Option<Acme>,
     local: SocketAddr,
     router: Router,
     settings: Settings,
@@ -238,9 +243,16 @@ impl BoundServer {
         let local = tcp
             .local_addr()
             .map_err(io_err("cannot read the listen address"))?;
+        let mut acme = None;
         let tls = match &config.tls {
-            Some(tls) => {
-                let rustls_config = load_server_config(&tls.cert, &tls.key)?;
+            Some(TlsConfig::Files { cert, key }) => {
+                let rustls_config = load_server_config(cert, key)?;
+                Some(TlsAcceptor::from(Arc::new(rustls_config)))
+            }
+            Some(TlsConfig::Acme(acme_config)) => {
+                let manager = Acme::new(acme_config.clone(), &config.data_dir)?;
+                let rustls_config = acme_server_config(manager.resolver())?;
+                acme = Some(manager);
                 Some(TlsAcceptor::from(Arc::new(rustls_config)))
             }
             None => {
@@ -261,6 +273,7 @@ impl BoundServer {
         Ok(Self {
             tcp,
             tls,
+            acme,
             local,
             router,
             settings,
@@ -287,7 +300,12 @@ impl BoundServer {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        // The certificate is obtained and renewed while the server runs.
+        let acme = self.acme.map(|a| tokio::spawn(a.maintain()));
         serve::serve(self.tcp, self.tls, self.router, self.settings, shutdown).await;
+        if let Some(task) = acme {
+            task.abort();
+        }
         Ok(())
     }
 }

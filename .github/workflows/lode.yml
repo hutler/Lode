@@ -30,6 +30,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: lode
+      # Pebble, the ACME test server, for the built-in TLS test (lode-server tests/acme.rs).
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version: stable
+          cache: false
+      - name: Install Pebble
+        if: runner.os == 'Linux'
+        run: |
+          go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.10.3 \
+            github.com/letsencrypt/pebble/v2/cmd/pebble-challtestsrv@v2.10.3
+          echo "PEBBLE=$(go env GOPATH)/bin/pebble" >> "$GITHUB_ENV"
+          echo "PEBBLE_CHALLTESTSRV=$(go env GOPATH)/bin/pebble-challtestsrv" >> "$GITHUB_ENV"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

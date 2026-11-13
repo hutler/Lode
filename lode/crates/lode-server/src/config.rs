@@ -21,10 +21,18 @@ listen = "127.0.0.1:7480"
 # Data directory holding meta.db and depots/. A relative path is relative to this file.
 data_dir = "."
 
-# Serve HTTPS directly. Paths are relative to this file unless absolute.
+# Serve HTTPS directly, with certificate files (paths relative to this file unless
+# absolute)...
 # [tls]
 # cert = "cert.pem"
 # key = "key.pem"
+#
+# ...or with a certificate obtained and renewed automatically from Let's Encrypt. The domain
+# must resolve to this server and port 443 must reach `listen`. Setting acme_domain accepts
+# the certificate authority's terms of service.
+# [tls]
+# acme_domain = "lode.example.com"
+# acme_email = "admin@example.com"
 
 [connections]
 # Seconds a client has to send a request's headers, and that an idle kept-alive connection
@@ -166,14 +174,96 @@ impl Default for ConnectionsConfig {
     }
 }
 
-/// PEM files for HTTPS.
+/// The ACME directory of Let's Encrypt, used when `acme_directory` is not set.
+pub const LETS_ENCRYPT_DIRECTORY: &str = "https://acme-v02.api.letsencrypt.org/directory";
+
+/// The `[tls]` table: certificate files, or a certificate obtained over ACME.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(try_from = "RawTls")]
+pub enum TlsConfig {
+    /// PEM files.
+    Files {
+        /// Certificate chain, leaf first.
+        cert: PathBuf,
+        /// Private key (PKCS#8, PKCS#1 or SEC1).
+        key: PathBuf,
+    },
+    /// A certificate obtained and renewed from an ACME server such as Let's Encrypt.
+    Acme(AcmeConfig),
+}
+
+/// Obtaining a certificate over ACME (TLS-ALPN-01 on the HTTPS port).
+#[derive(Debug, Clone)]
+pub struct AcmeConfig {
+    /// The server's DNS name, which must resolve to this server.
+    pub domain: String,
+    /// Contact address given to the certificate authority (expiry notices).
+    pub email: Option<String>,
+    /// Directory URL of the ACME server; Let's Encrypt production by default.
+    pub directory: String,
+    /// Extra root certificate (PEM) to trust for the ACME server itself, for a private one.
+    pub ca: Option<PathBuf>,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TlsConfig {
-    /// Certificate chain, leaf first.
-    pub cert: PathBuf,
-    /// Private key (PKCS#8, PKCS#1 or SEC1).
-    pub key: PathBuf,
+struct RawTls {
+    cert: Option<PathBuf>,
+    key: Option<PathBuf>,
+    acme_domain: Option<String>,
+    acme_email: Option<String>,
+    acme_directory: Option<String>,
+    acme_ca: Option<PathBuf>,
+}
+
+impl TryFrom<RawTls> for TlsConfig {
+    type Error = String;
+
+    fn try_from(raw: RawTls) -> Result<Self, String> {
+        let acme_keys =
+            raw.acme_email.is_some() || raw.acme_directory.is_some() || raw.acme_ca.is_some();
+        match (raw.cert, raw.key, raw.acme_domain) {
+            (Some(cert), Some(key), None) if !acme_keys => Ok(Self::Files { cert, key }),
+            (None, None, Some(domain)) => {
+                if !is_dns_name(&domain) {
+                    return Err(format!("[tls] acme_domain {domain:?} is not a DNS name"));
+                }
+                let directory = raw
+                    .acme_directory
+                    .unwrap_or_else(|| LETS_ENCRYPT_DIRECTORY.to_owned());
+                if !directory.starts_with("https://") {
+                    return Err("[tls] acme_directory must be an https:// URL".into());
+                }
+                Ok(Self::Acme(AcmeConfig {
+                    domain: domain.to_ascii_lowercase(),
+                    email: raw.acme_email,
+                    directory,
+                    ca: raw.acme_ca,
+                }))
+            }
+            (Some(_) | None, Some(_) | None, Some(_)) => {
+                Err("[tls] takes either cert and key, or acme_domain, not both".into())
+            }
+            _ if acme_keys => {
+                Err("[tls] acme_email, acme_directory and acme_ca need acme_domain".into())
+            }
+            _ => Err("[tls] needs cert and key, or acme_domain".into()),
+        }
+    }
+}
+
+/// A host name of letters, digits and hyphens in dot-separated labels, at least two labels.
+fn is_dns_name(name: &str) -> bool {
+    let labels: Vec<&str> = name.split('.').collect();
+    name.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+                && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
 }
 
 /// Limits from ARCHITECTURE §6.
@@ -279,9 +369,17 @@ impl ServerConfig {
             return Err(invalid("[connections] max_per_address must be at least 1"));
         }
         cfg.data_dir = base.join(&cfg.data_dir);
-        if let Some(tls) = &mut cfg.tls {
-            tls.cert = base.join(&tls.cert);
-            tls.key = base.join(&tls.key);
+        match &mut cfg.tls {
+            Some(TlsConfig::Files { cert, key }) => {
+                *cert = base.join(&*cert);
+                *key = base.join(&*key);
+            }
+            Some(TlsConfig::Acme(acme)) => {
+                if let Some(ca) = &mut acme.ca {
+                    *ca = base.join(&*ca);
+                }
+            }
+            None => {}
         }
         Ok(cfg)
     }
@@ -365,8 +463,49 @@ mod tests {
         let text = "data_dir = 'data'\n[tls]\ncert = 'c.pem'\nkey = '/abs/k.pem'";
         let cfg = ServerConfig::parse(text, Path::new("/etc/lode"), Path::new("x")).unwrap();
         assert_eq!(cfg.data_dir, Path::new("/etc/lode/data"));
-        let tls = cfg.tls.unwrap();
-        assert_eq!(tls.cert, Path::new("/etc/lode/c.pem"));
-        assert_eq!(tls.key, Path::new("/abs/k.pem"));
+        let Some(TlsConfig::Files { cert, key }) = cfg.tls else {
+            panic!("files expected");
+        };
+        assert_eq!(cert, Path::new("/etc/lode/c.pem"));
+        assert_eq!(key, Path::new("/abs/k.pem"));
+    }
+
+    #[test]
+    fn tls_takes_files_or_acme() {
+        let parse = |tls: &str| {
+            ServerConfig::parse(
+                &format!("data_dir = '.'\n[tls]\n{tls}"),
+                Path::new("/etc/lode"),
+                Path::new("x"),
+            )
+        };
+        let Some(TlsConfig::Acme(acme)) = parse("acme_domain = 'Lode.Example.com'").unwrap().tls
+        else {
+            panic!("acme expected");
+        };
+        assert_eq!(acme.domain, "lode.example.com");
+        assert_eq!(acme.directory, LETS_ENCRYPT_DIRECTORY);
+        assert!(acme.email.is_none() && acme.ca.is_none());
+        let text = "acme_domain = 'lode.example.com'\nacme_email = 'ops@example.com'\n\
+                    acme_directory = 'https://localhost:14000/dir'\nacme_ca = 'ca.pem'";
+        let Some(TlsConfig::Acme(acme)) = parse(text).unwrap().tls else {
+            panic!("acme expected");
+        };
+        assert_eq!(acme.email.as_deref(), Some("ops@example.com"));
+        assert_eq!(acme.directory, "https://localhost:14000/dir");
+        assert_eq!(acme.ca.unwrap(), Path::new("/etc/lode/ca.pem"));
+        for bad in [
+            "cert = 'c'\nkey = 'k'\nacme_domain = 'a.example'",
+            "cert = 'c'\nacme_domain = 'a.example'",
+            "cert = 'c'",
+            "cert = 'c'\nkey = 'k'\nacme_email = 'x@example.com'",
+            "acme_email = 'x@example.com'",
+            "acme_domain = 'localhost'",
+            "acme_domain = 'bad_name.example'",
+            "acme_domain = 'a.example'\nacme_directory = 'http://x/dir'",
+            "",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
     }
 }

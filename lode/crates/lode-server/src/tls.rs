@@ -56,3 +56,21 @@ pub fn load_server_config(cert: &Path, key: &Path) -> Result<rustls::ServerConfi
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(config)
 }
+
+/// A rustls server configuration whose certificate comes from ACME (T081). It also offers
+/// the `acme-tls/1` protocol, which only the certificate authority's validation uses.
+pub(crate) fn acme_server_config(
+    resolver: Arc<crate::acme::CertResolver>,
+) -> Result<rustls::ServerConfig, TlsError> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()?
+        .with_no_client_auth()
+        .with_cert_resolver(resolver);
+    config.alpn_protocols = vec![
+        b"h2".to_vec(),
+        b"http/1.1".to_vec(),
+        crate::acme::ACME_TLS_ALPN.to_vec(),
+    ];
+    Ok(config)
+}

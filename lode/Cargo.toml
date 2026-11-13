@@ -58,6 +58,9 @@ futures = "0.3"
 globset = "0.4"
 hex = "0.4"
 hmac = "0.12"
+# ACME client for built-in Let's Encrypt certificates (T081): ring, its own hyper-rustls client
+# with the platform verifier, rcgen for keys and CSRs.
+instant-acme = { version = "0.8", default-features = false, features = ["ring", "hyper-rustls", "rcgen"] }
 # hyper and its companion hyper-util (already used through axum): the server's own connection
 # loop, for header timeouts and per-address limits (T080).
 hyper = { version = "1", features = ["server", "http1", "http2"] }

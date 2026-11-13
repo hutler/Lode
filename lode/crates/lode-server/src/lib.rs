@@ -4,6 +4,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod acme;
 pub mod auth;
 pub mod blobs;
 pub mod branches;
@@ -30,8 +31,8 @@ pub mod tls;
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
-    ConfigError, ConnectionsConfig, GcConfig, Limits, ModulesConfig, ServerConfig, TlsConfig,
-    WebhooksConfig,
+    AcmeConfig, ConfigError, ConnectionsConfig, GcConfig, Limits, ModulesConfig, ServerConfig,
+    TlsConfig, WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};

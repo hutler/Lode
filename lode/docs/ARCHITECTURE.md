@@ -309,8 +309,15 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
 
 ## 7. Security
 
-- **Transport.** `loded` terminates TLS itself with rustls (cert and key in config) or listens
-  on plain HTTP bound to localhost behind a reverse proxy. Over TLS, ALPN picks HTTP/2 or
+- **Transport.** `loded` terminates TLS itself with rustls, with a certificate and key from
+  files or one it obtains over ACME (T081), or listens on plain HTTP bound to localhost behind
+  a reverse proxy. With `[tls] acme_domain`, `loded` gets the certificate from Let's Encrypt
+  (or `acme_directory`) with the TLS-ALPN-01 challenge on its own HTTPS port: during a
+  challenge, a handshake offering only the `acme-tls/1` protocol gets the challenge
+  certificate and the connection ends there. The account, certificate and key are cached in
+  `<data_dir>/acme/<id of the directory URL>/`; a restart serves the cached certificate at
+  once, and it is renewed after two thirds of its lifetime (failed attempts are retried after
+  5 minutes, doubling up to 6 hours). Over TLS, ALPN picks HTTP/2 or
   HTTP/1.1; plain HTTP is HTTP/1.1 only. `loded` runs its own connection loop on hyper (not
   `axum::serve`), so it can face the internet directly: request headers must arrive within
   `[connections] header_timeout_seconds` (30, also the limit for an idle kept-alive HTTP/1.1

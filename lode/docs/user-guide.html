@@ -470,9 +470,15 @@ lode admin acl add allow write user:alice --depot game</code></pre>
 <pre><code>listen = "127.0.0.1:7480"          # address and port
 data_dir = "."                     # relative to this file
 
-# [tls]                            # serve HTTPS directly
+# [tls]                            # serve HTTPS with certificate files...
 # cert = "cert.pem"
 # key = "key.pem"
+
+# [tls]                            # ...or with a certificate from Let's Encrypt
+# acme_domain = "lode.example.com"
+# acme_email = "admin@example.com" # optional: expiry notices
+# acme_directory = "..."           # optional: another ACME server (staging, private)
+# acme_ca = "ca.pem"               # optional: root to trust for a private ACME server
 
 [connections]
 header_timeout_seconds = 30        # time for a request's headers; idle connections close after it
@@ -501,7 +507,8 @@ grace_seconds = 86400              # unused data younger than this is kept</code
 <h1>4. TLS</h1>
 <p>Clients refuse unencrypted connections to remote servers, so one of these is required:</p>
 <ul>
-  <li><strong>Built-in.</strong> Fill in the <code>[tls]</code> section with a certificate and key in PEM format. Restart the server after renewing the certificate.</li>
+  <li><strong>Let's Encrypt, built in.</strong> Set <code>acme_domain</code> in <code>[tls]</code> to the server's name. <code>loded</code> obtains a certificate when it starts, renews it when two thirds of its lifetime have passed, and keeps it in <code>acme/</code> in the data directory, so a restart serves it at once. The name must resolve to the server, and port 443 of that name must reach <code>listen</code>: listen on <code>0.0.0.0:443</code>, or forward port 443 to the listen port. Nothing else is needed: the certificate authority checks the name over the same port (the TLS-ALPN-01 challenge). Setting <code>acme_domain</code> accepts the certificate authority's terms of service. To try it without using up Let's Encrypt's limits, set <code>acme_directory = "https://acme-staging-v02.api.letsencrypt.org/directory"</code> first; staging certificates are not trusted by clients, and switching back obtains a real one.</li>
+  <li><strong>Certificate files.</strong> Fill in the <code>[tls]</code> section with a certificate and key in PEM format. Restart the server after renewing the certificate.</li>
   <li><strong>Reverse proxy.</strong> Leave <code>[tls]</code> out, keep <code>listen = "127.0.0.1:7480"</code>, and put a web server such as Caddy or nginx in front. The proxy must allow large uploads, must not buffer request bodies, and must pass the <code>Authorization</code> header through.</li>
 </ul>
 <p>With built-in TLS, <code>loded</code> can face the internet directly: it closes a connection whose request headers do not arrive within <code>header_timeout_seconds</code>, fails request bodies that stall, and limits how many connections one address may hold (<code>[connections]</code> in chapter 3). A proxy is only needed if you want one, for example to share port 443 with a website:</p>
@@ -550,7 +557,7 @@ Start-Service loded</code></pre>
     -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.1.0
 docker logs lode                                  # the admin token, on first start only
 docker exec lode loded fsck --config /var/lib/lode/loded.toml</code></pre>
-<p>Publish the port on the host's loopback address and put the TLS proxy in front, as in chapter 4. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>
+<p>Either publish the port on the host's loopback address and put a TLS proxy in front, or set <code>acme_domain</code> in <code>/var/lib/lode/loded.toml</code> and publish it as port 443 (<code>-p 443:7480</code>), as in chapter 4. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>
 
 <h1>6. Depots</h1>
 <pre><code>lode admin depot create game
