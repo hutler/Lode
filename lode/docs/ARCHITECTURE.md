@@ -406,6 +406,15 @@ pub trait Module: Send + Sync + 'static {
 - Third-party extension without recompiling: the HTTP API, and CLI subcommands found on `PATH`
   as `lode-<name>` (the CLI passes server URL and token through environment variables).
 
+**Module surface (reviewed in T056).** The locks, shelves and MCP modules reach the server only
+through `ModuleCtx` (auth, depots, commits, blobs, meta, tools, limits, clock), the commit
+hooks (`CommitCtx`, `CommittedCtx`) and the `Module` trait. Their SQL touches only their own
+`mod_<name>_` tables; core data is read through `lode_meta::Reads` and written only through
+`Commits`, `set_rev_meta` and the event outbox. No module uses `AppState`, the permission
+engine's internals or the read handlers. `Blobs::store()` and `Meta::store()` hand out the raw
+stores, so the rule is kept by review rather than by the type system; a narrower surface is a
+candidate for a later version.
+
 ### 8.1 Events
 
 Every outbox event has the envelope `{ id, event, depot, created_at, data }`. `data` carries
@@ -764,8 +773,8 @@ applies each change against the workspace's current state: unchanged since the s
 written; changed here → three-way text merge with the shelf's `base_id` as ancestor, or a
 conflict. An unshelve conflict keeps the workspace's base in the row and records the shelf's
 side in `conflict.theirs_id` with `theirs_rev = 0`, so `resolve --theirs` writes that side
-without moving the base, and a binary conflict puts it in `<file>.theirs-shelf`. Pending merge
-state (`merged_from`) is not carried yet (T051).
+without moving the base, and a binary conflict puts it in `<file>.theirs-shelf`. A pending
+merge travels with the shelf as its `merged_from` and becomes pending again on unshelve (T051).
 
 **Locks in the workspace.** `file.lock_held` records which files this workspace has locked;
 `lock`, `unlock`, commit and `locks` set it, and `update` reconciles it with the server and

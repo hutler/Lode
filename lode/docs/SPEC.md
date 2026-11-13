@@ -186,8 +186,9 @@ checked out on Windows, macOS and Linux.
 Two MCP servers, both speaking the standard Model Context Protocol:
 
 - **Server endpoint** (`/mcp`, streamable HTTP, bearer token). Works without a workspace. Tools:
-  `whoami`, `list_branches`, `log`, `show_revision`, `list_dir`, `read_file`, `diff`, `blame`,
-  `search_history`, `list_locks`, `list_shelves`, `get_shelf`, `create_shelf`, `update_shelf`.
+  `whoami`, `list_depots`, `list_branches`, `log`, `show_revision`, `list_dir`, `read_file`,
+  `diff`, `blame`, `search_history`, `list_locks`, `list_shelves`, `get_shelf`, `create_shelf`,
+  `update_shelf`, and `submit_shelf` for tokens with `write`.
 - **Local endpoint** (`lode mcp`, stdio). Operates on a workspace. Tools: `status`, `diff`,
   `add`, `remove`, `move`, `revert`, `update`, `lock`, `unlock`, `shelve`, `unshelve`, `commit`.
 
@@ -251,6 +252,9 @@ What can be trusted: `via` is set by the server and says which server endpoint w
 `lode mcp` server. `client` and everything under `agent` are reported by the client and stored
 as given; show them, but do not base decisions on them.
 
+A revision made by `shelf submit` takes `via` from the submit request (usually `api`), keeps
+the shelf's `client` and `agent`, and adds `submitted_shelf` with the shelf's id.
+
 `author` and `submitter` come from the authenticated token and are always reliable.
 `author` is who made the change, `submitter` is who committed it. They differ when a human
 submits an agent's shelf. `lode log` shows both.
@@ -284,9 +288,10 @@ lode shelve | unshelve <id>          lode shelves | shelf show|diff|delete <id>
 lode shelf submit <id>[@version]
 lode changelist new|list|move|delete
 lode view show|include|exclude
-lode checks <rN | shelf-id[@version]>
+lode checks <rN | shelf-id[@version]>          (planned, with the checks module)
 lode mcp
-lode admin depot|user|agent|group|token|acl|webhook|gc|fsck …
+lode admin depot|user|agent|group|token|acl|gc|fsck …
+lode admin webhook …                           (planned, with the webhooks module)
 ```
 
 Every command honours the environment variables `LODE_SERVER` and `LODE_TOKEN_FILE` (a path
@@ -305,6 +310,23 @@ Exit codes: `0` success, `1` operation failed (conflict, rejected, not found), `
 - `lode status` on a 200,000-file workspace with no changes completes in under 5 s warm.
 - Server memory use is independent of file size (all content is streamed).
 - Supported platforms: Linux, Windows, macOS, for both client and server.
+
+## 10.1 Deviations in 0.1
+
+What the first build does differently from this specification, found in the T056 review.
+Everything else in sections 5–7 and 9 is covered by the scenario suite
+(`crates/lode-cli/tests/scenarios.rs`, one scenario per section) and the feature tests.
+
+| Section | Deviation |
+| --- | --- |
+| 6.5 Webhooks | Not implemented. The module is a scaffold; `[modules] webhooks = true` has no effect and `lode admin webhook` does not exist. Planned for M6. |
+| 6.6 Checks | Not implemented: no check reports, no `lode checks`, no MCP `list_checks`, and the `[checks]` submit gate is parsed in `.lodeconfig` but not enforced. Planned for M6. |
+| 5.4 Merge | After a single-revision pick (`-r`), a later full merge starts again from the merge base before the gap and re-applies the picked change. Usually `unchanged`; a conflict if the file changed since. Follows from the v1 base rule. |
+| 6.1 Locks | `lode switch` leaves this workspace's locks on the old branch (they are per branch) and reports them; it does not release them. |
+| 6.4 MCP | The server endpoint also offers `list_depots`, and `submit_shelf` to tokens with `write`. Large files, diffs and blame are cut off at fixed sizes (`truncated`, `next_line`). |
+| 7.3 Provenance | A submitted shelf's revision has `via` of the submit request and an extra `submitted_shelf` field (see 7.3). |
+| 10 Quality | `loded` times out stalled request bodies but not slow request headers. A server reachable from the internet should sit behind a reverse proxy; see `docs/HARDENING.md`. |
+| 10 Quality | The performance targets were measured on Linux only (`docs/BENCHMARKS.md`); Windows and macOS run the same tests in CI but not the benchmarks. |
 
 ## 11. Milestones
 

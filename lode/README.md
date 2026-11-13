@@ -10,6 +10,7 @@ and large binary files. Part of SimpleDevOps.
 - Using and running it: [docs/user-guide.html](docs/user-guide.html)
   ([PDF](docs/Lode-User-Guide.pdf))
 - Robustness tests and their findings: [docs/HARDENING.md](docs/HARDENING.md)
+- Performance against the SPEC targets: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 
 ## Installing
 
