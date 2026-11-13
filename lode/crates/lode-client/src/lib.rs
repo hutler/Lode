@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use lode_core::{DepotPath, ObjectId};
 use lode_proto::admin::{
-    AclList, AclRule, CreateGroupRequest, CreatePrincipalRequest, GroupList, GroupView,
-    MaintenanceReport, PatchPrincipalRequest, PrincipalList,
+    AccessCheck, AclList, AclRule, CreateGroupRequest, CreatePrincipalRequest, GroupList,
+    GroupView, MaintenanceReport, PatchPrincipalRequest, PrincipalList,
 };
 use lode_proto::auth::{
     CreateTokenRequest, CreateTokenResponse, Info, LoginRequest, LoginResponse, PrincipalView,
@@ -816,6 +816,25 @@ impl Client {
         .await
     }
 
+    /// `GET /admin/principals/{name}/tokens`: another principal's tokens.
+    pub async fn tokens_for(&self, name: &str) -> Result<TokenList> {
+        self.json(
+            Retry::Yes,
+            Method::GET,
+            self.url(&["admin", "principals", name, "tokens"])?,
+        )
+        .await
+    }
+
+    /// `DELETE /admin/principals/{name}/tokens/{id}`.
+    pub async fn delete_token_for(&self, name: &str, id: i64) -> Result<()> {
+        self.no_content(
+            Method::DELETE,
+            self.url(&["admin", "principals", name, "tokens", &id.to_string()])?,
+        )
+        .await
+    }
+
     /// `GET /admin/groups`.
     pub async fn groups(&self) -> Result<GroupList> {
         self.json(Retry::Yes, Method::GET, self.url(&["admin", "groups"])?)
@@ -864,6 +883,24 @@ impl Client {
     pub async fn add_acl_rule(&self, rule: &AclRule) -> Result<AclRule> {
         self.json_body(Retry::No, Method::POST, self.url(&["admin", "acl"])?, rule)
             .await
+    }
+
+    /// `GET /admin/acl/check`: the level the rules give `principal` on a depot, branch and
+    /// path.
+    pub async fn acl_check(
+        &self,
+        principal: &str,
+        depot: &str,
+        branch: &str,
+        path: &DepotPath,
+    ) -> Result<AccessCheck> {
+        let mut url = self.url(&["admin", "acl", "check"])?;
+        url.query_pairs_mut()
+            .append_pair("principal", principal)
+            .append_pair("depot", depot)
+            .append_pair("branch", branch)
+            .append_pair("path", path.as_str());
+        self.json(Retry::Yes, Method::GET, url).await
     }
 
     /// `DELETE /admin/acl/{id}`.

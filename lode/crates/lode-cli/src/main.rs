@@ -115,6 +115,8 @@ enum Command {
     Ls(cmd::history::LsArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
     Mcp(cmd::mcp::McpArgs),
+    /// Administer the server: depots, users, agents, groups, tokens, access rules.
+    Admin(cmd::admin::AdminArgs),
     /// Any other command runs `lode-<command>` from PATH.
     #[command(external_subcommand)]
     External(Vec<OsString>),
@@ -138,6 +140,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Login(a)) => cmd::login::login(&ctx, a).await,
         Some(Command::Logout) => cmd::login::logout(&ctx).await,
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
+        Some(Command::Admin(a)) => cmd::admin::admin(&ctx, a).await,
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
         Some(Command::View(c)) => cmd::view::view(&ctx, c).await,
         Some(Command::Status(a)) => cmd::status::status(&ctx, a).await,

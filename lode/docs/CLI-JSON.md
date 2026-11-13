@@ -330,6 +330,37 @@ Serves the workspace over MCP on stdin and stdout until stdin closes; prints not
 stdout. Each tool's result is the JSON above for the matching command, without `ok`; a
 failure is a tool error carrying `{code, message, details?}`. See `docs/MCP.md`.
 
+### `lode admin …`
+
+Server administration through the API; the token needs the `admin` scope (an agent's owner
+may also manage that agent's tokens).
+
+| Command | `--json` output |
+| --- | --- |
+| `depot create <name>` / `depot list` | the depot / `{ "depots": [ { "name", "created_at" } ] }` |
+| `user create <name> [--display-name D] [--password-stdin]` | the principal |
+| `user list` / `agent list` | `{ "principals": [principal] }`, users or agents only |
+| `user disable <name> [--enable]` / `agent disable …` | the principal |
+| `user passwd <name> [--password-stdin]` | the principal |
+| `agent create <name> --owner <user> [--display-name D]` | the principal |
+| `group create <name>` / `group list` | `{ "name", "members" }` / `{ "groups": [ … ] }` |
+| `group add|remove <group> <member>` | `{ "group", "added"|"removed" }` |
+| `token create [--for P] [--name N] [--scope S,…] [--expires-in-days D]` | `{ "token", "info": token }` |
+| `token list [--for P]` / `token revoke <id> [--for P]` | `{ "tokens": [token] }` / `{ "revoked": id }` |
+| `acl list` | `{ "rules": [rule] }` in evaluation order |
+| `acl add <allow|deny> <read|write|admin> <subject> [--depot D] [--branch G] [--path G] [--check P B PATH]` | the rule, plus `"check"` with `--check` |
+| `acl remove <id>` | `{ "removed": id }` |
+| `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null }` |
+| `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
+
+A subject is `user:NAME` (or a bare name), `group:NAME` or `all`. Branch and path patterns
+default to `**` and are checked before anything is sent (`usage` on a bad one). Passwords are
+prompted for twice in a terminal, or read from stdin with `--password-stdin` (required with
+`--json`). A new token's value goes to stdout once (alone on the line in human output, the
+rest on stderr); listings never show values. `fsck` exits 1 with code `fsck_failed` and the
+report as `details` when it finds problems. `acl check` evaluates the rules as for a token
+with every scope; a real token's scopes can only narrow that.
+
 ### External commands
 
 `lode foo …` runs `lode-foo …` from `PATH` when `foo` is not a built-in command. It inherits

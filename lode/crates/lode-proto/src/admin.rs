@@ -144,3 +144,19 @@ pub struct MaintenanceReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub problems: Vec<String>,
 }
+
+/// `GET /admin/acl/check?principal=&depot=&branch=&path=`: what the rules give a principal,
+/// as with a token that has every scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessCheck {
+    /// Principal checked.
+    pub principal: String,
+    /// Depot.
+    pub depot: String,
+    /// Branch.
+    pub branch: String,
+    /// Path.
+    pub path: lode_core::DepotPath,
+    /// The level granted; `None` when the path is invisible.
+    pub level: Option<AccessLevel>,
+}

@@ -8,18 +8,20 @@ use axum::routing::{delete, get};
 use axum::{Json, Router};
 use lode_core::PathGlobSet;
 use lode_meta::{AclId, AclRow, MetaError, Reads};
-use lode_proto::admin::{AccessLevel, AclEffect, AclList, AclRule, AclSubject};
+use lode_proto::admin::{AccessCheck, AccessLevel, AclEffect, AclList, AclRule, AclSubject};
 use lode_proto::consts::paths;
 
 use crate::auth::Caller;
 use crate::error::{ApiError, ApiResult};
-use crate::extract::{ApiJson, ApiPath};
+use crate::extract::{ApiJson, ApiPath, ApiQuery};
+use crate::perm::Level;
 use crate::state::AppState;
 
 /// The access rule administration routes.
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(paths::ADMIN_ACL, get(list).post(add))
+        .route(paths::ADMIN_ACL_CHECK, get(check))
         .route(paths::ADMIN_ACL_RULE, delete(remove))
 }
 
@@ -166,4 +168,69 @@ async fn remove(
         })?;
     state.permissions().reload(state.meta()).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn check(
+    State(state): State<AppState>,
+    caller: Caller,
+    q: ApiQuery,
+) -> ApiResult<Json<AccessCheck>> {
+    state.permissions().require_server_admin(&caller)?;
+    let need = |k: &str| {
+        q.get(k)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| ApiError::invalid_request(format!("`{k}` is required")))
+    };
+    let (name, depot) = (need("principal")?, need("depot")?);
+    let branch = q
+        .get("branch")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main")
+        .to_owned();
+    let path = q
+        .path("path")?
+        .ok_or_else(|| ApiError::invalid_request("`path` is required"))?;
+    let (n, d) = (name.clone(), depot.clone());
+    let found = state
+        .meta()
+        .read(move |tx| {
+            let Some(p) = tx.principal_by_name(&n)? else {
+                return Ok(Err(ApiError::not_found(format!("no principal `{n}`"))));
+            };
+            let Some(depot) = tx.depot_by_name(&d)? else {
+                return Ok(Err(ApiError::not_found(format!("no depot `{d}`"))));
+            };
+            let groups = tx.groups_of(p.id)?;
+            Ok(Ok((p, depot, groups)))
+        })
+        .await??;
+    let (principal, depot_row, groups) = found;
+    let every: Vec<String> = ["read", "write", "admin"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    let subject = Caller {
+        scopes: state.scopes().effective(&every),
+        principal,
+        token_id: lode_meta::TokenId(0),
+        groups,
+        via: lode_proto::commit::Via::Api,
+    };
+    let level = state
+        .permissions()
+        .depot(&subject, depot_row.id)
+        .level(&branch, &path);
+    Ok(Json(AccessCheck {
+        principal: name,
+        depot,
+        branch,
+        path,
+        level: match level {
+            Level::None => None,
+            Level::Read => Some(AccessLevel::Read),
+            Level::Write => Some(AccessLevel::Write),
+            Level::Admin => Some(AccessLevel::Admin),
+        },
+    }))
 }
