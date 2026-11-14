@@ -1743,3 +1743,93 @@ select {
   margin-top: -8px;
   padding-left: 21px;
 }
+
+/* Checks */
+
+.check-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.check-success {
+  background: #e3f4e8;
+  color: #23753b;
+}
+
+.check-pending {
+  background: #fdf3dc;
+  color: #8a5a00;
+}
+
+.check-cancelled {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.check-error,
+.check-failure {
+  background: #fdecea;
+  color: #b3261e;
+}
+
+.check-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.check-state {
+  flex: none;
+  min-width: 84px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.check-main {
+  min-width: 0;
+  font-size: 13px;
+}
+
+.check-name {
+  font-size: 12.5px;
+}
+
+.check-summary {
+  margin: 2px 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .check-success {
+    background: #1d3a26;
+    color: #8fd6a3;
+  }
+
+  .check-pending {
+    background: #3d3018;
+    color: #f0c77a;
+  }
+
+  .check-error,
+  .check-failure {
+    background: #4a1f1c;
+    color: #f2a39c;
+  }
+}

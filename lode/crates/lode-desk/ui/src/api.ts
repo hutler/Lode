@@ -240,6 +240,23 @@ export interface MissingCheck {
   reported_by?: string;
 }
 
+/** One check of `lode checks --json`: a result an outside system reported. */
+export interface CheckInfo {
+  name: string;
+  state: "pending" | "success" | "failure" | "error" | "cancelled";
+  summary?: string;
+  url?: string;
+  reporter: { name: string; kind: "user" | "agent"; owner?: string };
+  updated_at: string;
+}
+
+/** The checks of several targets (`rN`, `ID@VERSION`); `available` is false when the server
+ * has no checks module. */
+export interface ChecksResult {
+  available: boolean;
+  checks: Record<string, CheckInfo[]>;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -302,6 +319,10 @@ export interface Backend {
   shelfDelete(workspace: string, id: number): Promise<void>;
   /** Applies a shelf's changes to the workspace. */
   unshelve(workspace: string, id: number): Promise<UnshelveResult>;
+  /** The checks of each target: `rN` for a revision, `ID@VERSION` for a shelf. */
+  checks(workspace: string, targets: string[]): Promise<ChecksResult>;
+  /** Opens a web link in the system browser. */
+  openLink(url: string): Promise<void>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
   watch(workspace: string): Promise<void>;
   unwatch(workspace: string): Promise<void>;
@@ -375,6 +396,10 @@ async function tauriBackend(): Promise<Backend> {
       await invoke("shelf_delete", { workspace, id });
     },
     unshelve: (workspace, id) => invoke("unshelve", { workspace, id }),
+    checks: (workspace, targets) => invoke("checks", { workspace, targets }),
+    openLink: async (url) => {
+      await invoke("open_link", { url });
+    },
     watch: (workspace) => invoke("watch", { workspace }),
     unwatch: (workspace) => invoke("unwatch", { workspace }),
     onChanged: (listener) => subscribe<string>("lode://changed", listener),

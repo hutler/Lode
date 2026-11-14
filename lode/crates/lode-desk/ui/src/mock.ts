@@ -18,6 +18,7 @@ import type {
 } from "./api";
 import { demoRevisionDiff, demoWorkingDiff } from "./mockDiff";
 import { demoBlame, demoHead, demoLog, demoRevision } from "./mockHistory";
+import { demoChecks } from "./mockChecks";
 import { demoShelves, type MockShelf } from "./mockShelves";
 
 export interface MockOptions {
@@ -35,6 +36,8 @@ export interface MockOptions {
   noLocks?: boolean;
   /** The server has no shelves module. */
   noShelves?: boolean;
+  /** The server has no checks module. */
+  noChecks?: boolean;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -629,6 +632,15 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       changed.forEach((l) => l(workspace));
       return { shelf: id, version: s.version, files, counts };
     },
+    checks: async (workspace, targets) => {
+      const info = workspaces.get(workspace);
+      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+      if (opts.noChecks) return { available: false, checks: {} };
+      const checks: Record<string, ReturnType<typeof demoChecks>> = {};
+      for (const t of targets) if (info.depot === "skyfall") checks[t] = demoChecks(t);
+      return { available: true, checks };
+    },
+    openLink: async () => {},
     bumpShelf: (workspace, id) => {
       const s = shelfOf(workspace, id);
       s.version += 1;

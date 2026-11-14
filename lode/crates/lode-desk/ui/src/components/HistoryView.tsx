@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-import { asOpError, backend, type OpError, type Revision, type WorkspaceInfo } from "../api";
+import { asOpError, backend, type CheckInfo, type OpError, type Revision, type WorkspaceInfo } from "../api";
+import { useChecks } from "../checks";
 import { LANE, layoutGraph, type GraphRow } from "../graph";
+import { CheckBadge, ChecksList } from "./Checks";
 import { ErrorBanner } from "./ErrorBanner";
 
 interface Props {
@@ -182,6 +184,11 @@ export function HistoryView({ info, path, initialRev, onPath, onBlame, onDiff }:
   const first = Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN);
   const last = Math.min(revisions.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN);
 
+  // Checks of the rows on screen, and of the selected revision.
+  const targets = revisions.slice(first, last).map((r) => `r${r.rev}`);
+  if (selected !== null && !targets.includes(`r${selected}`)) targets.push(`r${selected}`);
+  const checks = useChecks(info.root, targets);
+
   // Load the next page as the end of the loaded rows comes near.
   useEffect(() => {
     if (more && !loading && revisions.length - last < PREFETCH) {
@@ -275,6 +282,7 @@ export function HistoryView({ info, path, initialRev, onPath, onBlame, onDiff }:
                   </span>
                   <span className="rev-badges">
                     <Badges r={r} />
+                    <CheckBadge checks={checks.get(`r${r.rev}`)} />
                   </span>
                   <span className="rev-author">{r.author.name}</span>
                   <span className="rev-date">{formatDate(r.created_at)}</span>
@@ -288,7 +296,7 @@ export function HistoryView({ info, path, initialRev, onPath, onBlame, onDiff }:
 
       <aside className="details" aria-label="Revision">
         {detail ? (
-          <RevisionDetails r={detail} branch={info.branch} onPath={onPath} onBlame={onBlame} onDiff={onDiff} />
+          <RevisionDetails r={detail} checks={checks.get(`r${detail.rev}`)} branch={info.branch} onPath={onPath} onBlame={onBlame} onDiff={onDiff} />
         ) : (
           <p className="muted small">Select a revision to see what it changed.</p>
         )}
@@ -301,12 +309,14 @@ const ACTION: Record<string, string> = { add: "A", modify: "M", delete: "D" };
 
 function RevisionDetails({
   r,
+  checks,
   branch,
   onPath,
   onBlame,
   onDiff,
 }: {
   r: Revision;
+  checks: CheckInfo[] | undefined;
   branch: string;
   onPath: (path: string) => void;
   onBlame: (path: string, rev: number) => void;
@@ -374,6 +384,7 @@ function RevisionDetails({
           </>
         )}
       </dl>
+      <ChecksList checks={checks} />
       <h3 className="details-sub">
         Changed files <span className="group-count">{r.changes?.length ?? 0}</span>
       </h3>

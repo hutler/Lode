@@ -867,3 +867,92 @@ required = [{ name = "ci/build", reporter = "ci" }, { name = "ci/test", reporter
         "{err:?}"
     );
 }
+
+#[tokio::test]
+async fn checks_of_revisions_are_read_for_the_rows_on_screen() {
+    let server = TestServer::start_with(TestServerOptions {
+        configure: Box::new(|c| c.modules.checks = true),
+    })
+    .await;
+    let s = setup_on(server).await;
+    let ci = s.server.create_user("ci", &["read", "checks"]).await;
+    s.server
+        .acl("game", "ci", "*", "**", AclEffect::Allow, AccessLevel::Read)
+        .await;
+    let root = checked_out(&s).await;
+    let head = s.desk.log(root.clone(), None, None, 1).await.unwrap()["revisions"][0]["rev"]
+        .as_u64()
+        .unwrap();
+    for (name, state, summary) in [
+        ("ci/build", CheckState::Success, None),
+        ("ci/test", CheckState::Failure, Some("2 tests failed")),
+    ] {
+        s.server
+            .client(&ci)
+            .report_check(
+                "game",
+                &ReportCheckRequest {
+                    target: CheckTarget {
+                        kind: CheckTargetKind::Revision,
+                        id: head,
+                        version: None,
+                    },
+                    name: name.into(),
+                    state,
+                    summary: summary.map(Into::into),
+                    url: Some("https://ci.example.com/42".into()),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let r = s
+        .desk
+        .checks(root.clone(), vec![format!("r{head}"), "r999".into()])
+        .await
+        .unwrap();
+    assert_eq!(r["available"], true, "{r}");
+    let mut on_head: Vec<(String, String)> = r["checks"][format!("r{head}")]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["name"].as_str().unwrap().to_owned(),
+                c["state"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    on_head.sort();
+    assert_eq!(
+        on_head,
+        [
+            ("ci/build".to_owned(), "success".to_owned()),
+            ("ci/test".to_owned(), "failure".to_owned())
+        ]
+    );
+    let test = r["checks"][format!("r{head}")]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ci/test")
+        .unwrap()
+        .clone();
+    assert_eq!(test["summary"], "2 tests failed");
+    assert_eq!(test["reporter"]["name"], "ci");
+    assert_eq!(test["url"], "https://ci.example.com/42");
+    // A revision nobody reported on has none.
+    assert!(
+        r["checks"]["r999"].as_array().is_none_or(|a| a.is_empty()),
+        "{r}"
+    );
+}
+
+#[tokio::test]
+async fn without_the_checks_module_there_are_no_badges_and_no_error() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let r = s.desk.checks(root, vec!["r1".into()]).await.unwrap();
+    assert_eq!(r, serde_json::json!({ "available": false, "checks": {} }));
+}

@@ -4,6 +4,7 @@ import {
   asOpError,
   backend,
   type ChangeView,
+  type CheckInfo,
   type FileDiff,
   type MissingCheck,
   type OpError,
@@ -12,6 +13,8 @@ import {
   type UnshelveResult,
   type WorkspaceInfo,
 } from "../api";
+import { useChecks } from "../checks";
+import { CheckBadge, ChecksList } from "./Checks";
 import { FileDiffBody, savedLayout, saveLayout, type Layout } from "./DiffView";
 import { ErrorBanner } from "./ErrorBanner";
 import { formatDate } from "./HistoryView";
@@ -132,6 +135,11 @@ export function ShelvesView({ info, onUnshelved }: Props) {
     };
   }, [info.server]);
 
+  // Checks belong to one version of a shelf.
+  const targets = (shelves ?? []).map((s) => `${s.id}@${s.version}`);
+  if (detail && !targets.includes(`${detail.id}@${detail.version}`)) targets.push(`${detail.id}@${detail.version}`);
+  const checks = useChecks(info.root, targets);
+
   const reload = async () => {
     await load();
     await loadDetail(selected);
@@ -195,6 +203,7 @@ export function ShelvesView({ info, onUnshelved }: Props) {
                   {s.owner.kind === "agent" && <span className="tag agent">agent</span>}
                   <span>v{s.version}</span>
                   <span>{formatDate(s.updated_at)}</span>
+                  <CheckBadge checks={checks.get(`${s.id}@${s.version}`)} />
                 </div>
               </li>
             ))}
@@ -206,6 +215,7 @@ export function ShelvesView({ info, onUnshelved }: Props) {
                 info={info}
                 shelf={detail}
                 mine={detail.owner.name === me}
+                checks={checks.get(`${detail.id}@${detail.version}`)}
                 onChanged={async (msg) => {
                   setNotice(msg);
                   await reload();
@@ -227,6 +237,7 @@ function ShelfDetail({
   info,
   shelf,
   mine,
+  checks,
   onChanged,
   onReload,
   onUnshelved,
@@ -234,6 +245,7 @@ function ShelfDetail({
   info: WorkspaceInfo;
   shelf: ShelfInfo;
   mine: boolean;
+  checks: CheckInfo[] | undefined;
   onChanged: (message: string) => Promise<void>;
   onReload: () => void;
   onUnshelved?: () => void;
@@ -324,6 +336,7 @@ function ShelfDetail({
           </div>
         ))}
       </dl>
+      <ChecksList checks={checks} />
       <div className="shelf-files-head">
         <h3 className="details-sub">
           Changed files <span className="group-count">{changes.length}</span>

@@ -8,13 +8,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lode_ops::cmd::{
-    changelist, checkout, commit, diff, files, history, info, locks, login, revert, shelve, status,
+    changelist, checkout, checks, commit, diff, files, history, info, locks, login, revert, shelve,
+    status,
 };
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
 use lode_ops::output::Ui;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::watch::{Watcher, QUIET};
 
@@ -685,6 +686,39 @@ impl Desk {
             .await
     }
 
+    /// `lode checks` of several targets (`rN` for a revision, `ID@VERSION` for a shelf), for
+    /// the rows on screen: `{"available": bool, "checks": {target: [check, ...]}}`. A server
+    /// without the checks module gives `available: false` rather than an error, and a target
+    /// the server does not know is left out.
+    pub async fn checks(
+        &self,
+        workspace: String,
+        targets: Vec<String>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            let mut found = serde_json::Map::new();
+            for target in targets {
+                let args = checks::ChecksArgs {
+                    target: target.clone(),
+                    depot: None,
+                };
+                match checks::checks(&ctx, args).await {
+                    Ok(mut v) => {
+                        found.insert(target, v["checks"].take());
+                    }
+                    Err(e) if e.code == "module_disabled" => {
+                        return Ok(json!({ "available": false, "checks": {} }));
+                    }
+                    Err(e) if e.code == "not_found" => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok(json!({ "available": true, "checks": found }))
+        })
+        .await
+    }
+
     /// Watches `workspace` for changes until [`Desk::unwatch`]; a second call is a no-op.
     pub fn watch(&self, workspace: String) -> Result<(), ErrorView> {
         let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
@@ -756,5 +790,82 @@ impl Desk {
         let mut list = self.recent();
         list.retain(|r| r.path != path);
         self.save_recent(&list)
+    }
+}
+
+/// Whether `url` may be handed to the system browser: `http` or `https`, with no spaces or
+/// control characters that a launcher could read as more than one argument.
+pub fn is_web_link(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"));
+    rest.is_some_and(|r| !r.is_empty())
+        && url.len() <= 2048
+        && !url
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"')
+}
+
+/// Opens a web link (a check's details) in the system browser.
+pub fn open_link(url: &str) -> Result<(), ErrorView> {
+    if !is_web_link(url) {
+        return Err(ErrorView {
+            code: "usage".into(),
+            message: format!("`{url}` is not a web link"),
+            details: Value::Null,
+        });
+    }
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("rundll32.exe");
+        c.arg("url.dll,FileProtocolHandler").arg(url);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    // Reaped on a thread of its own, so a launcher that exits leaves nothing behind.
+    cmd.spawn()
+        .map(|mut child| {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        })
+        .map_err(|e| ErrorView {
+            code: "failed".into(),
+            message: format!("could not open the browser: {e}"),
+            details: Value::Null,
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_web_link;
+
+    #[test]
+    fn only_plain_web_links_are_opened() {
+        assert!(is_web_link("https://ci.example.com/build/42"));
+        assert!(is_web_link("HTTP://ci.example.com/?a=1&b=2"));
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "https://",
+            "https://a b",
+            "https://a\"b",
+            "https://a\nb",
+            "calc.exe",
+        ] {
+            assert!(!is_web_link(bad), "{bad}");
+        }
     }
 }

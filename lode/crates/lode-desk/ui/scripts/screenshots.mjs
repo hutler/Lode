@@ -91,6 +91,13 @@ const scenes = {
     await page.getByRole("option", { name: /^r1478 / }).click();
     await page.getByRole("list", { name: "Changed files" }).waitFor();
   },
+  async checks(page) {
+    // A revision whose tests failed: the badge on the row and each check in the details.
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByRole("option", { name: /^r1481 / }).click();
+    await page.getByRole("list", { name: "Checks" }).waitFor();
+  },
   async "history-release"(page) {
     // A release branch: its own revisions, then main's below the branch point.
     await page.getByText("D:\\Work\\Skyfall-release", { exact: true }).click();

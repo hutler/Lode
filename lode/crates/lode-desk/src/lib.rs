@@ -270,6 +270,20 @@ async fn unshelve(desk: State<'_, Desk>, workspace: String, id: u64) -> Result<V
 }
 
 #[tauri::command]
+async fn checks(
+    desk: State<'_, Desk>,
+    workspace: String,
+    targets: Vec<String>,
+) -> Result<Value, ErrorView> {
+    desk.checks(workspace, targets).await
+}
+
+#[tauri::command]
+fn open_link(url: String) -> Result<(), ErrorView> {
+    desk::open_link(&url)
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -333,6 +347,8 @@ pub fn run() -> Result<(), tauri::Error> {
             shelf_submit,
             shelf_delete,
             unshelve,
+            checks,
+            open_link,
             watch,
             unwatch,
         ])
