@@ -23,8 +23,8 @@ pub enum MetaError {
         version: u32,
         /// Migration name.
         name: String,
-        /// SQLite's error.
-        source: rusqlite::Error,
+        /// The database's error.
+        source: Box<MetaError>,
     },
     /// A unique constraint was violated, such as a duplicate name.
     #[error("already exists: {0}")]
@@ -47,14 +47,26 @@ pub enum MetaError {
 pub type Result<T, E = MetaError> = std::result::Result<T, E>;
 
 /// Maps a unique-constraint violation to [`MetaError::AlreadyExists`].
-pub(crate) fn unique(what: &str) -> impl FnOnce(rusqlite::Error) -> MetaError + '_ {
-    move |e| match &e {
-        rusqlite::Error::SqliteFailure(f, _)
-            if f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
-                || f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY =>
-        {
+pub fn unique(what: &str) -> impl FnOnce(MetaError) -> MetaError + '_ {
+    move |e| {
+        if e.is_unique_violation() {
             MetaError::AlreadyExists(what.to_owned())
+        } else {
+            e
         }
-        _ => MetaError::Sqlite(e),
+    }
+}
+
+impl MetaError {
+    /// Whether this is a unique or primary-key constraint violation.
+    pub fn is_unique_violation(&self) -> bool {
+        match self {
+            MetaError::Sqlite(rusqlite::Error::SqliteFailure(f, _)) => {
+                f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                    || f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+            }
+            MetaError::Migration { source, .. } => source.is_unique_violation(),
+            _ => false,
+        }
     }
 }

@@ -11,6 +11,7 @@ mod error;
 mod migrate;
 mod queries;
 mod rows;
+mod sql;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -23,6 +24,7 @@ pub use error::{MetaError, Result};
 pub use migrate::{schema_version, Migration, MigrationSet, CORE_MIGRATIONS};
 pub use queries::{in_chain, Reads};
 pub use rows::*;
+pub use sql::{to_postgres_params, Cell, Dialect, FromCell, Row, Sql, Val};
 
 /// Settings for [`MetaStore::open`].
 #[derive(Debug, Clone)]
@@ -160,23 +162,27 @@ impl MetaStore {
         T: Send + 'static,
         F: FnOnce(&WriteTx<'_>) -> Result<T> + Send + 'static,
     {
-        let writer = self.writer.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut guard = writer.lock().map_err(|_| MetaError::Poisoned)?;
-            let tx = WriteTx::begin(&mut guard)?;
-            let out = f(&tx)?;
-            tx.commit()?;
-            Ok(out)
-        })
-        .await
-        .map_err(|e| MetaError::Setup(format!("write task failed: {e}")))?
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.write_blocking(f))
+            .await
+            .map_err(|e| MetaError::Setup(format!("write task failed: {e}")))?
+    }
+
+    /// [`MetaStore::write`] on the calling thread: runs `f` in a write transaction,
+    /// committing if it returns `Ok` and rolling back otherwise.
+    pub fn write_blocking<T>(&self, f: impl FnOnce(&WriteTx<'_>) -> Result<T>) -> Result<T> {
+        let mut guard = self.writer.lock().map_err(|_| MetaError::Poisoned)?;
+        let tx = WriteTx::begin(&mut guard)?;
+        let out = f(&tx)?;
+        tx.commit()?;
+        Ok(out)
     }
 
     /// Gives `f` the writer connection on the calling thread, for code that manages its own
     /// transaction (the commit engine, tests). Blocks other writers until `f` returns.
-    pub fn with_writer<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
-        let mut guard = self.writer.lock().map_err(|_| MetaError::Poisoned)?;
-        f(&mut guard)
+    pub fn with_writer<T>(&self, f: impl FnOnce(&dyn Sql) -> Result<T>) -> Result<T> {
+        let guard = self.writer.lock().map_err(|_| MetaError::Poisoned)?;
+        f(&*guard)
     }
 
     /// Copies the live database to `dest` with SQLite's online backup API. Readers and the
@@ -211,7 +217,7 @@ pub struct WriteTx<'c> {
 
 impl<'c> WriteTx<'c> {
     /// Starts an immediate (write-locking) transaction on the writer connection.
-    pub fn begin(conn: &'c mut Connection) -> Result<Self> {
+    pub(crate) fn begin(conn: &'c mut Connection) -> Result<Self> {
         Ok(Self {
             tx: conn.transaction_with_behavior(TransactionBehavior::Immediate)?,
         })
@@ -224,14 +230,14 @@ impl<'c> WriteTx<'c> {
 
     /// Raw connection access for module tables (`mod_<name>_*`). Core tables must be changed
     /// only through the typed methods.
-    pub fn conn(&self) -> &Connection {
-        &self.tx
+    pub fn conn(&self) -> &dyn Sql {
+        &*self.tx
     }
 }
 
 impl ReadTx<'_> {
     /// Raw connection access for module tables.
-    pub fn conn(&self) -> &Connection {
-        &self.tx
+    pub fn conn(&self) -> &dyn Sql {
+        &*self.tx
     }
 }

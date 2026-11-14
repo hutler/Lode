@@ -211,8 +211,17 @@ connection behind a mutex, a pool of read-only connections, all calls via `spawn
 All writers are serialized, which is what makes commits atomic and is ample for 100 users
 because blobs are uploaded before the write transaction begins.
 
-`MetaStore` is a concrete type with a narrow method surface, written so a Postgres
-implementation can be added later behind a trait without touching callers.
+`MetaStore` is a concrete type with a narrow method surface. Every statement, in the core
+and in modules, goes through the object-safe trait `lode_meta::Sql` (T152): `execute`,
+`query`, `query_opt`, `query_one` and `value` on `&dyn Sql`, with parameters built by
+`vals![…]` (`i64`, `&str`, `&[u8]`, `Option<…>`, `bool`) and results read from an owned
+`Row` with `row.get::<T>(i)`. `ReadTx::conn()`, `WriteTx::conn()` and `Reads::db()` return
+`&dyn Sql`; no crate but `lode-meta` names a database driver (a test enforces it; the
+client's local SQLite in `lode-workspace` and `lode-ops` is separate). Statements are
+written in a portable subset: numbered `?1` parameters (rewritten to `$1` for Postgres),
+`RETURNING id` instead of `last_insert_rowid()`, `ON CONFLICT … DO NOTHING/UPDATE` instead
+of `INSERT OR IGNORE/REPLACE`, and no SQLite-only functions. Where a statement must differ,
+`Sql::dialect()` tells which one to run.
 
 Migrations are numbered SQL files embedded in the binary; `schema_version` table; the server
 refuses to start on a newer schema than it knows. Modules own tables prefixed `mod_<name>_`
@@ -570,7 +579,7 @@ pub trait Module: Send + Sync + 'static {
 **Module surface (reviewed in T056).** The locks, shelves and MCP modules reach the server only
 through `ModuleCtx` (auth, depots, commits, blobs, meta, tools, limits, clock), the commit
 hooks (`CommitCtx`, `CommittedCtx`) and the `Module` trait. Their SQL touches only their own
-`mod_<name>_` tables; core data is read through `lode_meta::Reads` and written only through
+`mod_<name>_` tables and runs through `lode_meta::Sql` in the portable subset of §4.1; core data is read through `lode_meta::Reads` and written only through
 `Commits`, `set_rev_meta` and the event outbox. No module uses `AppState`, the permission
 engine's internals or the read handlers. `Blobs::store()` and `Meta::store()` hand out the raw
 stores, so the rule is kept by review rather than by the type system; a narrower surface is a

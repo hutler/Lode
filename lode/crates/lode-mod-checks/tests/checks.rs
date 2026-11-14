@@ -27,12 +27,14 @@ async fn events(h: &H) -> Vec<Value> {
     h.state
         .meta()
         .read(|tx| {
-            let mut st = tx
-                .db()
-                .prepare("SELECT payload FROM outbox WHERE kind = 'check.updated' ORDER BY id")?;
-            let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+            let rows = tx.db().query(
+                "SELECT payload FROM outbox WHERE kind = 'check.updated' ORDER BY id",
+                lode_meta::vals![],
+                |r| r.get::<String>(0),
+            )?;
             Ok(rows
-                .map(|r| serde_json::from_str(&r.unwrap()).unwrap())
+                .iter()
+                .map(|r| serde_json::from_str(r).unwrap())
                 .collect())
         })
         .await
@@ -295,11 +297,10 @@ async fn a_disabled_module_has_no_endpoints_and_the_scope_does_no_harm() {
         .state
         .meta()
         .read(|tx| {
-            Ok(tx.db().query_row(
+            tx.db().value(
                 "SELECT count(*) FROM sqlite_master WHERE name LIKE 'mod_checks_%'",
-                [],
-                |r| r.get(0),
-            )?)
+                lode_meta::vals![],
+            )
         })
         .await
         .unwrap();

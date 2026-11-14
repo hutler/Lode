@@ -154,7 +154,7 @@ impl Module for Example {
         tx.conn()
             .execute(
                 "INSERT INTO mod_example_seen (rev) VALUES (?1)",
-                [ctx.rev as i64],
+                lode_meta::vals![ctx.rev as i64],
             )
             .map_err(|_| ApiError::internal())?;
         if ctx
@@ -343,9 +343,7 @@ async fn in_commit_failure_rolls_everything_back() {
     let rows: i64 = h
         .state
         .meta()
-        .with_writer(
-            |c| Ok(c.query_row("SELECT count(*) FROM mod_example_seen", [], |r| r.get(0))?),
-        )
+        .with_writer(|c| c.value("SELECT count(*) FROM mod_example_seen", lode_meta::vals![]))
         .unwrap();
     assert_eq!(rows, 0);
     let rev2 = h
@@ -431,11 +429,10 @@ async fn disabled_module_contributes_nothing() {
         .state
         .meta()
         .with_writer(|c| {
-            Ok(c.query_row(
+            c.value(
                 "SELECT count(*) FROM sqlite_master WHERE name LIKE 'mod_example_%'",
-                [],
-                |r| r.get(0),
-            )?)
+                lode_meta::vals![],
+            )
         })
         .unwrap();
     assert_eq!(tables, 0);

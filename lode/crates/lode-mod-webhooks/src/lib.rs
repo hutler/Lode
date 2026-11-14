@@ -18,6 +18,7 @@ use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
 use lode_core::{DepotId, ErrorCode, PathGlobSet};
+use lode_meta::{vals, Row};
 use lode_meta::{MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads, WriteTx};
 use lode_proto::consts::paths;
 use lode_proto::webhooks::{
@@ -29,7 +30,6 @@ use lode_server::auth::{ms_to_time, SCOPE_ADMIN};
 use lode_server::module::{BoxError, BoxFuture, Event, Module, ModuleCtx, Stop};
 use lode_server::{ApiError, ApiJson, ApiPath, ApiResult, Caller};
 use rand::RngCore;
-use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 use sha2::Sha256;
 
@@ -154,17 +154,17 @@ impl Webhooks {
             .meta()
             .store()
             .write(move |tx| {
-                Ok(tx.conn().execute(
+                tx.conn().execute(
                     "DELETE FROM mod_webhooks_delivery
                      WHERE state != 'pending' AND created_at < ?1",
-                    [now - RETENTION_MS],
-                )?)
+                    vals![now - RETENTION_MS],
+                )
             })
             .await?;
         let heads = ctx
             .meta()
             .read(move |tx| {
-                let mut st = tx.db().prepare_cached(
+                tx.db().query(
                     "SELECT d.id, d.event, d.body, d.attempts, d.next_attempt_at,
                             d.first_attempt_at, h.url, h.secret
                      FROM mod_webhooks_delivery d
@@ -172,20 +172,20 @@ impl Webhooks {
                      WHERE h.active = 1 AND d.state = 'pending'
                        AND d.id = (SELECT min(id) FROM mod_webhooks_delivery
                                    WHERE hook_id = d.hook_id AND state = 'pending')",
-                )?;
-                let rows = st.query_map([], |r| {
-                    Ok(Due {
-                        id: r.get(0)?,
-                        event: r.get(1)?,
-                        body: r.get(2)?,
-                        attempts: r.get(3)?,
-                        next_attempt_at: r.get(4)?,
-                        first_attempt_at: r.get(5)?,
-                        url: r.get(6)?,
-                        secret: r.get(7)?,
-                    })
-                })?;
-                Ok(rows.collect::<Result<Vec<_>, _>>()?)
+                    vals![],
+                    |r| {
+                        Ok(Due {
+                            id: r.get(0)?,
+                            event: r.get(1)?,
+                            body: r.get(2)?,
+                            attempts: r.get(3)?,
+                            next_attempt_at: r.get(4)?,
+                            first_attempt_at: r.get(5)?,
+                            url: r.get(6)?,
+                            secret: r.get(7)?,
+                        })
+                    },
+                )
             })
             .await?;
         let due: Vec<Due> = heads
@@ -241,29 +241,28 @@ impl Webhooks {
             .meta()
             .store()
             .write(move |tx| {
-                let mut st = tx.conn().prepare_cached(
-                    "UPDATE mod_webhooks_delivery
-                     SET state = ?2, attempts = ?3, next_attempt_at = ?4, first_attempt_at = ?5,
-                         last_status = ?6, last_error = ?7
-                     WHERE id = ?1 AND state = 'pending'",
-                )?;
                 for u in &updates {
-                    st.execute(params![
-                        u.id,
-                        u.state.as_str(),
-                        u.attempts,
-                        u.next,
-                        u.first,
-                        u.status,
-                        u.error
-                    ])?;
+                    tx.conn().execute(
+                        "UPDATE mod_webhooks_delivery
+                         SET state = ?2, attempts = ?3, next_attempt_at = ?4, first_attempt_at = ?5,
+                             last_status = ?6, last_error = ?7
+                         WHERE id = ?1 AND state = 'pending'",
+                        vals![
+                            u.id,
+                            u.state.as_str(),
+                            u.attempts,
+                            u.next,
+                            u.first,
+                            u.status,
+                            &u.error
+                        ],
+                    )?;
                 }
-                let next: Option<i64> = tx.conn().query_row(
+                let next: Option<i64> = tx.conn().value(
                     "SELECT min(coalesce(d.next_attempt_at, 0)) FROM mod_webhooks_delivery d
                      JOIN mod_webhooks_hook h ON h.id = d.hook_id
                      WHERE h.active = 1 AND d.state = 'pending'",
-                    [],
-                    |r| r.get(0),
+                    vals![],
                 )?;
                 Ok(next)
             })
@@ -370,10 +369,6 @@ async fn attempt(client: Option<&reqwest::Client>, d: &Due) -> Result<u16, (Opti
     }
 }
 
-fn sql(e: rusqlite::Error) -> MetaError {
-    MetaError::from(e)
-}
-
 fn principal_ref(tx: &dyn Reads, id: i64) -> Result<PrincipalRef, MetaError> {
     let p = tx.principal(PrincipalId(id))?;
     Ok(match p {
@@ -411,13 +406,13 @@ struct HookRow {
 
 const HOOK_COLS: &str = "id, url, events, branch_glob, active, created_by, created_at";
 
-fn hook_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HookRow> {
+fn hook_row(r: &Row) -> Result<HookRow, MetaError> {
     Ok(HookRow {
         id: r.get(0)?,
         url: r.get(1)?,
         events: r.get(2)?,
         branch_glob: r.get(3)?,
-        active: r.get::<_, i64>(4)? != 0,
+        active: r.get::<i64>(4)? != 0,
         created_by: r.get(5)?,
         created_at: r.get(6)?,
     })
@@ -439,7 +434,7 @@ fn hook_view(tx: &dyn Reads, depot: &str, h: HookRow) -> Result<WebhookView, Met
 const DELIVERY_COLS: &str =
     "id, hook_id, event, state, attempts, next_attempt_at, last_status, last_error, created_at";
 
-fn delivery_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeliveryView> {
+fn delivery_view(r: &Row) -> Result<DeliveryView, MetaError> {
     let state: String = r.get(3)?;
     Ok(DeliveryView {
         id: r.get(0)?,
@@ -447,7 +442,7 @@ fn delivery_view(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeliveryView> {
         event: r.get(2)?,
         state: DeliveryState::parse(&state).unwrap_or(DeliveryState::Failed),
         attempts: r.get(4)?,
-        next_attempt_at: r.get::<_, Option<i64>>(5)?.map(ms_to_time),
+        next_attempt_at: r.get::<Option<i64>>(5)?.map(ms_to_time),
         last_status: r.get(6)?,
         last_error: r.get(7)?,
         created_at: ms_to_time(r.get(8)?),
@@ -545,12 +540,13 @@ async fn list(
     let webhooks = ctx
         .meta()
         .read(move |tx| {
-            let mut st = tx.db().prepare_cached(&format!(
-                "SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE depot_id = ?1 ORDER BY id"
-            ))?;
-            let rows = st
-                .query_map([depot_id.0], hook_row)?
-                .collect::<Result<Vec<_>, _>>()?;
+            let rows = tx.db().query(
+                &format!(
+                    "SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE depot_id = ?1 ORDER BY id"
+                ),
+                vals![depot_id.0],
+                hook_row,
+            )?;
             rows.into_iter().map(|h| hook_view(tx, &name, h)).collect()
         })
         .await?;
@@ -594,16 +590,15 @@ async fn create(
         .meta()
         .store()
         .write(move |tx| {
-            tx.conn().execute(
+            let id: i64 = tx.conn().value(
                 "INSERT INTO mod_webhooks_hook
                      (depot_id, url, secret, events, branch_glob, active, created_by, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7)",
-                params![depot_id.0, url, key, events_json, branch, me, now],
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7) RETURNING id",
+                vals![depot_id.0, &url, &key, &events_json, &branch, me, now],
             )?;
-            let id = tx.conn().last_insert_rowid();
-            let row = tx.conn().query_row(
+            let row = tx.conn().query_one(
                 &format!("SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE id = ?1"),
-                [id],
+                vals![id],
                 hook_row,
             )?;
             hook_view(tx, &name, row)
@@ -626,11 +621,13 @@ async fn remove(
         .write(move |tx| {
             let n = tx.conn().execute(
                 "DELETE FROM mod_webhooks_hook WHERE id = ?1 AND depot_id = ?2",
-                params![id, depot_id.0],
+                vals![id, depot_id.0],
             )?;
             if n > 0 {
-                tx.conn()
-                    .execute("DELETE FROM mod_webhooks_delivery WHERE hook_id = ?1", [id])?;
+                tx.conn().execute(
+                    "DELETE FROM mod_webhooks_delivery WHERE hook_id = ?1",
+                    vals![id],
+                )?;
             }
             Ok(n > 0)
         })
@@ -645,13 +642,11 @@ async fn remove(
 fn hook_exists(tx: &dyn Reads, depot: DepotId, id: i64) -> Result<bool, MetaError> {
     Ok(tx
         .db()
-        .query_row(
+        .query_opt(
             "SELECT 1 FROM mod_webhooks_hook WHERE id = ?1 AND depot_id = ?2",
-            params![id, depot.0],
+            vals![id, depot.0],
             |_| Ok(()),
-        )
-        .optional()
-        .map_err(sql)?
+        )?
         .is_some())
 }
 
@@ -668,13 +663,14 @@ async fn deliveries(
             if !hook_exists(tx, depot_id, id)? {
                 return Ok(None);
             }
-            let mut st = tx.db().prepare_cached(&format!(
-                "SELECT {DELIVERY_COLS} FROM mod_webhooks_delivery
-                 WHERE hook_id = ?1 ORDER BY id DESC LIMIT ?2"
-            ))?;
-            let rows = st
-                .query_map(params![id, DELIVERIES_LISTED], delivery_view)?
-                .collect::<Result<Vec<_>, _>>()?;
+            let rows = tx.db().query(
+                &format!(
+                    "SELECT {DELIVERY_COLS} FROM mod_webhooks_delivery
+                     WHERE hook_id = ?1 ORDER BY id DESC LIMIT ?2"
+                ),
+                vals![id, DELIVERIES_LISTED],
+                delivery_view,
+            )?;
             Ok(Some(rows))
         })
         .await?
@@ -708,16 +704,15 @@ async fn ping(
             if !hook_exists(tx, depot_id, id)? {
                 return Ok(None);
             }
-            tx.conn().execute(
+            let did: i64 = tx.conn().value(
                 "INSERT INTO mod_webhooks_delivery
                      (hook_id, outbox_id, event, body, state, attempts, next_attempt_at, created_at)
-                 VALUES (?1, NULL, ?2, ?3, 'pending', 0, ?4, ?4)",
-                params![id, PING_EVENT, body, now],
+                 VALUES (?1, NULL, ?2, ?3, 'pending', 0, ?4, ?4) RETURNING id",
+                vals![id, PING_EVENT, &body, now],
             )?;
-            let did = tx.conn().last_insert_rowid();
-            Ok(Some(tx.conn().query_row(
+            Ok(Some(tx.conn().query_one(
                 &format!("SELECT {DELIVERY_COLS} FROM mod_webhooks_delivery WHERE id = ?1"),
-                [did],
+                vals![did],
                 delivery_view,
             )?))
         })
@@ -736,13 +731,11 @@ fn enqueue(tx: &WriteTx<'_>, event: &Event, now: Millis) -> Result<usize, MetaEr
         return Ok(0);
     };
     let branch = event.data.get("branch").and_then(|b| b.as_str());
-    let hooks = {
-        let mut st = tx.conn().prepare_cached(&format!(
-            "SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE depot_id = ?1 AND active = 1"
-        ))?;
-        let rows = st.query_map([d.id.0], hook_row)?;
-        rows.collect::<Result<Vec<_>, _>>()?
-    };
+    let hooks = tx.conn().query(
+        &format!("SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE depot_id = ?1 AND active = 1"),
+        vals![d.id.0],
+        hook_row,
+    )?;
     let mut body = None;
     let mut added = 0;
     for h in hooks {
@@ -762,10 +755,10 @@ fn enqueue(tx: &WriteTx<'_>, event: &Event, now: Millis) -> Result<usize, MetaEr
             })?),
         };
         added += tx.conn().execute(
-            "INSERT OR IGNORE INTO mod_webhooks_delivery
+            "INSERT INTO mod_webhooks_delivery
                  (hook_id, outbox_id, event, body, state, attempts, next_attempt_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, ?5)",
-            params![h.id, event.id, event.event, body, now],
+             VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, ?5) ON CONFLICT DO NOTHING",
+            vals![h.id, event.id, &event.event, body.as_str(), now],
         )?;
     }
     Ok(added)

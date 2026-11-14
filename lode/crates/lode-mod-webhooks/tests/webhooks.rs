@@ -437,9 +437,8 @@ async fn failures_retry_on_schedule_until_24_hours() {
         .state
         .meta()
         .read(|tx| {
-            Ok(tx
-                .db()
-                .query_row("SELECT count(*) FROM outbox", [], |r| r.get(0))?)
+            tx.db()
+                .value("SELECT count(*) FROM outbox", lode_meta::vals![])
         })
         .await
         .unwrap();
@@ -703,11 +702,10 @@ async fn a_disabled_module_has_no_routes_tables_or_deliveries() {
     let tables: i64 = state
         .meta()
         .read(|tx| {
-            Ok(tx.db().query_row(
+            tx.db().value(
                 "SELECT count(*) FROM sqlite_master WHERE name LIKE 'mod_webhooks_%'",
-                [],
-                |r| r.get(0),
-            )?)
+                lode_meta::vals![],
+            )
         })
         .await
         .unwrap();

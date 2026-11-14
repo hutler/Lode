@@ -22,20 +22,20 @@ fn fresh_database_migrates_and_reopen_is_a_no_op() {
     assert_eq!(v, CORE_MIGRATIONS.migrations.len() as u32);
     let (mode, fk, sync): (String, i64, i64) = s
         .with_writer(|c| {
-            Ok(c.query_row(
+            c.query_one(
                 "SELECT (SELECT journal_mode FROM pragma_journal_mode), \
                         (SELECT foreign_keys FROM pragma_foreign_keys), \
                         (SELECT synchronous FROM pragma_synchronous)",
-                [],
+                vals![],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?)
+            )
         })
         .unwrap();
     assert_eq!((mode.as_str(), fk, sync), ("wal", 1, 2));
     drop(s);
     let s = MetaStore::open(&path, &[], MetaConfig::default()).unwrap();
     let count: i64 = s
-        .with_writer(|c| Ok(c.query_row("SELECT count(*) FROM schema_version", [], |r| r.get(0))?))
+        .with_writer(|c| c.value("SELECT count(*) FROM schema_version", vals![]))
         .unwrap();
     assert_eq!(count, 1);
 }
@@ -110,11 +110,10 @@ fn failed_migration_leaves_no_trace() {
     let s = open(&dir);
     let exists: i64 = s
         .with_writer(|c| {
-            Ok(c.query_row(
+            c.value(
                 "SELECT count(*) FROM sqlite_master WHERE name = 'mod_broken_a'",
-                [],
-                |r| r.get(0),
-            )?)
+                vals![],
+            )
         })
         .unwrap();
     assert_eq!(exists, 0);
@@ -125,16 +124,13 @@ fn failed_migration_leaves_no_trace() {
 fn dropped_write_transaction_leaves_no_trace() {
     let dir = tempfile::tempdir().unwrap();
     let s = open(&dir);
-    s.with_writer(|conn| {
-        let tx = WriteTx::begin(conn)?;
+    let res: Result<()> = s.write_blocking(|tx| {
         tx.create_depot("ghost", NOW)?;
         assert!(tx.depot_by_name("ghost")?.is_some());
-        drop(tx);
-        Ok(())
-    })
-    .unwrap();
-    s.with_writer(|conn| {
-        let tx = WriteTx::begin(conn)?;
+        Err(MetaError::NotFound("forced".into()))
+    });
+    assert!(res.is_err());
+    s.write_blocking(|tx| {
         assert!(tx.depot_by_name("ghost")?.is_none());
         Ok(())
     })
@@ -172,12 +168,11 @@ async fn readers_proceed_while_a_write_transaction_is_open() {
     let writer = s.clone();
     let handle = std::thread::spawn(move || {
         writer
-            .with_writer(|conn| {
-                let tx = WriteTx::begin(conn)?;
+            .write_blocking(|tx| {
                 tx.create_depot("pending", NOW)?;
                 started_tx.send(()).unwrap();
                 finish_rx.recv().unwrap();
-                tx.commit()
+                Ok(())
             })
             .unwrap();
     });

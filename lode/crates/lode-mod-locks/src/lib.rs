@@ -15,6 +15,7 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use lode_core::{ChangeAction, DepotId, DepotPath, EntryKind, ErrorCode};
+use lode_meta::{vals, Row, Sql};
 use lode_meta::{
     BranchId, BranchState, MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads, WriteTx,
 };
@@ -26,7 +27,6 @@ use lode_proto::PrincipalRef;
 use lode_server::commit::{CommitCtx, CommittedCtx};
 use lode_server::module::{Module, ModuleCtx, ScopeDef, ToolDef};
 use lode_server::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult, Caller, DepotAccess, Level};
-use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 /// Module name, as in `[modules]`.
@@ -90,7 +90,7 @@ struct LockRow {
 
 const COLUMNS: &str = "branch_id, path, owner_id, workspace, comment, created_at";
 
-fn lock_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<LockRow> {
+fn lock_row(r: &Row) -> lode_meta::Result<LockRow> {
     Ok(LockRow {
         branch_id: r.get(0)?,
         path: r.get(1)?,
@@ -102,36 +102,39 @@ fn lock_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<LockRow> {
 }
 
 fn get_lock(
-    conn: &Connection,
+    conn: &dyn Sql,
     depot: DepotId,
     branch: i64,
     path: &str,
-) -> rusqlite::Result<Option<LockRow>> {
-    conn.prepare_cached(&format!(
-        "SELECT {COLUMNS} FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2 AND path = ?3"
-    ))?
-    .query_row(params![depot.0, branch, path], lock_row)
-    .optional()
+) -> lode_meta::Result<Option<LockRow>> {
+    conn.query_opt(
+        &format!(
+            "SELECT {COLUMNS} FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2 AND path = ?3"
+        ),
+        vals![depot.0, branch, path],
+        lock_row,
+    )
 }
 
 /// Every lock of one branch, by path.
 fn branch_locks(
-    conn: &Connection,
+    conn: &dyn Sql,
     depot: DepotId,
     branch: i64,
-) -> rusqlite::Result<HashMap<String, LockRow>> {
-    let mut stmt = conn.prepare_cached(&format!(
-        "SELECT {COLUMNS} FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2"
-    ))?;
-    let rows = stmt.query_map(params![depot.0, branch], lock_row)?;
-    rows.map(|r| r.map(|l| (l.path.clone(), l))).collect()
+) -> lode_meta::Result<HashMap<String, LockRow>> {
+    let rows = conn.query(
+        &format!("SELECT {COLUMNS} FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2"),
+        vals![depot.0, branch],
+        lock_row,
+    )?;
+    Ok(rows.into_iter().map(|l| (l.path.clone(), l)).collect())
 }
 
-fn count_locks(conn: &Connection, depot: DepotId, branch: i64) -> rusqlite::Result<usize> {
-    conn.prepare_cached(
+fn count_locks(conn: &dyn Sql, depot: DepotId, branch: i64) -> lode_meta::Result<usize> {
+    conn.value::<i64>(
         "SELECT count(*) FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2",
-    )?
-    .query_row(params![depot.0, branch], |r| r.get::<_, i64>(0))
+        vals![depot.0, branch],
+    )
     .map(|n| n.max(0) as usize)
 }
 
@@ -140,8 +143,8 @@ fn ms_to_time(ms: Millis) -> time::OffsetDateTime {
         .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
 }
 
-fn sql_error(e: rusqlite::Error) -> ApiError {
-    ApiError::from(MetaError::from(e))
+fn sql_error(e: MetaError) -> ApiError {
+    ApiError::from(e)
 }
 
 /// Turns rows into views, looking up owner names once each.
@@ -440,13 +443,14 @@ async fn lock(
                     return Ok(Taken::Held(held, mine));
                 }
                 {
-                    let mut ins = tx.conn().prepare_cached(&format!(
+                    let ins = format!(
                         "INSERT INTO mod_locks_lock (depot_id, {COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
-                    ))?;
+                    );
                     for p in &fresh {
-                        ins.execute(params![
-                            depot_id.0, branch_id, p, me.id.0, workspace, comment, now
-                        ])?;
+                        tx.conn().execute(
+                            &ins,
+                            vals![depot_id.0, branch_id, *p, me.id.0, &workspace, &comment, now],
+                        )?;
                     }
                 }
                 if !fresh.is_empty() {
@@ -544,11 +548,11 @@ async fn unlock(
             }
             let mut per_owner: BTreeMap<i64, usize> = BTreeMap::new();
             {
-                let mut del = tx.conn().prepare_cached(
-                    "DELETE FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2 AND path = ?3",
-                )?;
                 for (p, owner) in &release {
-                    del.execute(params![depot_id.0, branch_id, p.as_str()])?;
+                    tx.conn().execute(
+                        "DELETE FROM mod_locks_lock WHERE depot_id = ?1 AND branch_id = ?2 AND path = ?3",
+                        vals![depot_id.0, branch_id, p.as_str()],
+                    )?;
                     *per_owner.entry(*owner).or_default() += 1;
                 }
             }
@@ -612,17 +616,18 @@ pub async fn list_locks(
                 },
                 None => None,
             };
-            let mut stmt = tx.db().prepare_cached(&format!(
-                "SELECT {COLUMNS} FROM mod_locks_lock
-                 WHERE depot_id = ?1
-                   AND (?2 IS NULL OR branch_id = ?2)
-                   AND (?3 IS NULL OR owner_id = ?3)
-                   AND (?4 IS NULL OR substr(path, 1, length(?4)) = ?4)
-                 ORDER BY branch_id, path"
-            ))?;
-            let rows = stmt
-                .query_map(params![depot_id.0, branch, owner_id, prefix], lock_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let rows = tx.db().query(
+                &format!(
+                    "SELECT {COLUMNS} FROM mod_locks_lock
+                     WHERE depot_id = ?1
+                       AND (?2 IS NULL OR branch_id = ?2)
+                       AND (?3 IS NULL OR owner_id = ?3)
+                       AND (?4 IS NULL OR substr(path, 1, length(?4)) = ?4)
+                     ORDER BY branch_id, path"
+                ),
+                vals![depot_id.0, branch, owner_id, &prefix],
+                lock_row,
+            )?;
             let mut viewer = Viewer::new(tx);
             let mut out = Vec::with_capacity(rows.len());
             for r in &rows {
@@ -742,24 +747,15 @@ impl Module for Locks {
             return Ok(());
         }
         let mut released = 0;
-        {
-            let mut del = tx
+        for ch in c.changes {
+            released += tx
                 .conn()
-                .prepare_cached(
+                .execute(
                     "DELETE FROM mod_locks_lock
                      WHERE depot_id = ?1 AND branch_id = ?2 AND path = ?3 AND owner_id = ?4",
+                    vals![c.depot.0, c.branch.id.0, ch.path.as_str(), c.author.id.0],
                 )
                 .map_err(sql_error)?;
-            for ch in c.changes {
-                released += del
-                    .execute(params![
-                        c.depot.0,
-                        c.branch.id.0,
-                        ch.path.as_str(),
-                        c.author.id.0
-                    ])
-                    .map_err(sql_error)?;
-            }
         }
         if released > 0 {
             let data = event_data(&c.branch.name, &c.author.name, released);

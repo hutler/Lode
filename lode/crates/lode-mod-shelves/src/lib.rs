@@ -68,8 +68,8 @@ impl Shelves {
     }
 }
 
-fn sql_error(e: rusqlite::Error) -> MetaError {
-    MetaError::from(e)
+fn sql_error(e: MetaError) -> MetaError {
+    e
 }
 
 fn ms_to_time(ms: lode_meta::Millis) -> time::OffsetDateTime {

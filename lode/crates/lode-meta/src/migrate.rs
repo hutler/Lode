@@ -1,6 +1,9 @@
 //! Embedded, numbered, transactional migrations, tracked per namespace.
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, TransactionBehavior};
+
+use crate::sql::Sql;
+use crate::vals;
 
 use crate::{MetaError, Result};
 
@@ -75,14 +78,7 @@ pub(crate) fn run(conn: &mut Connection, set: &MigrationSet) -> Result<()> {
         }
     }
     let known = set.migrations.len() as u32;
-    let current: u32 = conn
-        .query_row(
-            "SELECT version FROM schema_version WHERE namespace = ?1",
-            [set.namespace],
-            |r| r.get(0),
-        )
-        .optional()?
-        .unwrap_or(0);
+    let current = schema_version(conn, set.namespace)?;
     if current > known {
         return Err(MetaError::SchemaTooNew {
             namespace: set.namespace.to_owned(),
@@ -91,33 +87,33 @@ pub(crate) fn run(conn: &mut Connection, set: &MigrationSet) -> Result<()> {
         });
     }
     for m in &set.migrations[current as usize..] {
-        let wrap = |source| MetaError::Migration {
+        let wrap = |source: MetaError| MetaError::Migration {
             namespace: set.namespace.to_owned(),
             version: m.version,
             name: m.name.to_owned(),
-            source,
+            source: Box::new(source),
         };
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute_batch(m.sql).map_err(wrap)?;
-        tx.execute(
+        let db: &dyn Sql = &*tx;
+        db.batch(m.sql).map_err(wrap)?;
+        db.execute(
             "INSERT INTO schema_version (namespace, version) VALUES (?1, ?2)
              ON CONFLICT (namespace) DO UPDATE SET version = excluded.version",
-            params![set.namespace, m.version],
+            vals![set.namespace, m.version],
         )
         .map_err(wrap)?;
-        tx.commit().map_err(wrap)?;
+        tx.commit().map_err(|e| wrap(e.into()))?;
     }
     Ok(())
 }
 
 /// The recorded version of a namespace, or 0.
-pub fn schema_version(conn: &Connection, namespace: &str) -> Result<u32> {
+pub fn schema_version(conn: &dyn Sql, namespace: &str) -> Result<u32> {
     Ok(conn
-        .query_row(
+        .query_opt(
             "SELECT version FROM schema_version WHERE namespace = ?1",
-            [namespace],
+            vals![namespace],
             |r| r.get(0),
-        )
-        .optional()?
+        )?
         .unwrap_or(0))
 }

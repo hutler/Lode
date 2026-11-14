@@ -222,7 +222,7 @@ async fn a_branch_head_at_a_missing_revision_is_found() {
     h.commit("a", "a.txt", b"a").await;
     h.state
         .meta()
-        .with_writer(|c| Ok(c.execute("UPDATE branch SET head_rev = 99", [])?))
+        .with_writer(|c| c.execute("UPDATE branch SET head_rev = 99", lode_meta::vals![]))
         .unwrap();
     let problems = h.check(false).await;
     assert!(
