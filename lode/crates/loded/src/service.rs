@@ -8,6 +8,7 @@ use clap::Subcommand;
 use lode_server::ServerConfig;
 
 /// The service's name on both systems.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub const SERVICE_NAME: &str = "loded";
 
 /// `loded service ...`.

@@ -29,6 +29,13 @@ pub fn to_depot(root: &Path, cwd: &Path, local: &Path) -> Result<Option<DepotPat
     let abs = normalize(&joined);
     let root = normalize(root);
     let rel = strip_root(&abs, &root, cfg!(windows))
+        .or_else(|| {
+            // Another spelling of the same place: a Windows short name (`RUNNER~1`) or a
+            // symlink (`/var` and `/private/var` on macOS). Compare the resolved forms.
+            let abs = resolve_existing(&abs)?;
+            let root = canonical(&root).ok()?;
+            strip_root(&abs, &root, cfg!(windows))
+        })
         .ok_or_else(|| WorkspaceError::OutsideWorkspace(local.to_path_buf()))?;
     let mut segs = Vec::new();
     for c in rel.components() {
@@ -60,6 +67,21 @@ pub fn to_depot(root: &Path, cwd: &Path, local: &Path) -> Result<Option<DepotPat
             local: local.to_path_buf(),
             reason: e.to_string(),
         })
+}
+
+/// `abs` with its deepest existing ancestor made [`canonical`] and the rest kept as given, so
+/// a path to a file that does not exist yet resolves too. `None` when nothing resolves.
+fn resolve_existing(abs: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut at = abs;
+    loop {
+        if let Ok(mut base) = canonical(at) {
+            base.extend(rest.iter().rev());
+            return Some(base);
+        }
+        rest.push(at.file_name()?.to_os_string());
+        at = at.parent()?;
+    }
 }
 
 /// `abs` below `root`, comparing components exactly or, with `ignore_case`, without regard
@@ -130,6 +152,24 @@ fn normalize(p: &Path) -> PathBuf {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn another_spelling_of_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        // The root as one spelling, the file (existing or not) as the other.
+        let d = to_depot(&real, &real, &link.join("sub/new.txt"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.as_str(), "sub/new.txt");
+        let d = to_depot(&link, &link, &real.join("sub")).unwrap().unwrap();
+        assert_eq!(d.as_str(), "sub");
+        assert!(to_depot(&real, &real, &dir.path().join("elsewhere")).is_err());
+    }
 
     #[test]
     fn conversions() {
