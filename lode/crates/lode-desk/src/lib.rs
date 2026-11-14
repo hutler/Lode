@@ -2,12 +2,14 @@
 //!
 //! The window is a React app (`ui/`). Each Tauri command here runs one `lode-ops` operation
 //! through [`desk::Desk`] and returns the same JSON document `lode <command> --json` prints;
-//! progress and warnings arrive as `lode://progress` and `lode://warning` events. Operations
+//! progress and warnings arrive as `lode://progress` and `lode://warning` events, and a
+//! watched workspace whose files changed as `lode://changed` with its root. Operations
 //! open the workspace only while they run, so `lode` and editor plugins work next to the app.
 
 #![forbid(unsafe_code)]
 
 pub mod desk;
+pub mod watch;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -81,6 +83,44 @@ async fn checkout(
 }
 
 #[tauri::command]
+async fn add(
+    desk: State<'_, Desk>,
+    workspace: String,
+    paths: Vec<String>,
+) -> Result<Value, ErrorView> {
+    desk.add(workspace, paths).await
+}
+
+#[tauri::command]
+async fn revert(
+    desk: State<'_, Desk>,
+    workspace: String,
+    paths: Vec<String>,
+) -> Result<Value, ErrorView> {
+    desk.revert(workspace, paths).await
+}
+
+#[tauri::command]
+async fn commit(
+    desk: State<'_, Desk>,
+    workspace: String,
+    paths: Vec<String>,
+    message: String,
+) -> Result<Value, ErrorView> {
+    desk.commit(workspace, paths, message).await
+}
+
+#[tauri::command]
+fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
+    desk.watch(workspace)
+}
+
+#[tauri::command]
+fn unwatch(desk: State<'_, Desk>, workspace: String) {
+    desk.unwatch(&workspace);
+}
+
+#[tauri::command]
 async fn status(desk: State<'_, Desk>, workspace: String) -> Result<Value, ErrorView> {
     desk.status(workspace).await
 }
@@ -96,7 +136,11 @@ pub fn run() -> Result<(), tauri::Error> {
             let ui = Arc::new(WindowUi {
                 app: app.handle().clone(),
             });
-            app.manage(Desk::new(home, &data, ui));
+            let handle = app.handle().clone();
+            let desk = Desk::new(home, &data, ui).with_change_hook(move |root| {
+                let _ = handle.emit("lode://changed", root);
+            });
+            app.manage(desk);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -108,6 +152,11 @@ pub fn run() -> Result<(), tauri::Error> {
             open_workspace,
             checkout,
             status,
+            add,
+            revert,
+            commit,
+            watch,
+            unwatch,
         ])
         .run(tauri::generate_context!())
 }

@@ -203,3 +203,135 @@ async fn errors_come_back_with_their_codes() {
     assert_eq!(err.code, "not_found", "{err:?}");
     assert!(s.desk.recent().is_empty());
 }
+
+/// Signs alice in and checks out `game` into `<home>/work/game`; returns the workspace root.
+async fn checked_out(s: &Setup) -> String {
+    let url = s.server.url().trim_end_matches('/').to_owned();
+    s.desk
+        .sign_in(url.clone(), "alice".into(), "correct horse".into())
+        .await
+        .unwrap();
+    let dir = s.home.path().join("work").join("game");
+    s.desk
+        .checkout(
+            format!("{url}/game"),
+            dir.display().to_string(),
+            "main".into(),
+        )
+        .await
+        .unwrap();
+    s.desk.recent()[0].path.clone()
+}
+
+fn paths(status: &serde_json::Value) -> Vec<(String, String)> {
+    status["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["path"].as_str().unwrap().to_owned(),
+                f["status"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn add_commit_and_revert_picked_files() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    std::fs::write(dir.join("a.txt"), "apricot\n").unwrap();
+    std::fs::write(dir.join("b.txt"), "blueberry\n").unwrap();
+    std::fs::write(dir.join("new.txt"), "new\n").unwrap();
+
+    let added = s
+        .desk
+        .add(root.clone(), vec!["new.txt".into()])
+        .await
+        .unwrap();
+    assert!(added.is_object(), "{added}");
+
+    // Commit only the picked files; b.txt stays pending.
+    let done = s
+        .desk
+        .commit(
+            root.clone(),
+            vec!["a.txt".into(), "new.txt".into()],
+            "Two of three".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(done["files"], 2, "{done}");
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert_eq!(paths(&st), [("b.txt".to_owned(), "modified".to_owned())]);
+
+    // Nothing picked is refused before the operation runs.
+    let err = s
+        .desk
+        .commit(root.clone(), vec![], "x".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "usage");
+
+    s.desk
+        .revert(root.clone(), vec!["b.txt".into()])
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(dir.join("b.txt")).unwrap(), b"banana\n");
+    let st = s.desk.status(root).await.unwrap();
+    assert!(paths(&st).is_empty(), "{st}");
+}
+
+#[tokio::test]
+async fn a_refused_commit_names_the_files() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    // Someone else commits a.txt first.
+    s.server
+        .commit_files("game", "main", &[("a.txt", b"avocado\n")])
+        .await;
+    std::fs::write(dir.join("a.txt"), "apricot\n").unwrap();
+    let err = s
+        .desk
+        .commit(root, vec!["a.txt".into()], "Mine".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "out_of_date", "{err:?}");
+    assert_eq!(err.details["paths"][0], "a.txt", "{err:?}");
+}
+
+#[tokio::test]
+async fn watching_reports_changes_once_per_burst() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut s = setup().await;
+    let home = s.home.path().to_path_buf();
+    s.desk = Desk::new(home.clone(), &home.join("app"), s.events.clone())
+        .with_config_dir(home.join("config"))
+        .with_change_hook(move |root| {
+            let _ = tx.send(root);
+        });
+    let root = checked_out(&s).await;
+    s.desk.watch(root.clone()).unwrap();
+    s.desk.watch(root.clone()).unwrap();
+    let dir = std::path::PathBuf::from(&root);
+    for i in 0..20 {
+        std::fs::write(dir.join(format!("n{i}.txt")), "x").unwrap();
+    }
+    let got = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got, root);
+    // Status, which only reads, does not count as a change.
+    s.desk.status(root.clone()).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    assert!(rx.try_recv().is_err(), "one burst, one call");
+
+    s.desk.unwatch(&root);
+    std::fs::write(dir.join("late.txt"), "x").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    assert!(rx.try_recv().is_err(), "no calls after unwatch");
+}

@@ -63,13 +63,26 @@ const scenes = {
   async workspace(page) {
     // Two workspaces open, the first one showing.
     await page.getByText("D:\\Work\\Skyfall", { exact: true }).click();
-    await page.getByText("changed files").waitFor();
+    await page.getByRole("group", { name: "Changes" }).waitFor();
     await page.getByRole("button", { name: "Home" }).click();
     await page.getByText("D:\\Tools\\pipeline", { exact: true }).click();
     await page.getByRole("heading", { name: "pipeline" }).waitFor();
     await page.locator(".tab-label", { hasText: "skyfall" }).click();
-    await page.getByRole("heading", { name: "skyfall" }).waitFor();
-    await page.getByText("changed files").waitFor();
+    await page.getByRole("group", { name: "Changes" }).waitFor();
+  },
+  async "changes-picked"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("checkbox", { name: "Pick all of Changes" }).click();
+    await page.getByRole("checkbox", { name: "Pick Content/Props/Crate_02.uasset" }).click();
+    await page.getByText("Boat.cpp").click();
+    await page.getByLabel("Commit message").fill("Harbor: new mooring for the boat");
+  },
+  async "commit-refused"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("checkbox", { name: "Pick all of Changes" }).click();
+    await page.getByLabel("Commit message").fill("Crates");
+    await page.getByRole("button", { name: "Commit 3 files" }).click();
+    await page.getByRole("form", { name: "Commit" }).getByRole("alert").waitFor();
   },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.

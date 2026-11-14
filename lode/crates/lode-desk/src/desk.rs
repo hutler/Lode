@@ -2,16 +2,19 @@
 //! its JSON document. The Tauri commands in `lib.rs` are thin wrappers around these, so the
 //! tests drive this type directly against a test server.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lode_ops::cmd::{checkout, info, login, status};
+use lode_ops::cmd::{checkout, commit, files, info, login, revert, status};
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
 use lode_ops::output::Ui;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::watch::{Watcher, QUIET};
 
 /// An operation's error as the UI receives it: the same fields as `lode --json`.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -62,6 +65,10 @@ pub struct Desk {
     /// Serializes writes to `recent_file`.
     recent_lock: Mutex<()>,
     ui: Arc<dyn Ui>,
+    /// Called with a workspace root when files in it changed.
+    on_change: Arc<dyn Fn(String) + Send + Sync>,
+    /// Running watches by workspace root.
+    watches: Mutex<HashMap<String, Watcher>>,
 }
 
 impl std::fmt::Debug for Desk {
@@ -117,7 +124,15 @@ impl Desk {
             recent_file: data_dir.join("recent.json"),
             recent_lock: Mutex::new(()),
             ui,
+            on_change: Arc::new(|_| {}),
+            watches: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Calls `hook` with a workspace root after files in a watched workspace changed.
+    pub fn with_change_hook(mut self, hook: impl Fn(String) + Send + Sync + 'static) -> Self {
+        self.on_change = Arc::new(hook);
+        self
     }
 
     /// Uses `dir` as the lode config directory instead of the user's (tests).
@@ -220,6 +235,93 @@ impl Desk {
         let ctx = self.ctx(Path::new(&workspace), None)?;
         run_op(move || async move { status::status(&ctx, status::StatusArgs::default()).await })
             .await
+    }
+
+    /// Starts `lode add` of `paths` (depot paths) in `workspace`.
+    pub async fn add(&self, workspace: String, paths: Vec<String>) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            files::add(
+                &ctx,
+                files::AddArgs {
+                    paths: paths.into_iter().map(PathBuf::from).collect(),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode revert` of `paths` (depot paths) in `workspace`.
+    pub async fn revert(&self, workspace: String, paths: Vec<String>) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            revert::revert(
+                &ctx,
+                revert::RevertArgs {
+                    paths: paths.into_iter().map(PathBuf::from).collect(),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode commit -m message paths…` in `workspace`. Untracked files among `paths` must be
+    /// added first.
+    pub async fn commit(
+        &self,
+        workspace: String,
+        paths: Vec<String>,
+        message: String,
+    ) -> Result<Value, ErrorView> {
+        if paths.is_empty() {
+            return Err(ErrorView {
+                code: "usage".into(),
+                message: "pick the files to commit".into(),
+                details: Value::Null,
+            });
+        }
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            commit::commit(
+                &ctx,
+                commit::CommitArgs {
+                    paths: paths.into_iter().map(PathBuf::from).collect(),
+                    message: Some(message),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// Watches `workspace` for changes until [`Desk::unwatch`]; a second call is a no-op.
+    pub fn watch(&self, workspace: String) -> Result<(), ErrorView> {
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        if watches.contains_key(&workspace) {
+            return Ok(());
+        }
+        let hook = Arc::clone(&self.on_change);
+        let root = workspace.clone();
+        let w = Watcher::new(Path::new(&workspace), QUIET, move || hook(root.clone())).map_err(
+            |e| ErrorView {
+                code: "watch_failed".into(),
+                message: format!("cannot watch {workspace} for changes: {e}"),
+                details: Value::Null,
+            },
+        )?;
+        watches.insert(workspace, w);
+        Ok(())
+    }
+
+    /// Stops watching `workspace`.
+    pub fn unwatch(&self, workspace: &str) {
+        let mut watches = self.watches.lock().unwrap_or_else(|p| p.into_inner());
+        watches.remove(workspace);
     }
 
     /// The remembered workspaces, newest first.

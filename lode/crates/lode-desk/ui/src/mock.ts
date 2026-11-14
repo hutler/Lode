@@ -4,9 +4,11 @@
 import type {
   Backend,
   CheckoutResult,
+  CommitResult,
   OpError,
   ProgressEvent,
   RecentWorkspace,
+  StatusFile,
   StatusResult,
   WhoAmI,
   WorkspaceInfo,
@@ -19,6 +21,8 @@ export interface MockOptions {
   signedIn?: string[];
   /** Milliseconds each progress step takes (0 in tests). */
   stepMs?: number;
+  /** Makes every commit fail with this error. */
+  refuseCommit?: OpError;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -109,7 +113,13 @@ function parseTarget(target: string): { server: string; depot: string } {
   return { server: t.slice(0, at), depot: t.slice(at + 1) };
 }
 
-export function createMockBackend(opts: MockOptions = {}): Backend {
+/** The mock backend, plus a way to pretend files changed on disk. */
+export type MockBackend = Backend & {
+  /** Changes a file's status as an editor would, and reports the change. */
+  touch(workspace: string, file: StatusFile): void;
+};
+
+export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const recent = [...(opts.recent ?? DEMO_RECENT)];
   const signed = new Set((opts.signedIn ?? [DEMO_SERVER]).map(serverOf));
   const listeners = new Set<(e: ProgressEvent) => void>();
@@ -138,6 +148,22 @@ export function createMockBackend(opts: MockOptions = {}): Backend {
     recent.unshift({ path: info.root, depot: info.depot, server: info.server, branch: info.branch });
   };
 
+  const changed = new Set<(workspace: string) => void>();
+  const statusOf = new Map<string, StatusResult>();
+  const statusFor = (workspace: string): StatusResult => {
+    let st = statusOf.get(workspace);
+    if (!st) {
+      const info = workspaces.get(workspace);
+      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+      st = {
+        branch: info.branch,
+        rev: info.rev,
+        files: info.depot === "skyfall" ? DEMO_STATUS.files.map((f) => ({ ...f })) : [],
+      };
+      statusOf.set(workspace, st);
+    }
+    return st;
+  };
   const emit = (e: ProgressEvent) => listeners.forEach((l) => l(e));
   const pause = () => new Promise((r) => setTimeout(r, stepMs));
 
@@ -193,9 +219,53 @@ export function createMockBackend(opts: MockOptions = {}): Backend {
       return { workspace: dir, depot, branch, rev: d.rev, files: d.files };
     },
     status: async (workspace) => {
+      const st = statusFor(workspace);
+      return { ...st, files: st.files.map((f) => ({ ...f })) };
+    },
+    add: async (workspace, paths) => {
+      const st = statusFor(workspace);
+      for (const f of st.files) if (paths.includes(f.path) && f.status === "untracked") f.status = "added";
+    },
+    revert: async (workspace, paths) => {
+      const st = statusFor(workspace);
+      st.files = st.files.filter((f) => !paths.includes(f.path) || f.status === "untracked");
+    },
+    commit: async (workspace, paths, message): Promise<CommitResult> => {
+      const st = statusFor(workspace);
+      if (opts.refuseCommit) throw opts.refuseCommit;
+      if (!message.trim()) fail("aborted", "empty commit message; nothing was committed");
+      const picked = st.files.filter((f) => paths.includes(f.path) && f.status !== "untracked");
+      if (picked.length === 0) fail("nothing_to_commit", "nothing to commit in the given paths");
+      const needLock = picked.filter((f) => f.needs_lock).map((f) => f.path);
+      if (needLock.length > 0) {
+        const e: OpError = {
+          code: "lock_required",
+          message: `these files need a lock: ${needLock.join(", ")}; run \`lode lock <path>\` first`,
+          details: { paths: needLock },
+        };
+        throw e;
+      }
+      for (let i = 1; i <= picked.length; i++) {
+        await pause();
+        emit({ label: "Uploading", done: i, total: picked.length, bytes: i * 1_200_000, finished: false });
+      }
+      emit({ label: "Uploading", done: picked.length, total: picked.length, bytes: picked.length * 1_200_000, finished: true });
+      st.rev += 1;
+      st.files = st.files.filter((f) => !picked.includes(f));
       const info = workspaces.get(workspace);
-      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
-      return { ...DEMO_STATUS, branch: info.branch, rev: info.rev };
+      if (info) info.rev = st.rev;
+      return { rev: st.rev, branch: st.branch, files: picked.length };
+    },
+    watch: async () => {},
+    unwatch: async () => {},
+    onChanged: (listener) => {
+      changed.add(listener);
+      return () => changed.delete(listener);
+    },
+    touch: (workspace, file) => {
+      const st = statusFor(workspace);
+      st.files = [...st.files.filter((f) => f.path !== file.path), file];
+      changed.forEach((l) => l(workspace));
     },
     pickFolder: async () => "D:\\Work\\Skyfall-new",
     onProgress: (listener) => {

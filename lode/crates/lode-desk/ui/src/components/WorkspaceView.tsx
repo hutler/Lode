@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
-import { asOpError, backend, type OpError, type StatusResult, type WorkspaceInfo } from "../api";
+import type { OpError, StatusResult, WorkspaceInfo } from "../api";
+import { ChangesView } from "./ChangesView";
 
 interface Props {
   info: WorkspaceInfo;
@@ -17,30 +18,11 @@ function hostOf(server: string): string {
 
 const SECTIONS = ["Changes", "History", "Locks", "Shelves"] as const;
 
-/** One open workspace: the sidebar and its overview. */
+/** One open workspace: the sidebar and the section it shows. */
 export function WorkspaceView({ info, onError }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const b = await backend();
-      setStatus(await b.status(info.root));
-    } catch (e) {
-      onError(asOpError(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [info.root, onError]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const changed = status?.files.filter((f) => f.status !== "untracked" && f.status !== "unchanged").length ?? 0;
-  const untracked = status?.files.filter((f) => f.status === "untracked").length ?? 0;
-  const needLock = status?.files.filter((f) => f.needs_lock).length ?? 0;
+  const changed = status?.files.filter((f) => f.status !== "unchanged").length ?? 0;
   const locked = status?.files.filter((f) => f.locked).length ?? 0;
 
   return (
@@ -51,7 +33,9 @@ export function WorkspaceView({ info, onError }: Props) {
           <div className="sidebar-server">{hostOf(info.server)}</div>
         </div>
         <div className="sidebar-branch">
-          <span className="branch-icon" aria-hidden="true">⑂</span>
+          <span className="branch-icon" aria-hidden="true">
+            ⑂
+          </span>
           {status?.branch ?? info.branch}
           <span className="rev">r{status?.rev ?? info.rev}</span>
         </div>
@@ -65,42 +49,7 @@ export function WorkspaceView({ info, onError }: Props) {
           ))}
         </nav>
       </aside>
-      <section className="overview" aria-label="Overview">
-        <header className="overview-head">
-          <h1>{info.depot}</h1>
-          <button onClick={() => void refresh()} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        </header>
-        <dl className="facts">
-          <dt>Folder</dt>
-          <dd className="mono">{info.root}</dd>
-          <dt>Server</dt>
-          <dd className="mono">{info.server}</dd>
-          <dt>Branch</dt>
-          <dd>{status?.branch ?? info.branch}</dd>
-          <dt>Revision</dt>
-          <dd>r{status?.rev ?? info.rev}</dd>
-        </dl>
-        <div className="tiles">
-          <div className="tile">
-            <div className="tile-value">{changed}</div>
-            <div className="tile-label">changed files</div>
-          </div>
-          <div className="tile">
-            <div className="tile-value">{untracked}</div>
-            <div className="tile-label">new, not added</div>
-          </div>
-          <div className="tile">
-            <div className="tile-value">{locked}</div>
-            <div className="tile-label">locked by you</div>
-          </div>
-          <div className={`tile ${needLock > 0 ? "warn" : ""}`}>
-            <div className="tile-value">{needLock}</div>
-            <div className="tile-label">need a lock to commit</div>
-          </div>
-        </div>
-      </section>
+      <ChangesView info={info} onStatus={setStatus} onError={onError} />
     </div>
   );
 }

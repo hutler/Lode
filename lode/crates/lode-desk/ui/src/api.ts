@@ -62,6 +62,13 @@ export interface StatusResult {
   files: StatusFile[];
 }
 
+/** `lode commit --json`. */
+export interface CommitResult {
+  rev: number;
+  branch: string;
+  files: number;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -81,6 +88,17 @@ export interface Backend {
   openWorkspace(path: string): Promise<WorkspaceInfo>;
   checkout(target: string, dir: string, branch: string): Promise<CheckoutResult>;
   status(workspace: string): Promise<StatusResult>;
+  /** Starts tracking untracked files (depot paths). */
+  add(workspace: string, paths: string[]): Promise<void>;
+  /** Discards local changes to files (depot paths). */
+  revert(workspace: string, paths: string[]): Promise<void>;
+  /** Commits the changes to `paths`; untracked ones must be added first. */
+  commit(workspace: string, paths: string[], message: string): Promise<CommitResult>;
+  /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
+  watch(workspace: string): Promise<void>;
+  unwatch(workspace: string): Promise<void>;
+  /** Calls `listener` with a workspace root when its files changed. */
+  onChanged(listener: (workspace: string) => void): () => void;
   /** Asks the user for a folder; null when they cancel. */
   pickFolder(title: string): Promise<string | null>;
   /** Calls `listener` for each progress update until the returned function is called. */
@@ -115,23 +133,35 @@ async function tauriBackend(): Promise<Backend> {
     openWorkspace: (path) => invoke("open_workspace", { path }),
     checkout: (target, dir, branch) => invoke("checkout", { target, dir, branch }),
     status: (workspace) => invoke("status", { workspace }),
+    add: async (workspace, paths) => {
+      await invoke("add", { workspace, paths });
+    },
+    revert: async (workspace, paths) => {
+      await invoke("revert", { workspace, paths });
+    },
+    commit: (workspace, paths, message) => invoke("commit", { workspace, paths, message }),
+    watch: (workspace) => invoke("watch", { workspace }),
+    unwatch: (workspace) => invoke("unwatch", { workspace }),
+    onChanged: (listener) => subscribe<string>("lode://changed", listener),
     pickFolder: async (title) => {
       const picked = await open({ directory: true, multiple: false, title });
       return typeof picked === "string" ? picked : null;
     },
-    onProgress: (listener) => {
-      let stop: (() => void) | null = null;
-      let stopped = false;
-      void listen<ProgressEvent>("lode://progress", (e) => listener(e.payload)).then((un) => {
-        if (stopped) un();
-        else stop = un;
-      });
-      return () => {
-        stopped = true;
-        stop?.();
-      };
-    },
+    onProgress: (listener) => subscribe<ProgressEvent>("lode://progress", listener),
   };
+
+  function subscribe<T>(event: string, listener: (payload: T) => void): () => void {
+    let stop: (() => void) | null = null;
+    let stopped = false;
+    void listen<T>(event, (e) => listener(e.payload)).then((un) => {
+      if (stopped) un();
+      else stop = un;
+    });
+    return () => {
+      stopped = true;
+      stop?.();
+    };
+  }
 }
 
 let current: Promise<Backend> | null = null;

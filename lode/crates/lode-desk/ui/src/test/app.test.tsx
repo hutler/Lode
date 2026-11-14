@@ -20,8 +20,8 @@ describe("welcome page", () => {
     await user.click(within(list).getByText("D:\\Tools\\pipeline"));
     expect(await screen.findByRole("heading", { name: "pipeline" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Open workspaces" })).toHaveTextContent("pipeline");
-    // The overview counts the status result.
-    expect(await screen.findByText("changed files")).toBeInTheDocument();
+    // The pending changes are listed.
+    expect(await screen.findByRole("region", { name: "Pending changes" })).toBeInTheDocument();
   });
 
   it("forgets a workspace without touching the folder", async () => {
