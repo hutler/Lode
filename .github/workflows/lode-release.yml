@@ -326,6 +326,10 @@ jobs:
             mkdir -p target/universal/release
             lipo -create -output target/universal/release/lode-desk \
               target/aarch64-apple-darwin/release/lode-desk target/x86_64-apple-darwin/release/lode-desk
+            # `cargo packager --release` takes the program from target/release whatever
+            # --binaries-dir says, so the universal one goes there too.
+            mkdir -p target/release
+            cp target/universal/release/lode-desk target/release/lode-desk
             echo "BINARIES=target/universal/release" >> "$GITHUB_ENV"
           else
             cargo build --release --locked
@@ -381,7 +385,12 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "msiexec exited with $($p.ExitCode)" }
           $cmd = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\lode\shell\open\command").'(default)'
           Write-Output "lode:// opens: $cmd"
-          if ($cmd -notmatch 'lode-desk\.exe') { throw "the lode scheme is not registered" }
+          # The installer may write the short (8.3) form of the path; the file's own name is
+          # the long one.
+          $exe = ($cmd -split '"')[1]
+          if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { throw "the lode scheme names no program: $cmd" }
+          $found = [System.IO.Directory]::GetFiles((Split-Path $exe), (Split-Path -Leaf $exe))
+          if ($found.Count -ne 1 -or (Split-Path -Leaf $found[0]) -ne 'lode-desk.exe') { throw "the lode scheme does not open lode-desk.exe: $cmd" }
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall exited with $($p.ExitCode)" }
       - uses: actions/upload-artifact@v4

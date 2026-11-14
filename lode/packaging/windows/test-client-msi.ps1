@@ -34,3 +34,5 @@ Msi '/x' $Server
 if (Test-Path $lode) { Fail 'lode.exe is still there after both were removed' }
 if (OnPath) { Fail 'the PATH entry is still there after both were removed' }
 Write-Output 'test-client-msi: ok'
+# `lode self-update` above exits with 1 on purpose; the test itself passed.
+exit 0
