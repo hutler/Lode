@@ -4305,6 +4305,7 @@ dependencies = [
  "i-slint-backend-testing",
  "image",
  "lode-client",
+ "lode-core",
  "lode-ops",
  "lode-proto",
  "lode-server",

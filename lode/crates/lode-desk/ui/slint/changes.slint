@@ -4,6 +4,7 @@
 
 import { Reading } from "history.slint";
 import { Team } from "team.slint";
+import { Branching } from "branches.slint";
 import { Button, LineEdit, TextEdit, ListView, ProgressIndicator, Palette, ScrollView } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check, DialogButtons } from "parts.slint";
 
@@ -311,16 +312,24 @@ export component ChangesView inherits Rectangle {
             if root.state.merging != "": Rectangle {
                 background: Palette.accent-background.transparentize(0.85);
                 border-radius: 6px;
-                height: merge-text.preferred-height + 16px;
-                merge-text := Text {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    text: root.state.merging + ". The next commit records the merge and takes every change.";
-                    wrap: word-wrap;
-                    color: Palette.foreground;
-                    accessible-role: text;
-                    accessible-label: "Pending merge";
-                    accessible-value: self.text;
+                HorizontalLayout {
+                    padding: 8px;
+                    spacing: 8px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.state.merging + ". The next commit records the merge and takes every change.";
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        color: Palette.foreground;
+                        accessible-role: text;
+                        accessible-label: "Pending merge";
+                        accessible-value: self.text;
+                    }
+                    Button {
+                        text: "Abandon merge";
+                        enabled: root.state.busy == "";
+                        clicked => { Branching.abandon-merge(); }
+                    }
                 }
             }
             if root.state.loaded && root.rows.length == 0: Muted {
@@ -474,6 +483,15 @@ export component ChangesView inherits Rectangle {
                             accessible-label: "Move to changelist";
                             enabled: root.state.busy == "";
                             clicked => { root.move-selected(); }
+                        }
+                    }
+                    if root.state.details.status == "conflicted": HorizontalLayout {
+                        alignment: start;
+                        Button {
+                            text: "Resolve…";
+                            primary: true;
+                            accessible-label: "Resolve " + root.state.details.path;
+                            clicked => { Branching.resolve(root.state.details.path); }
                         }
                     }
                     if root.state.details.status != "untracked" && root.state.details.status != "added": HorizontalLayout {

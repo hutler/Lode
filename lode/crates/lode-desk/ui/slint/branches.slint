@@ -1,0 +1,946 @@
+// Branches, switches, merges, conflicts and the workspace view (T134). `src/app/branch.rs`
+// fills the global `Branching` and answers its callbacks.
+
+import { Button, LineEdit, TextEdit, ListView, ComboBox, ScrollView, ProgressIndicator, Palette } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check, DialogButtons } from "parts.slint";
+import { Reading, Pane } from "history.slint";
+
+/// One branch in the list.
+export struct BranchRow {
+    name: string,
+    current: bool,
+    archived: bool,
+    /// `r12`, its head.
+    head: string,
+    /// "from main@r3", or "first branch".
+    origin: string,
+    selected: bool,
+}
+
+export struct BranchesState {
+    loaded: bool,
+    current: string,
+    /// The selected branch.
+    selected: string,
+    /// The selected branch is the workspace's.
+    is-current: bool,
+    /// The selected branch is active (not archived).
+    active: bool,
+    /// The selected branch's head revision.
+    head: int,
+    /// The revision field does not name one of its revisions.
+    bad-rev: bool,
+    /// "Switching to dev…" while an operation runs, else empty.
+    busy: string,
+    /// "No branch matches …" when the filter hides every branch.
+    empty: string,
+    error: ErrorInfo,
+}
+
+export struct NewBranchState {
+    /// "This workspace: main at r5".
+    here: string,
+    /// The placeholder of the revision field: the base branch's head.
+    head: string,
+    bad-rev: bool,
+    busy: bool,
+    error: ErrorInfo,
+}
+
+export struct MergeState {
+    title: string,
+    head: string,
+    bad-rev: bool,
+    busy: bool,
+    error: ErrorInfo,
+}
+
+/// What an update, switch or merge did to one file.
+export struct OutcomeRow {
+    outcome: string,
+    path: string,
+}
+
+export struct OutcomeState {
+    title: string,
+    text: string,
+    /// Why conflicted files need resolving, when there are some.
+    conflicts: string,
+    /// Locks left on the old branch, or skipped files.
+    notes: string,
+    /// "and 12 more", past the shown files.
+    more: string,
+    /// Done closes; otherwise the main button goes to Changes to resolve.
+    done: bool,
+}
+
+/// One line of a side of a conflict.
+export struct SideLine {
+    n: int,
+    text: string,
+    changed: bool,
+}
+
+/// One conflict region left in the result.
+export struct RegionRow {
+    index: int,
+    label: string,
+    mine: string,
+    theirs: string,
+}
+
+export struct ConflictState {
+    loaded: bool,
+    path: string,
+    name: string,
+    /// "r7", or "a shelf".
+    from: string,
+    /// A text file with its markers: the three-way view and an editable result.
+    editable: bool,
+    /// Conflict markers were written into the file.
+    text: bool,
+    base-note: string,
+    mine-note: string,
+    theirs-note: string,
+    theirs-file: string,
+    regions-left: int,
+    busy: bool,
+    error: ErrorInfo,
+}
+
+/// One row of the folder tree: a folder, or the count of the files in an open one.
+export struct FolderRow {
+    path: string,
+    name: string,
+    depth: int,
+    open: bool,
+    on: bool,
+    mixed: bool,
+    locked-by: string,
+    /// "3 files" for a files row; empty for a folder.
+    files: string,
+}
+
+export struct ViewState {
+    loaded: bool,
+    depot: string,
+    /// "In the view at r12".
+    server-label: string,
+    server: string,
+    disk: string,
+    /// The patterns differ from the workspace's.
+    dirty: bool,
+    checking: bool,
+    applying: bool,
+    preview: bool,
+    preview-text: string,
+    preview-paths: string,
+    blocked: string,
+    untracked: string,
+    /// Files with local changes or untracked files stop the change without force.
+    stopped: bool,
+    done: string,
+    error: ErrorInfo,
+}
+
+export global Branching {
+    in-out property <BranchesState> branches;
+    in property <[BranchRow]> rows;
+    in-out property <string> filter;
+    in-out property <bool> show-archived;
+    in-out property <string> rev-text;
+    in-out property <NewBranchState> new-branch;
+    in-out property <string> new-name;
+    in-out property <bool> new-here: true;
+    in property <[string]> bases;
+    in-out property <int> base-index;
+    in-out property <string> base-rev;
+    in-out property <bool> new-switch: true;
+    in-out property <MergeState> merge;
+    in property <[string]> sources;
+    in-out property <int> source-index;
+    in-out property <bool> merge-one;
+    in-out property <string> merge-rev;
+    in-out property <OutcomeState> outcome;
+    in property <[OutcomeRow]> outcome-rows;
+    in-out property <ConflictState> conflict;
+    in property <[SideLine]> base-lines;
+    in property <[SideLine]> mine-lines;
+    in property <[SideLine]> theirs-lines;
+    in property <[RegionRow]> regions;
+    in-out property <string> result-text;
+    in-out property <ViewState> view;
+    in property <[FolderRow]> folders;
+    in-out property <string> include-text;
+    in-out property <string> exclude-text;
+    /// Progress of a switch, update, merge or view change.
+    in-out property <float> progress: -1;
+    in-out property <string> progress-text;
+
+    callback open-branches();
+    callback filter-changed();
+    callback archived-toggled();
+    callback select-branch(string);
+    callback rev-edited();
+    callback switch-branch();
+    callback update();
+    callback ask-new-branch();
+    callback new-edited();
+    callback create-branch();
+    callback back-to-branches();
+    callback ask-merge();
+    callback merge-edited();
+    callback merge-branch();
+    callback ask-archive();
+    callback show-changes();
+    callback abandon-merge();
+    callback resolve(string);
+    callback take-region(int, string);
+    callback result-edited();
+    callback use-side(string);
+    callback mark-resolved();
+    callback save-result();
+    callback toggle-folder(string);
+    callback tick-folder(string, bool);
+    callback patterns-edited();
+    callback reset-view();
+    callback preview-view();
+    callback apply-view();
+    callback ask-force();
+    callback dismiss-error();
+}
+
+component Tag inherits Rectangle {
+    in property <string> text;
+    height: 18px;
+    width: tag-text.preferred-width + 10px;
+    border-radius: 9px;
+    background: Palette.accent-background.transparentize(0.8);
+    tag-text := Text {
+        text: root.text;
+        font-size: 11px;
+        color: Palette.foreground;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
+component BranchRowView inherits Rectangle {
+    in property <BranchRow> item;
+    callback clicked();
+    height: 44px;
+    border-radius: 4px;
+    background: root.item.selected ? Palette.accent-background.transparentize(0.75) : touch.has-hover ? Palette.alternate-background : transparent;
+    accessible-role: list-item;
+    accessible-label: "Branch " + root.item.name;
+    accessible-item-selected: root.item.selected;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text {
+            text: root.item.name;
+            vertical-alignment: center;
+            color: root.item.archived ? Palette.foreground.transparentize(0.4) : Palette.foreground;
+            font-weight: root.item.current ? 700 : 400;
+            accessible-role: none;
+        }
+        if root.item.current: VerticalLayout { alignment: center; Tag { text: "current"; } }
+        if root.item.archived: VerticalLayout { alignment: center; Tag { text: "archived"; } }
+        Rectangle { horizontal-stretch: 1; }
+        Muted { text: root.item.head + " · " + root.item.origin; vertical-alignment: center; accessible-role: none; }
+    }
+}
+
+/// Progress of a running operation, when it reports some.
+component Progress inherits VerticalLayout {
+    in property <string> busy;
+    spacing: 4px;
+    if Branching.progress >= 0: ProgressIndicator { progress: Branching.progress; height: 6px; }
+    Muted { text: Branching.progress-text != "" ? Branching.progress-text : root.busy; font-size: 11px; }
+}
+
+/// The depot's branches: filter, switch to one (its head or a revision), create, merge or
+/// archive.
+export component BranchesDialog inherits Card {
+    callback close();
+    width: 620px;
+    accessible-role: groupbox;
+    accessible-label: "Branches";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: "Branches"; }
+        HorizontalLayout {
+            spacing: 10px;
+            LineEdit {
+                horizontal-stretch: 1;
+                placeholder-text: "Filter branches";
+                accessible-label: "Filter branches";
+                text <=> Branching.filter;
+                edited => { Branching.filter-changed(); }
+            }
+            VerticalLayout {
+                alignment: center;
+                Check {
+                    checked: Branching.show-archived;
+                    accessible-label: "Show archived";
+                    toggled => { Branching.show-archived = !Branching.show-archived; Branching.archived-toggled(); }
+                }
+            }
+            Text { text: "Show archived"; vertical-alignment: center; color: Palette.foreground; accessible-role: none; }
+        }
+        if !Branching.branches.loaded && !Branching.branches.error.shown: Muted { text: "Loading branches…"; }
+        ListView {
+            height: 260px;
+            accessible-label: "Branch list";
+            for b in Branching.rows: BranchRowView {
+                item: b;
+                clicked => { Branching.select-branch(b.name); }
+            }
+        }
+        if Branching.branches.empty != "": Muted { text: Branching.branches.empty; }
+        if Branching.branches.busy != "": Progress { busy: Branching.branches.busy; }
+        if Branching.branches.error.shown: ErrorBanner {
+            error: Branching.branches.error;
+            dismissable: true;
+            dismissed => { Branching.dismiss-error(); }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            if Branching.branches.selected != "" && !Branching.branches.is-current: HorizontalLayout {
+                spacing: 6px;
+                FormLabel { text: "Revision"; vertical-alignment: center; }
+                LineEdit {
+                    width: 140px;
+                    accessible-label: "Revision";
+                    placeholder-text: "head (r" + Branching.branches.head + ")";
+                    text <=> Branching.rev-text;
+                    enabled: Branching.branches.busy == "";
+                    edited => { Branching.rev-edited(); }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: "New branch…";
+                enabled: Branching.branches.loaded && Branching.branches.busy == "";
+                clicked => { Branching.ask-new-branch(); }
+            }
+            if Branching.branches.selected != "" && !Branching.branches.is-current && Branching.branches.active: Button {
+                text: "Merge…";
+                accessible-label: "Merge " + Branching.branches.selected + "…";
+                enabled: Branching.branches.busy == "";
+                clicked => { Branching.ask-merge(); }
+            }
+            if Branching.branches.selected != "" && !Branching.branches.is-current && Branching.branches.active: Button {
+                text: "Archive…";
+                accessible-label: "Archive " + Branching.branches.selected + "…";
+                enabled: Branching.branches.busy == "";
+                clicked => { Branching.ask-archive(); }
+            }
+            if Branching.branches.selected != "" && !Branching.branches.is-current: Button {
+                text: "Switch";
+                primary: true;
+                enabled: Branching.branches.busy == "" && !Branching.branches.bad-rev;
+                clicked => { Branching.switch-branch(); }
+            }
+            if Branching.branches.selected == "" || Branching.branches.is-current: Button {
+                text: "Close";
+                enabled: Branching.branches.busy == "";
+                clicked => { root.close(); }
+            }
+            if Branching.branches.is-current: Button {
+                text: "Update to r" + Branching.branches.head;
+                primary: true;
+                enabled: Branching.branches.busy == "";
+                clicked => { Branching.update(); }
+            }
+        }
+        if Branching.branches.selected != "" && !Branching.branches.is-current: Muted {
+            text: "Your local changes come along to " + Branching.branches.selected + ". Files that do not merge are left in conflict in Changes.";
+            wrap: word-wrap;
+            font-size: 11px;
+        }
+    }
+}
+
+/// A new branch from the workspace's branch at its revision, or from any branch at any
+/// revision.
+export component NewBranchDialog inherits Card {
+    callback close();
+    width: 520px;
+    accessible-role: groupbox;
+    accessible-label: "New branch";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: "New branch"; }
+        FormLabel { text: "Name"; }
+        LineEdit {
+            accessible-label: "Name";
+            placeholder-text: "feature/harbor-lights";
+            text <=> Branching.new-name;
+            enabled: !Branching.new-branch.busy;
+            accepted => { Branching.create-branch(); }
+        }
+        Muted { text: "Letters, digits, dots, dashes and underscores; slashes group branches."; font-size: 11px; }
+        FormLabel { text: "Start from"; }
+        HorizontalLayout {
+            spacing: 8px;
+            Check {
+                checked: Branching.new-here;
+                accessible-label: Branching.new-branch.here;
+                toggled => { Branching.new-here = true; Branching.new-edited(); }
+            }
+            Text { text: Branching.new-branch.here; color: Palette.foreground; accessible-role: none; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Check {
+                checked: !Branching.new-here;
+                accessible-label: "Another branch or revision";
+                toggled => { Branching.new-here = false; Branching.new-edited(); }
+            }
+            Text { text: "Another branch or revision"; color: Palette.foreground; accessible-role: none; }
+        }
+        if !Branching.new-here: HorizontalLayout {
+            padding-left: 26px;
+            spacing: 8px;
+            ComboBox {
+                horizontal-stretch: 1;
+                model: Branching.bases;
+                current-index <=> Branching.base-index;
+                accessible-label: "Branch to start from";
+                selected => { Branching.new-edited(); }
+            }
+            LineEdit {
+                width: 140px;
+                accessible-label: "Revision to start from";
+                placeholder-text: Branching.new-branch.head;
+                text <=> Branching.base-rev;
+                edited => { Branching.new-edited(); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Check {
+                checked: Branching.new-switch;
+                accessible-label: "Switch this workspace to it";
+                toggled => { Branching.new-switch = !Branching.new-switch; }
+            }
+            Text { text: "Switch this workspace to it"; color: Palette.foreground; accessible-role: none; }
+        }
+        if Branching.new-branch.busy && Branching.new-switch: Progress { busy: "Switching…"; }
+        if Branching.new-branch.error.shown: ErrorBanner { error: Branching.new-branch.error; }
+        DialogButtons {
+            confirm: Branching.new-branch.busy ? "Creating…" : Branching.new-switch ? "Create and switch" : "Create branch";
+            busy: Branching.new-branch.busy;
+            enabled: Branching.new-name != "" && !Branching.new-branch.bad-rev;
+            confirmed => { Branching.create-branch(); }
+            cancelled => { Branching.back-to-branches(); }
+        }
+    }
+}
+
+/// Merge another branch into the workspace: everything since the merge base, or one revision.
+export component MergeDialog inherits Card {
+    callback close();
+    width: 520px;
+    accessible-role: groupbox;
+    accessible-label: "Merge";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: Branching.merge.title; }
+        FormLabel { text: "Merge from"; }
+        ComboBox {
+            model: Branching.sources;
+            current-index <=> Branching.source-index;
+            enabled: !Branching.merge.busy;
+            accessible-label: "Merge from";
+            selected => { Branching.merge-edited(); }
+        }
+        FormLabel { text: "What to merge"; }
+        HorizontalLayout {
+            spacing: 8px;
+            Check {
+                checked: !Branching.merge-one;
+                accessible-label: "Everything since the last merge or where it started";
+                toggled => { Branching.merge-one = false; Branching.merge-edited(); }
+            }
+            Text { text: "Everything since the last merge or where it started"; color: Palette.foreground; accessible-role: none; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Check {
+                checked: Branching.merge-one;
+                accessible-label: "Only one revision";
+                toggled => { Branching.merge-one = true; Branching.merge-edited(); }
+            }
+            Text { text: "Only one revision"; color: Palette.foreground; accessible-role: none; }
+        }
+        if Branching.merge-one: HorizontalLayout {
+            padding-left: 26px;
+            LineEdit {
+                width: 160px;
+                accessible-label: "Revision to merge";
+                placeholder-text: Branching.merge.head;
+                text <=> Branching.merge-rev;
+                edited => { Branching.merge-edited(); }
+            }
+        }
+        Muted {
+            text: "Changes are applied to your workspace; files changed on both sides are merged or left in conflict. Your next commit records the merge.";
+            wrap: word-wrap;
+            font-size: 11px;
+        }
+        if Branching.merge.busy: Progress { busy: "Merging…"; }
+        if Branching.merge.error.shown: ErrorBanner { error: Branching.merge.error; }
+        DialogButtons {
+            confirm: Branching.merge.busy ? "Merging…" : "Merge";
+            busy: Branching.merge.busy;
+            enabled: Branching.sources.length > 0 && !Branching.merge.bad-rev;
+            confirmed => { Branching.merge-branch(); }
+            cancelled => { Branching.back-to-branches(); }
+        }
+    }
+}
+
+/// What an update, switch or merge did to each file.
+export component OutcomeDialog inherits Card {
+    callback close();
+    width: 600px;
+    accessible-role: groupbox;
+    accessible-label: Branching.outcome.title;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: Branching.outcome.title; }
+        Text {
+            text: Branching.outcome.text;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "Result";
+            accessible-value: self.text;
+        }
+        if Branching.outcome-rows.length > 0: ListView {
+            height: min(200px, Branching.outcome-rows.length * 24px + 4px);
+            accessible-label: "Files";
+            for f in Branching.outcome-rows: HorizontalLayout {
+                height: 24px;
+                spacing: 8px;
+                accessible-role: list-item;
+                accessible-label: f.outcome + " " + f.path;
+                Text { text: f.outcome; width: 90px; color: f.outcome == "conflicted" ? #dc2626 : Palette.foreground; font-size: 12px; vertical-alignment: center; accessible-role: none; }
+                Text { text: f.path; font-family: Reading.mono; color: Palette.foreground; vertical-alignment: center; overflow: elide; accessible-role: none; }
+            }
+        }
+        if Branching.outcome.more != "": Muted { text: Branching.outcome.more; }
+        if Branching.outcome.conflicts != "": Text {
+            text: Branching.outcome.conflicts;
+            wrap: word-wrap;
+            color: #b45309;
+            accessible-role: text;
+            accessible-label: "Conflicts";
+            accessible-value: self.text;
+        }
+        if Branching.outcome.notes != "": Text {
+            text: Branching.outcome.notes;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "Notes";
+            accessible-value: self.text;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            if Branching.outcome.conflicts != "": Button {
+                text: Branching.outcome.done ? "Show changes" : "Resolve conflicts";
+                primary: !Branching.outcome.done;
+                clicked => { Branching.show-changes(); }
+            }
+            if Branching.outcome.done: Button { text: "Done"; primary: true; clicked => { root.close(); } }
+        }
+    }
+}
+
+component SidePane inherits Rectangle {
+    in property <string> label;
+    in property <string> note;
+    in property <[SideLine]> lines;
+    in property <string> empty;
+    accessible-role: groupbox;
+    accessible-label: root.label;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 4px;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: root.label; font-weight: 700; color: Palette.foreground; accessible-role: none; }
+            Muted { text: root.note; font-size: 11px; accessible-role: none; }
+        }
+        if root.lines.length == 0: Muted { text: root.empty; font-size: 11px; }
+        if root.lines.length > 0: ListView {
+            vertical-stretch: 1;
+            for l in root.lines: Rectangle {
+                height: 20px;
+                background: l.changed ? #f59e0b.transparentize(0.75) : transparent;
+                accessible-role: list-item;
+                accessible-label: l.text;
+                accessible-value: l.changed ? "changed" : "";
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text { text: l.n; width: 34px; horizontal-alignment: right; font-family: Reading.mono; font-size: 11px; color: Palette.foreground.transparentize(0.5); vertical-alignment: center; accessible-role: none; }
+                    Text { text: l.text; font-family: Reading.mono; font-size: 12px; color: Palette.foreground; vertical-alignment: center; overflow: elide; accessible-role: none; }
+                }
+            }
+        }
+    }
+}
+
+/// Resolves one conflicted file: a three-way view with an editable result for text, or a
+/// choice of sides for a binary file or a symlink.
+export component ConflictView inherits Rectangle {
+    accessible-role: groupbox;
+    accessible-label: "Resolve conflict";
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 10px;
+            Button { text: "← Changes"; accessible-label: "Back to Changes"; clicked => { Reading.show-pane(Pane.changes); } }
+            Title { text: "Resolve " + Branching.conflict.name; vertical-alignment: center; }
+            Muted { text: Branching.conflict.path; font-family: Reading.mono; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            if Branching.conflict.loaded: Muted { text: "Theirs came from " + Branching.conflict.from; vertical-alignment: center; }
+        }
+        if Branching.conflict.error.shown: ErrorBanner {
+            error: Branching.conflict.error;
+            dismissable: true;
+            dismissed => { Branching.dismiss-error(); }
+        }
+        if !Branching.conflict.loaded && !Branching.conflict.error.shown: Muted { text: "Loading the conflict…"; }
+        if Branching.conflict.loaded && !Branching.conflict.editable: VerticalLayout {
+            spacing: 12px;
+            alignment: start;
+            Text {
+                text: Branching.conflict.text
+                    ? "This file is too large to edit here. Keep one side, or edit it in another program and mark it resolved."
+                    : "This file cannot be merged line by line. Keep one side.";
+                wrap: word-wrap;
+                color: Palette.foreground;
+            }
+            HorizontalLayout {
+                spacing: 16px;
+                alignment: start;
+                Card {
+                    width: 280px;
+                    accessible-role: groupbox;
+                    accessible-label: "Mine";
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 6px;
+                        Text { text: "Mine"; font-weight: 700; color: Palette.foreground; }
+                        Text { text: Branching.conflict.mine-note; color: Palette.foreground; }
+                        Muted { text: Branching.conflict.path; font-family: Reading.mono; font-size: 11px; }
+                        Button { text: "Keep mine"; primary: true; enabled: !Branching.conflict.busy; clicked => { Branching.use-side("mine"); } }
+                    }
+                }
+                Card {
+                    width: 280px;
+                    accessible-role: groupbox;
+                    accessible-label: "Theirs";
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 6px;
+                        Text { text: "Theirs (" + Branching.conflict.from + ")"; font-weight: 700; color: Palette.foreground; }
+                        Text { text: Branching.conflict.theirs-note; color: Palette.foreground; }
+                        if Branching.conflict.theirs-file != "": Muted { text: Branching.conflict.theirs-file; font-family: Reading.mono; font-size: 11px; }
+                        Button { text: "Take theirs"; primary: true; enabled: !Branching.conflict.busy; clicked => { Branching.use-side("theirs"); } }
+                    }
+                }
+            }
+            if Branching.conflict.text: HorizontalLayout {
+                alignment: start;
+                Button { text: "Mark resolved as it is now"; enabled: !Branching.conflict.busy; clicked => { Branching.mark-resolved(); } }
+            }
+        }
+        if Branching.conflict.loaded && Branching.conflict.editable: VerticalLayout {
+            spacing: 10px;
+            HorizontalLayout {
+                height: 220px;
+                spacing: 8px;
+                SidePane { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; label: "Base"; note: Branching.conflict.base-note; lines: Branching.base-lines; empty: "The file does not exist on this side."; }
+                SidePane { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; label: "Mine"; note: Branching.conflict.mine-note; lines: Branching.mine-lines; empty: "The file does not exist on this side."; }
+                SidePane { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; label: "Theirs (" + Branching.conflict.from + ")"; note: Branching.conflict.theirs-note; lines: Branching.theirs-lines; empty: "The file does not exist on this side."; }
+            }
+            if Branching.regions.length > 0: ScrollView {
+                height: min(180px, Branching.regions.length * 90px);
+                VerticalLayout {
+                    spacing: 6px;
+                    for r in Branching.regions: Rectangle {
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        border-radius: 4px;
+                        accessible-role: groupbox;
+                        accessible-label: r.label;
+                        VerticalLayout {
+                            padding: 8px;
+                            spacing: 6px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text { text: r.label; font-weight: 700; color: Palette.foreground; vertical-alignment: center; accessible-role: none; }
+                                Rectangle { horizontal-stretch: 1; }
+                                Button { text: "Use mine"; accessible-label: "Use mine in " + r.label; clicked => { Branching.take-region(r.index, "mine"); } }
+                                Button { text: "Use theirs"; accessible-label: "Use theirs in " + r.label; clicked => { Branching.take-region(r.index, "theirs"); } }
+                                Button { text: "Use both"; accessible-label: "Use both in " + r.label; clicked => { Branching.take-region(r.index, "both"); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    background: #2563eb.transparentize(0.88);
+                                    Text { x: 6px; width: parent.width - 12px; text: r.mine; font-family: Reading.mono; font-size: 12px; color: Palette.foreground; wrap: word-wrap; accessible-role: none; }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    background: #16a34a.transparentize(0.88);
+                                    Text { x: 6px; width: parent.width - 12px; text: r.theirs; font-family: Reading.mono; font-size: 12px; color: Palette.foreground; wrap: word-wrap; accessible-role: none; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "Result"; font-weight: 700; color: Palette.foreground; accessible-role: none; }
+                Muted {
+                    text: Branching.conflict.regions-left > 0
+                        ? Branching.conflict.regions-left + (Branching.conflict.regions-left == 1 ? " conflict" : " conflicts") + " left. Pick a side above, or edit the text."
+                        : "No conflicts left.";
+                    accessible-role: text;
+                    accessible-label: "Conflicts left";
+                    accessible-value: self.text;
+                }
+            }
+            TextEdit {
+                vertical-stretch: 1;
+                min-height: 120px;
+                font-family: Reading.mono;
+                accessible-label: "Result";
+                text <=> Branching.result-text;
+                enabled: !Branching.conflict.busy;
+                edited => { Branching.result-edited(); }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button { text: "Take mine"; enabled: !Branching.conflict.busy; clicked => { Branching.use-side("mine"); } }
+                Button { text: "Take theirs"; enabled: !Branching.conflict.busy; clicked => { Branching.use-side("theirs"); } }
+                Rectangle { horizontal-stretch: 1; }
+                if Branching.conflict.regions-left > 0: Muted { text: "Resolve every conflict first."; vertical-alignment: center; }
+                Button {
+                    text: "Save and mark resolved";
+                    primary: true;
+                    enabled: !Branching.conflict.busy && Branching.conflict.regions-left == 0;
+                    clicked => { Branching.save-result(); }
+                }
+            }
+        }
+    }
+}
+
+component FolderRowView inherits Rectangle {
+    in property <FolderRow> item;
+    in property <bool> busy;
+    height: 28px;
+    accessible-role: list-item;
+    accessible-label: root.item.files != "" ? root.item.files : root.item.path;
+    HorizontalLayout {
+        padding-left: root.item.depth * 18px + 6px;
+        spacing: 6px;
+        alignment: start;
+        if root.item.files != "": Rectangle { width: 22px; }
+        if root.item.files != "": Muted { text: root.item.files; vertical-alignment: center; font-size: 11px; }
+        if root.item.files == "": Text {
+            text: root.item.open ? "▾" : "▸";
+            width: 16px;
+            vertical-alignment: center;
+            color: Palette.foreground;
+            accessible-role: button;
+            accessible-label: (root.item.open ? "Close " : "Open ") + root.item.path;
+            accessible-action-default => { Branching.toggle-folder(root.item.path); }
+            TouchArea { clicked => { Branching.toggle-folder(root.item.path); } }
+        }
+        if root.item.files == "": VerticalLayout {
+            alignment: center;
+            Check {
+                checked: root.item.on;
+                enabled: !root.busy && root.item.locked-by == "";
+                accessible-label: "Include " + root.item.path;
+                toggled => { Branching.tick-folder(root.item.path, !root.item.on); }
+            }
+        }
+        if root.item.files == "": Text {
+            text: root.item.name;
+            vertical-alignment: center;
+            color: root.item.on ? Palette.foreground : Palette.foreground.transparentize(0.5);
+            accessible-role: none;
+        }
+        if root.item.mixed: Muted { text: "partly"; vertical-alignment: center; font-size: 11px; }
+        if root.item.locked-by != "": Muted { text: root.item.locked-by; font-family: Reading.mono; vertical-alignment: center; font-size: 11px; }
+    }
+}
+
+/// Which part of the depot is on disk: the patterns, a folder tree to tick, a preview, and
+/// the change.
+export component ViewEditor inherits Rectangle {
+    property <bool> busy: Branching.view.checking || Branching.view.applying;
+    accessible-role: groupbox;
+    accessible-label: "Workspace view";
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+            Title { text: "Workspace view"; }
+            Muted { text: "Which part of " + Branching.view.depot + " is on disk"; vertical-alignment: center; }
+        }
+        if Branching.view.error.shown: ErrorBanner {
+            error: Branching.view.error;
+            dismissable: true;
+            dismissed => { Branching.dismiss-error(); }
+        }
+        if Branching.view.loaded: HorizontalLayout {
+            spacing: 24px;
+            alignment: start;
+            Muted { text: Branching.view.server-label; accessible-role: none; }
+            Text { text: Branching.view.server; color: Palette.foreground; accessible-role: text; accessible-label: "In the view"; accessible-value: self.text; }
+            Muted { text: "On disk"; accessible-role: none; }
+            Text { text: Branching.view.disk; color: Palette.foreground; accessible-role: text; accessible-label: "On disk"; accessible-value: self.text; }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 16px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+                Text { text: "Folders"; font-weight: 700; color: Palette.foreground; }
+                Muted { text: "Tick a folder to bring it to disk, untick it to leave it out."; font-size: 11px; }
+                if !Branching.view.loaded && !Branching.view.error.shown: Muted { text: "Loading folders…"; }
+                ListView {
+                    vertical-stretch: 1;
+                    accessible-label: "Depot folders";
+                    for f in Branching.folders: FolderRowView { item: f; busy: root.busy; }
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+                alignment: start;
+                Text { text: "Patterns"; font-weight: 700; color: Palette.foreground; }
+                FormLabel { text: "Include"; }
+                TextEdit {
+                    height: 100px;
+                    font-family: Reading.mono;
+                    accessible-label: "Include patterns";
+                    placeholder-text: "Everything (no patterns)";
+                    enabled: !root.busy;
+                    text <=> Branching.include-text;
+                    edited => { Branching.patterns-edited(); }
+                }
+                FormLabel { text: "Exclude"; }
+                TextEdit {
+                    height: 100px;
+                    font-family: Reading.mono;
+                    accessible-label: "Exclude patterns";
+                    placeholder-text: "Nothing left out";
+                    enabled: !root.busy;
+                    text <=> Branching.exclude-text;
+                    edited => { Branching.patterns-edited(); }
+                }
+                Muted {
+                    text: "One pattern per line, such as Content/Cinematics/**. * stays within a folder, ** goes into subfolders. Excludes win.";
+                    wrap: word-wrap;
+                    font-size: 11px;
+                }
+            }
+        }
+        if Branching.view.preview: Rectangle {
+            border-width: 1px;
+            border-color: Palette.border;
+            border-radius: 4px;
+            accessible-role: groupbox;
+            accessible-label: "Preview";
+            VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text { text: "What changes"; font-weight: 700; color: Palette.foreground; }
+                Text {
+                    text: Branching.view.preview-text;
+                    wrap: word-wrap;
+                    color: Palette.foreground;
+                    accessible-role: text;
+                    accessible-label: "Change";
+                    accessible-value: self.text;
+                }
+                if Branching.view.preview-paths != "": Muted { text: Branching.view.preview-paths; font-family: Reading.mono; font-size: 11px; wrap: word-wrap; }
+                if Branching.view.blocked != "": Text {
+                    text: "These files have local changes and would leave the view, so they are kept and nothing changes. Commit, shelve or revert them first, or drop them anyway:\n" + Branching.view.blocked;
+                    wrap: word-wrap;
+                    color: #b45309;
+                    accessible-role: text;
+                    accessible-label: "Files with local changes";
+                    accessible-value: Branching.view.blocked;
+                }
+                if Branching.view.untracked != "": Text {
+                    text: "Untracked files are where incoming files would go:\n" + Branching.view.untracked;
+                    wrap: word-wrap;
+                    color: #b45309;
+                    accessible-role: text;
+                    accessible-label: "Untracked files in the way";
+                    accessible-value: Branching.view.untracked;
+                }
+            }
+        }
+        if Branching.view.applying: Progress { busy: "Updating the files on disk. You can keep working meanwhile."; }
+        if Branching.view.done != "": Text {
+            text: Branching.view.done;
+            color: #15803d;
+            accessible-role: text;
+            accessible-label: "Done";
+            accessible-value: self.text;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Button { text: "Reset"; enabled: !root.busy && Branching.view.dirty; clicked => { Branching.reset-view(); } }
+            if !Branching.view.preview: Button {
+                text: Branching.view.checking ? "Checking…" : "Preview change";
+                primary: true;
+                enabled: !root.busy && Branching.view.dirty;
+                clicked => { Branching.preview-view(); }
+            }
+            if Branching.view.preview && Branching.view.stopped: Button {
+                text: "Drop them anyway…";
+                enabled: !root.busy;
+                clicked => { Branching.ask-force(); }
+            }
+            if Branching.view.preview && !Branching.view.stopped: Button {
+                text: Branching.view.applying ? "Applying…" : "Apply";
+                primary: true;
+                enabled: !root.busy;
+                clicked => { Branching.apply-view(); }
+            }
+        }
+    }
+}

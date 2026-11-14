@@ -15,9 +15,13 @@ use lode_desk::app::{
     SignInState, WorkspaceTab,
 };
 use lode_desk::app::{BlameState, DiffNote, DiffState, HistoryState, ImageState, Pane, Reading};
+use lode_desk::app::{
+    BranchesState, Branching, ConflictState, FolderRow, MergeState, OutcomeState, RegionRow,
+    SideLine, ViewState,
+};
 use lode_desk::app::{LocksState, ShelvesState, SubmitState, Team};
 use lode_desk::changes::{self, FileEntry, ListInfo, Pending};
-use lode_desk::{diffs, history, team};
+use lode_desk::{branches, diffs, history, merge, team, views};
 use serde_json::json;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter, WindowEvent};
@@ -363,6 +367,157 @@ fn main() {
         w.set_dialog(Dialog::SubmitShelf);
         shot("shelf-submit-blocked");
         w.set_dialog(Dialog::None);
+
+        // T134: branches, a merge, a three-way conflict and the view editor.
+        let b = w.global::<Branching>();
+        let list = sample_branches();
+        b.set_rows(ModelRc::from(Rc::new(VecModel::from(
+            branches::branch_rows(&list, "main", "", "harbor-night"),
+        ))));
+        b.set_branches(BranchesState {
+            loaded: true,
+            current: "main".into(),
+            selected: "harbor-night".into(),
+            active: true,
+            head: 1477,
+            ..BranchesState::default()
+        });
+        r.set_pane(Pane::Changes);
+        w.set_dialog(Dialog::Branches);
+        shot("branches");
+
+        b.set_sources(ModelRc::from(Rc::new(VecModel::from(vec![
+            slint::SharedString::from("harbor-night (r1477)"),
+            "release/1.2 (r1460)".into(),
+        ]))));
+        b.set_merge(MergeState {
+            title: "Merge into main".into(),
+            head: "r1477".into(),
+            ..MergeState::default()
+        });
+        w.set_dialog(Dialog::Merge);
+        shot("merge");
+
+        let result = serde_json::json!({"source": "harbor-night", "from_rev": 1470, "to_rev": 1477,
+            "nothing_to_do": false, "counts": {"applied": 3, "merged": 1, "conflicted": 1},
+            "files": [{"path": "Source/Game/Boat.cpp", "outcome": "conflicted"},
+                      {"path": "Source/Game/Tide.cpp", "outcome": "merged"},
+                      {"path": "Content/Maps/Harbor_Night.umap", "outcome": "applied"},
+                      {"path": "Content/Props/Lamp.uasset", "outcome": "applied"},
+                      {"path": "Config/DefaultGame.ini", "outcome": "applied"}]});
+        let o = branches::merge_outcome(&result);
+        let (rows, _) = branches::outcome_rows(&result, 40);
+        b.set_outcome_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+        b.set_outcome(OutcomeState {
+            title: o.title.into(),
+            text: o.text.into(),
+            conflicts: o.conflicts.into(),
+            notes: o.notes.into(),
+            done: o.done,
+            ..OutcomeState::default()
+        });
+        w.set_dialog(Dialog::Outcome);
+        shot("merge-result");
+        w.set_dialog(Dialog::None);
+
+        let (base, mine, theirs, current) = sample_conflict();
+        let base_lines = merge::lines(base);
+        let side = |text: &str, against: Option<&[String]>| -> Vec<SideLine> {
+            let own = merge::lines(text);
+            let changed = against.and_then(|a| merge::changed_lines(a, &own, merge::COMPARE_LIMIT));
+            own.into_iter()
+                .enumerate()
+                .map(|(i, l)| SideLine {
+                    n: i32::try_from(i + 1).unwrap_or(0),
+                    text: l.into(),
+                    changed: changed.as_ref().is_some_and(|c| c.contains(&i)),
+                })
+                .collect()
+        };
+        b.set_base_lines(ModelRc::from(Rc::new(VecModel::from(side(base, None)))));
+        b.set_mine_lines(ModelRc::from(Rc::new(VecModel::from(side(
+            mine,
+            Some(&base_lines),
+        )))));
+        b.set_theirs_lines(ModelRc::from(Rc::new(VecModel::from(side(
+            theirs,
+            Some(&base_lines),
+        )))));
+        let regions: Vec<RegionRow> = merge::regions(current)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (m, t))| RegionRow {
+                index: i32::try_from(i).unwrap_or(0),
+                label: format!("Conflict {} of 1", i + 1).into(),
+                mine: m.join("\n").into(),
+                theirs: t.join("\n").into(),
+            })
+            .collect();
+        b.set_regions(ModelRc::from(Rc::new(VecModel::from(regions))));
+        b.set_result_text(current.into());
+        b.set_conflict(ConflictState {
+            loaded: true,
+            path: "Source/Game/Boat.cpp".into(),
+            name: "Boat.cpp".into(),
+            from: "r1477".into(),
+            editable: true,
+            text: true,
+            base_note: "412 B".into(),
+            mine_note: "431 B · 1 line changed".into(),
+            theirs_note: "447 B · 2 lines changed".into(),
+            regions_left: 1,
+            ..ConflictState::default()
+        });
+        r.set_pane(Pane::Conflict);
+        shot("conflict");
+
+        let spec = views::Spec {
+            include: vec![],
+            exclude: vec!["Content/Cinematics/**".into()],
+        };
+        let folder = |path: &str, depth: i32, open: bool| {
+            let st = views::folder_state(&spec, path);
+            FolderRow {
+                path: path.into(),
+                name: path.rsplit('/').next().unwrap_or(path).into(),
+                depth,
+                open,
+                on: st.on,
+                mixed: st.mixed,
+                locked_by: st.locked_by.unwrap_or_default().into(),
+                files: "".into(),
+            }
+        };
+        b.set_folders(ModelRc::from(Rc::new(VecModel::from(vec![
+            folder("Config", 0, false),
+            folder("Content", 0, true),
+            folder("Content/Boats", 1, false),
+            folder("Content/Cinematics", 1, false),
+            folder("Content/Maps", 1, false),
+            folder("Content/Props", 1, false),
+            FolderRow {
+                path: "Content/".into(),
+                depth: 1,
+                files: "2 files".into(),
+                ..FolderRow::default()
+            },
+            folder("Source", 0, false),
+        ]))));
+        b.set_exclude_text("Content/Cinematics/**".into());
+        b.set_view(ViewState {
+            loaded: true,
+            depot: "game".into(),
+            server_label: "In the view at r1482".into(),
+            server: "18,240 files, 41.7 GB".into(),
+            disk: "21,530 files, 52.3 GB".into(),
+            dirty: true,
+            preview: true,
+            preview_text: "Fetch 0 files (0 B); remove 3,290 files from disk.".into(),
+            preview_paths: "− Content/Cinematics/Intro.umap\n− Content/Cinematics/Intro_Audio.uasset\n− Content/Cinematics/Outro.umap".into(),
+            ..ViewState::default()
+        });
+        r.set_pane(Pane::View);
+        shot("view-editor");
         r.set_pane(Pane::Changes);
         w.set_workspaces(ModelRc::default());
 
@@ -374,6 +529,48 @@ fn main() {
 }
 
 const SAMPLE_PATCH: &str = "--- a/Source/Game/Boat.cpp\n+++ b/Source/Game/Boat.cpp\n@@ -12,9 +12,11 @@ void ABoat::Tick(float DeltaTime)\n {\n     Super::Tick(DeltaTime);\n-    const float Speed = 10.0f;\n-    const float Roll = FMath::Sin(Time * 0.5f) * 3.0f;\n+    const float Speed = 12.0f;\n+    const float Roll = FMath::Sin(Time * 0.35f) * 3.0f;\n+    // Bob with the tide.\n+    const float Bob = Tide->HeightAt(GetActorLocation());\n     AddActorWorldOffset(GetActorForwardVector() * Speed * DeltaTime);\n-    SetActorRotation(FRotator(0.f, Yaw, Roll));\n+    SetActorRotation(FRotator(0.f, Yaw, Roll));\n+    SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, Bob));\n     Time += DeltaTime;\n }\n";
+
+/// Branches as `Desk::branches` lists them.
+fn sample_branches() -> Vec<serde_json::Value> {
+    let b = |name: &str, head: u64, parent: serde_json::Value, state: &str| json!({"name": name, "head_rev": head, "parent": parent, "state": state});
+    vec![
+        b("main", 1482, serde_json::Value::Null, "active"),
+        b(
+            "harbor-night",
+            1477,
+            json!({"branch": "main", "rev": 1440}),
+            "active",
+        ),
+        b(
+            "release/1.2",
+            1460,
+            json!({"branch": "main", "rev": 1400}),
+            "active",
+        ),
+        b(
+            "feature/boat-physics",
+            1451,
+            json!({"branch": "main", "rev": 1431}),
+            "active",
+        ),
+        b(
+            "old-water",
+            1200,
+            json!({"branch": "main", "rev": 1100}),
+            "archived",
+        ),
+    ]
+}
+
+/// A conflict's base, mine, theirs and the file with its markers.
+fn sample_conflict() -> (&'static str, &'static str, &'static str, &'static str) {
+    (
+        "void ABoat::Tick(float DeltaTime)\n{\n    Super::Tick(DeltaTime);\n    const float Speed = 10.0f;\n    AddActorWorldOffset(GetActorForwardVector() * Speed * DeltaTime);\n}\n",
+        "void ABoat::Tick(float DeltaTime)\n{\n    Super::Tick(DeltaTime);\n    const float Speed = 12.0f;\n    AddActorWorldOffset(GetActorForwardVector() * Speed * DeltaTime);\n}\n",
+        "void ABoat::Tick(float DeltaTime)\n{\n    Super::Tick(DeltaTime);\n    const float Speed = Tide->SpeedAt(GetActorLocation());\n    AddActorWorldOffset(GetActorForwardVector() * Speed * DeltaTime);\n    Bob(DeltaTime);\n}\n",
+        "void ABoat::Tick(float DeltaTime)\n{\n    Super::Tick(DeltaTime);\n<<<<<<< mine\n    const float Speed = 12.0f;\n=======\n    const float Speed = Tide->SpeedAt(GetActorLocation());\n>>>>>>> r1477\n    AddActorWorldOffset(GetActorForwardVector() * Speed * DeltaTime);\n    Bob(DeltaTime);\n}\n",
+    )
+}
 
 /// Locks as `Desk::locks` lists them.
 fn sample_locks() -> Vec<serde_json::Value> {

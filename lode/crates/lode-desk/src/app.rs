@@ -34,10 +34,12 @@ mod screens {
 
 pub use screens::*;
 
+mod branch;
 mod read;
 mod team;
 mod work;
 
+use branch::BranchState;
 use read::ReadState;
 use team::TeamState;
 use work::WorkspaceState;
@@ -120,6 +122,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     let messages_file = options.data_dir.join("messages.json");
     let read = ReadState::new(&window, &options.data_dir);
     let team = TeamState::new(&window);
+    let branch = BranchState::new(&window);
     let app = Rc::new(App {
         window: window.as_weak(),
         desk,
@@ -139,6 +142,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         dialog_paths: RefCell::new(Vec::new()),
         read,
         team,
+        branch,
         this: RefCell::new(RcWeak::new()),
     });
     *app.this.borrow_mut() = Rc::downgrade(&app);
@@ -147,6 +151,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     work::connect(&window, &app);
     read::connect(&window, &app);
     team::connect(&window, &app);
+    branch::connect(&window, &app);
     Ok(window)
 }
 
@@ -169,6 +174,15 @@ impl Ui for WindowUi {
                 state.progress = fraction;
                 state.progress_text = text.as_str().into();
                 w.set_checkout(state);
+            }
+            let b = w.global::<Branching>();
+            let running = !b.get_branches().busy.is_empty()
+                || b.get_new_branch().busy
+                || b.get_merge().busy
+                || b.get_view().applying;
+            if running {
+                b.set_progress(fraction);
+                b.set_progress_text(text.as_str().into());
             }
             let mut changes = w.get_changes();
             if changes.busy == "Committing" {
@@ -227,6 +241,8 @@ struct App {
     read: ReadState,
     /// Locks, shelves and checks (T133).
     team: TeamState,
+    /// Branches, merges, conflicts and the view (T134).
+    branch: BranchState,
     /// This controller, for tasks that outlive a call.
     this: RefCell<RcWeak<App>>,
 }
@@ -597,6 +613,9 @@ impl App {
         };
         match w.get_dialog() {
             Dialog::CheckOut if w.get_checkout().busy => {}
+            Dialog::Branches if !w.global::<Branching>().get_branches().busy.is_empty() => {}
+            Dialog::NewBranch if w.global::<Branching>().get_new_branch().busy => {}
+            Dialog::Merge if w.global::<Branching>().get_merge().busy => {}
             Dialog::NewChangelist
             | Dialog::RenameChangelist
             | Dialog::CommitChangelist
@@ -757,7 +776,7 @@ fn grouped(n: u64) -> String {
 }
 
 /// `1.5 MB`.
-fn human_bytes(n: u64) -> String {
+pub(crate) fn human_bytes(n: u64) -> String {
     const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
     if n < 1024 {
         return format!("{n} B");

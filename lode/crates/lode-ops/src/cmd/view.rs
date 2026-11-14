@@ -170,6 +170,9 @@ async fn sync_view(
     let client = ctx.client(&server)?;
     let (entries, _) = full_manifest(&client, &depot, rev, next).await?;
     let wanted: HashSet<DepotPath> = entries.iter().map(|e| e.path.clone()).collect();
+    // Only paths the new patterns leave out go: a file committed or added since the synced
+    // revision is not in its manifest, but it is still in the view.
+    let next_view = next.compile()?;
 
     // What leaves the view, and whether any of it has local changes.
     // Scanned without the view, so untracked files at paths entering it are seen too.
@@ -186,7 +189,7 @@ async fn sync_view(
     let mut drop_paths = Vec::new();
     let mut blocked = Vec::new();
     for e in &report.entries {
-        if e.row.is_none() || wanted.contains(&e.path) {
+        if e.row.is_none() || wanted.contains(&e.path) || next_view.contains(&e.path) {
             continue;
         }
         if e.status != Status::Unchanged {
@@ -258,7 +261,13 @@ async fn sync_view(
         })?;
         removed += 1;
     }
-    let fetched = fetch_entries(ws, &client, &depot, entries, ctx).await?;
+    // Only what is not tracked yet comes in: a tracked file keeps what is on disk, local
+    // changes included.
+    let incoming: Vec<_> = entries
+        .into_iter()
+        .filter(|e| report.get(&e.path).is_none_or(|s| s.row.is_none()))
+        .collect();
+    let fetched = fetch_entries(ws, &client, &depot, incoming, ctx).await?;
     ws.set_view_spec(next)?;
     ctx.out.line(format!(
         "View updated: {} files added, {removed} removed.",

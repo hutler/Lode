@@ -36,6 +36,10 @@ pub(super) enum View {
     Locks,
     /// The depot's shelves (T133).
     Shelves,
+    /// A conflicted file being resolved (T134).
+    Conflict { path: String },
+    /// The workspace view's editor (T134).
+    Patterns,
 }
 
 /// The models and loaded state behind `Reading`.
@@ -134,6 +138,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
             Pane::Changes => View::Changes,
             Pane::Locks => View::Locks,
             Pane::Shelves => View::Shelves,
+            Pane::View => View::Patterns,
+            Pane::Conflict => View::Changes,
             _ => View::History {
                 path: None,
                 rev: None,
@@ -260,7 +266,7 @@ impl App {
     }
 
     /// Opens `view` in the workspace that shows, and loads what it needs.
-    fn open_view(&self, view: View) {
+    pub(super) fn open_view(&self, view: View) {
         let Some((w, root)) = self.reading() else {
             return;
         };
@@ -291,6 +297,14 @@ impl App {
             View::Shelves => {
                 r.set_pane(Pane::Shelves);
                 self.load_shelves();
+            }
+            View::Conflict { path } => {
+                r.set_pane(Pane::Conflict);
+                self.load_conflict(path);
+            }
+            View::Patterns => {
+                r.set_pane(Pane::View);
+                self.load_view(false);
             }
         }
     }

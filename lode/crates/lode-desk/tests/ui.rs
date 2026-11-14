@@ -12,14 +12,15 @@ use std::time::Duration;
 
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use lode_desk::app::{
-    self, AppWindow, BlameLine, ChangeRow, CheckRow, Dialog, DiffRow, LockRow, Options, Pane,
-    Reading, RevRow, ShelfRow, Span, Team,
+    self, AppWindow, BlameLine, BranchRow, Branching, ChangeRow, CheckRow, Dialog, DiffRow,
+    FolderRow, LockRow, Options, Pane, Reading, RevRow, ShelfRow, Span, Team,
 };
 use lode_desk::changes::{self, FileEntry, Pending};
 use lode_desk::desk::Desk;
 use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
 use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
+use lode_proto::depot::CreateBranchRequest;
 use lode_proto::PrincipalKind;
 use lode_server::{OidcConfig, PasswordLogin};
 use lode_testkit::oidc::{browse, TestProvider};
@@ -232,6 +233,76 @@ required = [{ name = "ci/build", reporter = "ci" }, { name = "ci/test", reporter
             "**",
             AclEffect::Allow,
             AccessLevel::Read,
+        )
+        .await;
+    // Depot `forks`: branch `dev` changes four files main changes too (three text, one binary)
+    // and adds one; branch `feature` only adds a file. Two folders for the view.
+    server.create_depot("forks").await;
+    server
+        .commit_files(
+            "forks",
+            "main",
+            &[
+                ("a.txt", b"apple\n"),
+                ("b.txt", b"one\ntwo\nthree\n"),
+                ("c.txt", b"c\n"),
+                ("d.txt", b"d\n"),
+                ("pic.bin", &[0, 1, 0, 1]),
+                ("Content/Maps/harbor.txt", b"map\n"),
+                ("Content/Cine/intro.txt", b"intro\n"),
+            ],
+        )
+        .await;
+    for name in ["dev", "feature"] {
+        server
+            .admin()
+            .create_branch(
+                "forks",
+                &CreateBranchRequest {
+                    name: name.into(),
+                    from_branch: "main".into(),
+                    from_rev: None,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    server
+        .commit_files(
+            "forks",
+            "dev",
+            &[
+                ("b.txt", b"one\nTWO dev\nthree\n"),
+                ("c.txt", b"c dev\n"),
+                ("d.txt", b"d dev\n"),
+                ("pic.bin", &[0, 2, 0, 2]),
+                ("f.txt", b"new on dev\n"),
+            ],
+        )
+        .await;
+    server
+        .commit_files("forks", "feature", &[("g.txt", b"from feature\n")])
+        .await;
+    server
+        .commit_files(
+            "forks",
+            "main",
+            &[
+                ("b.txt", b"one\nTWO main\nthree\n"),
+                ("c.txt", b"c main\n"),
+                ("d.txt", b"d main\n"),
+                ("pic.bin", &[0, 3, 0, 3]),
+            ],
+        )
+        .await;
+    server
+        .acl(
+            "forks",
+            "alice",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Write,
         )
         .await;
     let url = server.url().trim_end_matches('/').to_owned();
@@ -1385,6 +1456,280 @@ async fn locks_shelves_and_checks(world: &World) {
     println!("locks, shelves and checks ... ok");
 }
 
+fn branch_rows(w: &AppWindow) -> Vec<BranchRow> {
+    w.global::<Branching>().get_rows().iter().collect()
+}
+
+fn folders(w: &AppWindow) -> Vec<FolderRow> {
+    w.global::<Branching>().get_folders().iter().collect()
+}
+
+/// Opens the conflict of `path` from its details in Changes.
+async fn open_conflict(w: &AppWindow, path: &str) {
+    let b = w.global::<Branching>();
+    click(w, path);
+    click(w, &format!("Resolve {path}"));
+    assert_eq!(w.global::<Reading>().get_pane(), Pane::Conflict);
+    until("the conflict loads", || b.get_conflict().loaded).await;
+    assert_eq!(b.get_conflict().path, path);
+}
+
+async fn resolved(w: &AppWindow, path: &str, how: &str) {
+    until("it is resolved", || {
+        value_or_empty(w, "Done") == format!("Resolved {path}: {how}.")
+    })
+    .await;
+    assert_eq!(w.global::<Reading>().get_pane(), Pane::Changes);
+    until("the file is no longer conflicted", || {
+        row(w, path, false).is_none_or(|r| r.status != "conflicted")
+    })
+    .await;
+}
+
+/// Opens the branch list from the sidebar, whose button names the branch and revision.
+fn open_branches(w: &AppWindow) {
+    let t = w.get_workspaces().row_data(0).unwrap();
+    click(
+        w,
+        &format!("Branch {} at r{}: change branch", t.branch, t.rev),
+    );
+}
+
+async fn branches_merges_and_views(world: &World) {
+    let home = Home::new();
+    let folder = home.path().join("forks");
+    let w = home.window(world, Some(folder.clone()));
+    signed_in(world, &w).await;
+    click(&w, "Check out a depot…");
+    type_into(&w, "Depot", &format!("{}/forks", world.url));
+    click(&w, "Browse…");
+    click(&w, "Check out");
+    until("the workspace opens", || w.get_dialog() == Dialog::None).await;
+    until("its changes load", || w.get_changes().loaded).await;
+    let root = std::fs::canonicalize(&folder).unwrap();
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap();
+    let b = w.global::<Branching>();
+    let r = w.global::<Reading>();
+    let tab = |w: &AppWindow| w.get_workspaces().row_data(0).unwrap();
+
+    // The branch list: the current one first, filtered by name.
+    open_branches(&w);
+    assert_eq!(w.get_dialog(), Dialog::Branches);
+    until("branches load", || b.get_branches().loaded).await;
+    let names: Vec<String> = branch_rows(&w).iter().map(|r| r.name.to_string()).collect();
+    assert_eq!(names, ["main", "dev", "feature"]);
+    assert!(branch_rows(&w)[0].current && branch_rows(&w)[0].selected);
+    assert_eq!(branch_rows(&w)[1].origin, "from main@r2");
+    type_into(&w, "Filter branches", "FEA");
+    b.invoke_filter_changed();
+    assert_eq!(branch_rows(&w).len(), 1);
+    type_into(&w, "Filter branches", "nope");
+    b.invoke_filter_changed();
+    assert_eq!(b.get_branches().empty, "No branch matches “nope”.");
+    type_into(&w, "Filter branches", "");
+    b.invoke_filter_changed();
+
+    // Switch to dev; a revision it does not have is refused first.
+    click(&w, "Branch dev");
+    assert!(!b.get_branches().is_current);
+    type_into(&w, "Revision", "r99");
+    b.invoke_rev_edited();
+    assert!(b.get_branches().bad_rev);
+    type_into(&w, "Revision", "");
+    b.invoke_rev_edited();
+    assert!(!b.get_branches().bad_rev);
+    let dev_head = branch_rows(&w)
+        .iter()
+        .find(|r| r.name == "dev")
+        .map(|r| r.head.to_string())
+        .unwrap();
+    click(&w, "Switch");
+    until("the switch is done", || w.get_dialog() == Dialog::Outcome).await;
+    assert_eq!(b.get_outcome().title, "Switched to dev");
+    assert!(
+        b.get_outcome().text.starts_with(&format!(
+            "The workspace is on dev at {dev_head}, from main."
+        )),
+        "{}",
+        b.get_outcome().text
+    );
+    assert_eq!(read("c.txt"), "c dev\n");
+    click_in(&w, "Switched to dev", "Done");
+    until("the tab follows", || tab(&w).branch == "dev").await;
+
+    // And back to main.
+    open_branches(&w);
+    until("branches load", || {
+        b.get_branches().loaded && b.get_branches().current == "dev"
+    })
+    .await;
+    click(&w, "Branch main");
+    click(&w, "Switch");
+    until("back on main", || w.get_dialog() == Dialog::Outcome).await;
+    click_in(&w, "Switched to main", "Done");
+    until("the tab follows", || tab(&w).branch == "main").await;
+    assert_eq!(read("c.txt"), "c main\n");
+
+    // A clean merge of feature, committed.
+    open_branches(&w);
+    until("branches load", || b.get_branches().loaded).await;
+    click(&w, "Branch feature");
+    click(&w, "Merge feature…");
+    assert_eq!(w.get_dialog(), Dialog::Merge);
+    assert_eq!(b.get_merge().title, "Merge into main");
+    click_in(&w, "Merge", "Merge");
+    until("the merge is done", || w.get_dialog() == Dialog::Outcome).await;
+    let o = b.get_outcome();
+    assert!(o.title.starts_with("Merged feature r"), "{o:?}");
+    assert!(o.done && o.conflicts.is_empty(), "{o:?}");
+    click_in(&w, &o.title, "Done");
+    assert_eq!(read("g.txt"), "from feature\n");
+    until("the merge waits for the commit", || {
+        !w.get_changes().merging.is_empty()
+    })
+    .await;
+    w.set_commit_message("Merge feature into main".into());
+    click(&w, "Commit merge");
+    until("the merge is committed", || {
+        value_or_empty(&w, "Done").starts_with("Committed r")
+    })
+    .await;
+
+    // A merge of dev: four files conflict, each resolved another way.
+    open_branches(&w);
+    until("branches load", || b.get_branches().loaded).await;
+    click(&w, "Branch dev");
+    click(&w, "Merge dev…");
+    click_in(&w, "Merge", "Merge");
+    until("the merge is done", || w.get_dialog() == Dialog::Outcome).await;
+    let o = b.get_outcome();
+    assert!(
+        !o.done && o.conflicts.starts_with("4 files changed on both sides"),
+        "{o:?}"
+    );
+    click(&w, "Resolve conflicts");
+    assert_eq!(w.get_dialog(), Dialog::None);
+    assert_eq!(r.get_pane(), Pane::Changes);
+    until("the conflicts show", || w.get_changes().conflicted == 4).await;
+    assert_eq!(read("f.txt"), "new on dev\n");
+
+    // b.txt: their side of the region, then the result saved.
+    open_conflict(&w, "b.txt").await;
+    let c = b.get_conflict();
+    assert!(c.editable && c.from == dev_head, "{c:?}");
+    assert_eq!(c.regions_left, 1);
+    let mine: Vec<(String, bool)> = b
+        .get_mine_lines()
+        .iter()
+        .map(|l| (l.text.to_string(), l.changed))
+        .collect();
+    assert_eq!(
+        mine,
+        [
+            ("one".to_owned(), false),
+            ("TWO main".to_owned(), true),
+            ("three".to_owned(), false)
+        ]
+    );
+    assert!(b
+        .get_theirs_lines()
+        .iter()
+        .any(|l| l.text == "TWO dev" && l.changed));
+    let region = b.get_regions().row_data(0).unwrap();
+    assert_eq!(
+        (region.mine.as_str(), region.theirs.as_str()),
+        ("TWO main", "TWO dev")
+    );
+    click(&w, "Use theirs in Conflict 1 of 1");
+    assert_eq!(b.get_conflict().regions_left, 0);
+    assert_eq!(b.get_result_text(), "one\nTWO dev\nthree\n");
+    click(&w, "Save and mark resolved");
+    resolved(&w, "b.txt", "saved the edited result").await;
+    assert_eq!(read("b.txt"), "one\nTWO dev\nthree\n");
+
+    // c.txt: mine; d.txt: theirs.
+    open_conflict(&w, "c.txt").await;
+    click(&w, "Take mine");
+    resolved(&w, "c.txt", "kept your version").await;
+    assert_eq!(read("c.txt"), "c main\n");
+    open_conflict(&w, "d.txt").await;
+    click(&w, "Take theirs");
+    resolved(&w, "d.txt", "took their version").await;
+    assert_eq!(read("d.txt"), "d dev\n");
+
+    // pic.bin cannot be merged line by line: one side is kept.
+    open_conflict(&w, "pic.bin").await;
+    assert!(!b.get_conflict().editable);
+    assert_eq!(b.get_conflict().mine_note, "4 B");
+    click(&w, "Keep mine");
+    resolved(&w, "pic.bin", "kept your version").await;
+    assert_eq!(std::fs::read(root.join("pic.bin")).unwrap(), [0, 3, 0, 3]);
+    until("no conflicts left", || w.get_changes().conflicted == 0).await;
+
+    // Abandoning the merge keeps the files but not the merge.
+    click(&w, "Abandon merge");
+    until("the merge is gone", || w.get_changes().merging.is_empty()).await;
+    assert_eq!(read("f.txt"), "new on dev\n");
+
+    // The view: leave a folder out, with its dry run first.
+    click(&w, "Workspace view");
+    assert_eq!(r.get_pane(), Pane::View);
+    until("the view loads", || {
+        b.get_view().loaded && !folders(&w).is_empty()
+    })
+    .await;
+    assert_eq!(value(&w, "On disk").split(',').next(), Some("8 files"));
+    assert_eq!(folders(&w)[0].path, "Content");
+    click(&w, "Open Content");
+    until("its folders show", || folders(&w).len() == 3).await;
+    let paths: Vec<String> = folders(&w).iter().map(|f| f.path.to_string()).collect();
+    assert_eq!(paths, ["Content", "Content/Cine", "Content/Maps"]);
+    click(&w, "Include Content/Cine");
+    assert_eq!(b.get_exclude_text(), "Content/Cine/**");
+    assert!(b.get_view().dirty);
+    assert!(folders(&w)[0].on && folders(&w)[0].mixed && !folders(&w)[1].on);
+    click(&w, "Preview change");
+    until("the dry run answers", || b.get_view().preview).await;
+    assert_eq!(
+        value(&w, "Change"),
+        "Fetch 0 files (0 B); remove 1 file from disk.",
+        "{}",
+        b.get_view().preview_paths
+    );
+    assert!(
+        root.join("Content/Cine/intro.txt").exists(),
+        "a dry run changes nothing"
+    );
+    click(&w, "Apply");
+    until("the view is applied", || !b.get_view().done.is_empty()).await;
+    assert_eq!(
+        b.get_view().done,
+        "View updated: 0 files fetched, 1 removed."
+    );
+    assert!(!root.join("Content/Cine/intro.txt").exists());
+    assert_eq!(read("b.txt"), "one\nTWO dev\nthree\n", "local changes stay");
+    assert_eq!(read("f.txt"), "new on dev\n", "added files stay");
+    until("it reloads", || b.get_view().loaded && !b.get_view().dirty).await;
+
+    // A file with local changes stops the next change until it is dropped on purpose.
+    std::fs::write(root.join("Content/Maps/harbor.txt"), "map, edited\n").unwrap();
+    type_into(&w, "Exclude patterns", "Content/**");
+    b.invoke_patterns_edited();
+    click(&w, "Preview change");
+    until("the dry run answers", || b.get_view().preview).await;
+    assert!(b.get_view().stopped);
+    assert_eq!(
+        value(&w, "Files with local changes"),
+        "Content/Maps/harbor.txt"
+    );
+    click(&w, "Drop them anyway…");
+    assert_eq!(w.get_dialog(), Dialog::Confirm);
+    click_in(&w, "Drop local changes?", "Drop and apply");
+    until("the view is applied", || !b.get_view().done.is_empty()).await;
+    assert!(!root.join("Content/Maps/harbor.txt").exists());
+    println!("branches, merges and views ... ok");
+}
+
 fn main() -> std::process::ExitCode {
     i_slint_backend_testing::init_integration_test_with_system_time();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1403,6 +1748,7 @@ fn main() -> std::process::ExitCode {
         twenty_thousand_rows(&world).await;
         history_blame_and_diffs(&world).await;
         locks_shelves_and_checks(&world).await;
+        branches_merges_and_views(&world).await;
         let _ = slint::quit_event_loop();
     })
     .unwrap();

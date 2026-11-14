@@ -9,13 +9,16 @@
 #![deny(unsafe_code)]
 
 pub mod app;
+pub mod branches;
 pub mod changes;
 pub mod desk;
 pub mod diffs;
 pub mod history;
 pub mod links;
+pub mod merge;
 pub mod team;
 pub mod update;
+pub mod views;
 pub mod watch;
 #[cfg(feature = "web")]
 pub mod web;

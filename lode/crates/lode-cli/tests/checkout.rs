@@ -303,6 +303,54 @@ async fn the_view_adds_and_removes_exactly_its_files() {
     assert!(tree(&root).is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_view_change_keeps_local_changes_and_files_committed_or_added_since_the_sync() {
+    let server = server_with_depot().await;
+    server
+        .commit_files("game", "main", &[("a.txt", b"a"), ("art/x.psd", b"psd")])
+        .await;
+    let ws = ws_for(&server);
+    let url = format!("{}/game", server.url());
+    ws.json(&["checkout", &url, "ws"]);
+    let root = ws.root().join("ws");
+    let w = |args: &[&str]| -> serde_json::Value {
+        let mut full = vec!["-C", "ws"];
+        full.extend_from_slice(args);
+        ws.json(&full)
+    };
+    // Committed after the checkout, so not in the synced revision's manifest.
+    std::fs::write(root.join("new.txt"), b"new").unwrap();
+    w(&["add", "new.txt"]);
+    w(&["commit", "-m", "New"]);
+    // Added, not committed.
+    std::fs::write(root.join("added.txt"), b"added").unwrap();
+    w(&["add", "added.txt"]);
+    // Changed, not committed.
+    std::fs::write(root.join("a.txt"), b"a, edited").unwrap();
+
+    let v = w(&["view", "exclude", "art/**"]);
+    assert_eq!(
+        (v["added"].as_u64(), v["removed"].as_u64()),
+        (Some(0), Some(1)),
+        "{v}"
+    );
+    assert_eq!(tree(&root), vec!["a.txt", "added.txt", "new.txt"]);
+    assert_eq!(
+        std::fs::read(root.join("a.txt")).unwrap(),
+        b"a, edited",
+        "local changes stay"
+    );
+    let st = w(&["status"]);
+    let added: Vec<&str> = st["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["status"] == "added")
+        .filter_map(|f| f["path"].as_str())
+        .collect();
+    assert_eq!(added, ["added.txt"], "{st}");
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_symlinked_directory_is_not_followed() {

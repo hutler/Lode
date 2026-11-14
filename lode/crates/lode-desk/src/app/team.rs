@@ -16,11 +16,15 @@ use crate::team;
 
 /// What the confirm dialog does when confirmed.
 #[derive(Debug, Clone, Default)]
-enum Confirm {
+pub(super) enum Confirm {
     #[default]
     None,
     BreakLock(String),
     DeleteShelf(u64),
+    /// Archive a branch (T134).
+    ArchiveBranch(String),
+    /// Apply the edited view, dropping local changes in the way (T134).
+    ForceView,
 }
 
 /// What the shelve dialog shelves.
@@ -369,6 +373,40 @@ impl App {
             Confirm::None => w.set_dialog(Dialog::None),
             Confirm::BreakLock(p) => self.release(vec![p], true),
             Confirm::DeleteShelf(id) => self.delete_shelf(id),
+            Confirm::ArchiveBranch(name) => self.archive_branch(name),
+            Confirm::ForceView => self.apply_view(true),
+        }
+    }
+
+    /// Asks `title` with `body`, doing `action` when `confirm` is pressed.
+    pub(super) fn ask_confirm(
+        &self,
+        action: Confirm,
+        title: String,
+        body: String,
+        confirm: String,
+    ) {
+        let Some(w) = self.window.upgrade() else {
+            return;
+        };
+        *self.team.confirm.borrow_mut() = action;
+        w.global::<Team>().set_confirm(ConfirmState {
+            title: title.into(),
+            body: body.into(),
+            confirm: confirm.into(),
+            ..ConfirmState::default()
+        });
+        w.set_dialog(Dialog::Confirm);
+    }
+
+    /// Shows why a confirmed action failed, in the confirm dialog.
+    pub(super) fn confirm_failed(&self, e: &ErrorView) {
+        if let Some(w) = self.window.upgrade() {
+            let t = w.global::<Team>();
+            let mut c = t.get_confirm();
+            c.busy = false;
+            c.error = error_info(e);
+            t.set_confirm(c);
         }
     }
 

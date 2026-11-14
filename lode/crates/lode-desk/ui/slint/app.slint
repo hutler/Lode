@@ -8,10 +8,12 @@ import { ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, Mov
 import { CheckoutDialog, CheckoutState } from "checkout.slint";
 import { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, LocksView, ShelvesView, LockDialog, TeamConfirmDialog, ShelveDialog, SubmitShelfDialog, UnshelvedDialog } from "team.slint";
 import { CheckBadgeInfo, CheckRow } from "checks.slint";
+import { Branching, BranchRow, BranchesState, NewBranchState, MergeState, OutcomeRow, OutcomeState, SideLine, RegionRow, ConflictState, FolderRow, ViewState, BranchesDialog, NewBranchDialog, MergeDialog, OutcomeDialog, ConflictView, ViewEditor } from "branches.slint";
 import { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState, HistoryView, BlameView, DiffView } from "history.slint";
 
 export { ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
 export { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, CheckBadgeInfo, CheckRow }
+export { Branching, BranchRow, BranchesState, NewBranchState, MergeState, OutcomeRow, OutcomeState, SideLine, RegionRow, ConflictState, FolderRow, ViewState }
 export { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState }
 
 /// A workspace opened before.
@@ -31,7 +33,7 @@ export struct WorkspaceTab {
     server: string,
 }
 
-export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved }
+export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome }
 
 component Tab inherits Rectangle {
     in property <string> text;
@@ -247,6 +249,11 @@ component WorkspacePage inherits Rectangle {
                 Field { label: "Revision"; value: root.ws.rev; }
                 Field { label: "Server"; value: root.ws.server; }
                 Muted { text: root.ws.root; wrap: word-wrap; font-size: 11px; }
+                Button {
+                    text: "Branches…";
+                    accessible-label: "Branch " + root.ws.branch + " at r" + root.ws.rev + ": change branch";
+                    clicked => { Branching.open-branches(); }
+                }
                 Rectangle { height: 8px; }
                 NavButton {
                     text: "Changes";
@@ -268,6 +275,12 @@ component WorkspacePage inherits Rectangle {
                     active: Reading.pane == Pane.shelves;
                     clicked => { Reading.show-pane(Pane.shelves); }
                 }
+                NavButton {
+                    text: "View";
+                    accessible-label: "Workspace view";
+                    active: Reading.pane == Pane.view;
+                    clicked => { Reading.show-pane(Pane.view); }
+                }
             }
         }
         VerticalLayout {
@@ -287,6 +300,8 @@ component WorkspacePage inherits Rectangle {
             if Reading.pane == Pane.diff: DiffView { vertical-stretch: 1; }
             if Reading.pane == Pane.locks: LocksView { vertical-stretch: 1; branch: root.ws.branch; }
             if Reading.pane == Pane.shelves: ShelvesView { vertical-stretch: 1; }
+            if Reading.pane == Pane.conflict: ConflictView { vertical-stretch: 1; }
+            if Reading.pane == Pane.view: ViewEditor { vertical-stretch: 1; }
             if Reading.pane == Pane.changes: ChangesView {
                 vertical-stretch: 1;
                 state: root.changes;
@@ -557,6 +572,30 @@ export component AppWindow inherits Window {
             close => { root.close-dialog(); }
         }
         if root.dialog == Dialog.submit-shelf: SubmitShelfDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.branches: BranchesDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 4;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.new-branch: NewBranchDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.merge: MergeDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.outcome: OutcomeDialog {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 3;
             height: self.preferred-height;

@@ -48,6 +48,7 @@ tauri-build = { version = "2.7", features = [], optional = true }
 [dependencies]
 lode-client = { path = "../lode-client" }
 lode-ops = { path = "../lode-ops" }
+lode-core = { path = "../lode-core" }
 directories = "6"
 # Decodes the two sides of an image diff (Slint takes pixels); already in the tree through tauri and rfd.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
