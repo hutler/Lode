@@ -20,6 +20,7 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M7.md](M7.md) | Release v1 | T070–T072 |
 | [M8.md](M8.md) | Easy setup | T080–T087 |
 | [M9.md](M9.md) | GUI core | T090–T094 |
+| [M10.md](M10.md) | GUI team work | T100–T104 |
 
 ## Dependency graph
 
@@ -77,6 +78,10 @@ M9   T090                             (after T087)
      T091                             (after T090)
      T092  T093                       (after T091)
      T094                             (after T092 T093)
+
+M10  T100  T101  T104                 (after T094)
+     T102                             (after T101)
+     T103                             (after T093 T102)
 ```
 
 ## Status
