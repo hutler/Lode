@@ -14,10 +14,9 @@ Rules for agents working here are in [AGENTS.md](AGENTS.md).
 
 ## Status
 
-Lode v1 (milestones M0 to M6) and its packaging, desktop client and 0.2 features (M7 to M12)
-are implemented; the first release, 0.1.0, is next. Lode Desk is moving from a web view to a
-native Slint UI (M13), and a web admin UI for the server is planned (M14). Lode for Unreal is
-planned. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
+Lode v1 (milestones M0 to M6), its packaging and 0.2 features (M7 to M12), Lode Desk with a
+native Slint UI (M13) and the server's admin web UI (M14) are implemented. The first public
+release is 0.2.0. Lode for Unreal is planned. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
 [unreal/docs/TASKS.md](unreal/docs/TASKS.md).
 
 ## How the parts fit

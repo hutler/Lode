@@ -60,9 +60,10 @@ a newer client may use requests that an older server does not know.
 
 ### 0.1.0
 
-First release.
+Built and tested, never published. 0.2.0 is the first public release; a server that ran a
+0.1 build from source upgrades as the notes below say.
 
-### Next release (M8, not yet released)
+### 0.2.0: setup and packaging (M8)
 
 - New `[connections]` table (`header_timeout_seconds`, `max_per_address`). The defaults apply
   without it; slow and idle connections are now closed after 30 seconds.
@@ -79,7 +80,7 @@ First release.
 - Client installers: a Windows MSI (also for winget), a Homebrew formula, and
   `lode self-update` for archive installs. Releases also carry the bare `lode` executables.
 
-### 0.2.0 (M12, not yet released)
+### 0.2.0: obliterate, importers, single sign-on, S3, Lode Desk on Slint, admin web UI (M12 to M14)
 
 - The database gains the `obliterated` table (core schema 3) and a single sign-on column on
   principals (core schema 4), both added automatically on the first start. A 0.1 server refuses a database a 0.2 server has opened, so take a backup first if

@@ -6,7 +6,7 @@
 <style>
   @page { size: A4; margin: 22mm 18mm 20mm 18mm;
           @bottom-center { content: counter(page); font: 9pt "Segoe UI", Arial, sans-serif; color: #667; }
-          @top-right { content: "Lode User Guide — v0.1"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
+          @top-right { content: "Lode User Guide — v0.2"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
   @page :first { @bottom-center { content: none; } @top-right { content: none; } }
   :root { --ink:#1c2530; --muted:#5a6675; --accent:#0b5cad; --rule:#d5dbe3; --code-bg:#f3f5f8; --note-bg:#eef5fc; --warn-bg:#fff6e5; }
   html { font: 10.5pt/1.5 "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
@@ -56,9 +56,9 @@
   <p class="title">Lode</p>
   <p class="sub">User Guide for Client and Server</p>
   <p class="meta">
-    Version 0.1 · November 2026<br>
+    Version 0.2 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes Lode 0.1 with the integration release (webhooks, checks) and the admin web UI.
+    Describes Lode 0.2 with the integration release (webhooks, checks) and the admin web UI.
   </p>
 </section>
 
@@ -122,7 +122,7 @@
 <pre><code>curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh
 sudo -u lode loded setup            # domain, email, backups, admin password
 sudo systemctl enable --now loded</code></pre>
-<p><strong>Windows.</strong> Run <code>lode-server-0.1.0-x64.msi</code> from the releases page and keep "Set up the Lode server now" ticked on the last page. Answer the questions in the window that opens; it installs and starts the service. Allow port 443 (or the port you chose) through Windows Firewall.</p>
+<p><strong>Windows.</strong> Run <code>lode-server-0.2.0-x64.msi</code> from the releases page and keep "Set up the Lode server now" ticked on the last page. Answer the questions in the window that opens; it installs and starts the service. Allow port 443 (or the port you chose) through Windows Firewall.</p>
 <p><strong>Docker.</strong> Copy <code>packaging/compose.yaml</code> from the release archive, set <code>LODED_DOMAIN</code> and <code>LODED_EMAIL</code> in it, put the admin password in <code>admin-password.txt</code> beside it, and run <code>docker compose up -d</code>.</p>
 <p>Without a domain, choose "this machine only" in the setup: the server then answers plain HTTP on 127.0.0.1:7480, for trying Lode out or for running behind your own proxy. Part II, chapter 2 has every option.</p>
 <h3>2. Your project</h3>
@@ -151,7 +151,7 @@ lode checkout https://lode.example.com/mygame MyGame</code></pre>
 <p>The client is a single executable named <code>lode</code> (<code>lode.exe</code> on Windows). Install it the way your system installs software:</p>
 <table>
   <tr><th style="width:22%">System</th><th>Install</th><th style="width:30%">Update</th></tr>
-  <tr><td>Windows</td><td><code>winget install SimpleDevOps.Lode</code>, or <code>lode-0.1.0-x64.msi</code> from the releases page. Either puts <code>lode</code> on the <code>PATH</code>.</td><td><code>winget upgrade SimpleDevOps.Lode</code>, or the newer MSI</td></tr>
+  <tr><td>Windows</td><td><code>winget install SimpleDevOps.Lode</code>, or <code>lode-0.2.0-x64.msi</code> from the releases page. Either puts <code>lode</code> on the <code>PATH</code>.</td><td><code>winget upgrade SimpleDevOps.Lode</code>, or the newer MSI</td></tr>
   <tr><td>macOS, Linux with Homebrew</td><td><code>brew install hutler/lode/lode</code></td><td><code>brew upgrade lode</code></td></tr>
   <tr><td>Debian, Ubuntu, Fedora, RHEL</td><td><code>curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh -s -- --client</code>, or the <code>lode</code> <code>.deb</code>/<code>.rpm</code> from the releases page</td><td>the same command, or <code>apt</code>/<code>dnf</code></td></tr>
   <tr><td>Anything else</td><td>the archive for your platform, below</td><td><code>lode self-update</code></td></tr>
@@ -159,16 +159,16 @@ lode checkout https://lode.example.com/mygame MyGame</code></pre>
 <p>To use an archive, download the one for your platform from the project's releases page, unpack it, and put the executable somewhere on your <code>PATH</code>.</p>
 <table>
   <tr><th style="width:52%">Archive</th><th>Platform</th></tr>
-  <tr><td><code>lode-0.1.0-x86_64-pc-windows-msvc.zip</code></td><td>Windows, 64-bit</td></tr>
-  <tr><td><code>lode-0.1.0-x86_64-apple-darwin.tar.gz</code></td><td>macOS, Intel</td></tr>
-  <tr><td><code>lode-0.1.0-aarch64-apple-darwin.tar.gz</code></td><td>macOS, Apple silicon</td></tr>
-  <tr><td><code>lode-0.1.0-x86_64-unknown-linux-musl.tar.gz</code></td><td>Linux, 64-bit (any distribution)</td></tr>
-  <tr><td><code>lode-0.1.0-aarch64-unknown-linux-musl.tar.gz</code></td><td>Linux, ARM 64-bit</td></tr>
+  <tr><td><code>lode-0.2.0-x86_64-pc-windows-msvc.zip</code></td><td>Windows, 64-bit</td></tr>
+  <tr><td><code>lode-0.2.0-x86_64-apple-darwin.tar.gz</code></td><td>macOS, Intel</td></tr>
+  <tr><td><code>lode-0.2.0-aarch64-apple-darwin.tar.gz</code></td><td>macOS, Apple silicon</td></tr>
+  <tr><td><code>lode-0.2.0-x86_64-unknown-linux-musl.tar.gz</code></td><td>Linux, 64-bit (any distribution)</td></tr>
+  <tr><td><code>lode-0.2.0-aarch64-unknown-linux-musl.tar.gz</code></td><td>Linux, ARM 64-bit</td></tr>
 </table>
 <p>Each archive holds both programs, <code>lode</code> and <code>loded</code>, and the service files used in Part II. Check the download against <code>SHA256SUMS</code> from the same release:</p>
 <pre><code>sha256sum -c SHA256SUMS --ignore-missing        # Linux
 shasum -a 256 -c SHA256SUMS --ignore-missing    # macOS
-Get-FileHash lode-0.1.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the list
+Get-FileHash lode-0.2.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the list
 lode --version</code></pre>
 <p>There is nothing else to install.</p>
 <p>A <code>lode</code> installed from an archive updates itself: <code>lode self-update</code> downloads the newest release for your platform, checks it against the release's <code>SHA256SUMS</code>, and replaces the executable. <code>lode self-update --check</code> only tells you whether there is a newer one. A <code>lode</code> installed by winget, the MSI, Homebrew or a Linux package is left to that tool, and <code>self-update</code> says which command to run instead.</p>
@@ -540,7 +540,7 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 <table>
   <tr><th style="width:24%">Platform</th><th>Install</th><th style="width:34%">Then</th></tr>
   <tr><td>Linux (Debian, Ubuntu, Fedora, RHEL, Rocky, openSUSE)</td><td><code>curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh</code><br>picks the <code>.deb</code> or <code>.rpm</code> for the machine and checks it against <code>SHA256SUMS</code>. The packages <code>lode-server</code> and <code>lode</code> are also on the releases page.</td><td><code>sudo -u lode loded setup</code><br><code>sudo systemctl enable --now loded</code></td></tr>
-  <tr><td>Windows</td><td><code>lode-server-0.1.0-x64.msi</code> from the releases page. It installs into <code>C:\Program Files\Lode</code> and adds that folder to <code>PATH</code>.</td><td>Leave "Set up the Lode server now" ticked on the last page: it asks the setup questions, then installs and starts the service. Later, "Lode server setup" in the Start menu does the same.</td></tr>
+  <tr><td>Windows</td><td><code>lode-server-0.2.0-x64.msi</code> from the releases page. It installs into <code>C:\Program Files\Lode</code> and adds that folder to <code>PATH</code>.</td><td>Leave "Set up the Lode server now" ticked on the last page: it asks the setup questions, then installs and starts the service. Later, "Lode server setup" in the Start menu does the same.</td></tr>
   <tr><td>Docker</td><td><code>packaging/compose.yaml</code> from the release archive (chapter 5, Container)</td><td><code>docker compose up -d</code></td></tr>
 </table>
 <p>The Linux package runs the server as the account <code>lode</code> with its data in <code>/var/lib/lode</code>, using the systemd unit it installs; removing it (<code>apt remove lode-server</code>, <code>dnf remove lode-server</code>) keeps both. Uninstalling the MSI stops and removes the service and keeps <code>C:\ProgramData\Lode</code>. The packages are not signed in version 0.x: Windows SmartScreen may ask you to confirm ("More info", "Run anyway").</p>
@@ -693,7 +693,7 @@ lode login https://lode.example.com               # name: admin</code></pre>
 </table>
 <p>Without compose:</p>
 <pre><code>docker run -d --name lode --restart unless-stopped \
-    -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.1.0
+    -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.2.0
 docker logs lode                                  # the admin token, on first start only
 docker exec lode loded fsck --config /var/lib/lode/loded.toml</code></pre>
 <p>Either publish the port on the host's loopback address and put a TLS proxy in front, or use the variables above for built-in HTTPS. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>
