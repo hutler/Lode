@@ -24,6 +24,7 @@ use super::caller::Caller;
 use super::password::{hash_password, verify_password, MIN_PASSWORD_LEN};
 use super::token::{generate_token, hash_token};
 use super::{ms_to_time, time_to_ms};
+use crate::config::PasswordLogin;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{ApiJson, ApiPath as Path};
 use crate::server::ClientInfo;
@@ -54,10 +55,13 @@ pub fn routes() -> Router<AppState> {
             paths::ADMIN_GROUP_MEMBER,
             put(add_member).delete(remove_member),
         )
+        .merge(super::sso::routes())
 }
 
 const MAX_NAME_LEN: usize = 64;
-const MAX_LABEL_LEN: usize = 100;
+pub(super) const MAX_LABEL_LEN: usize = 100;
+/// Longest single sign-on identity, such as an e-mail address.
+const MAX_SSO_LEN: usize = 254;
 
 /// Principal and group names: 1 to 64 characters of ASCII letters, digits, `.`, `_`, `-`,
 /// starting with a letter or digit.
@@ -94,7 +98,22 @@ async fn hash_password_blocking(password: String) -> ApiResult<String> {
         .map_err(|_| ApiError::internal())
 }
 
-fn principal_view(p: &PrincipalRow, owner: Option<String>) -> PrincipalView {
+/// A single sign-on identity as an administrator gives it: trimmed and in lower case; `None`
+/// for an empty one (which removes a link).
+fn check_sso(sso: &str) -> ApiResult<Option<String>> {
+    let s = sso.trim();
+    if s.is_empty() {
+        return Ok(None);
+    }
+    if s.len() > MAX_SSO_LEN || s.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(ApiError::invalid_request(format!(
+            "invalid single sign-on identity: use at most {MAX_SSO_LEN} characters without spaces"
+        )));
+    }
+    Ok(Some(s.to_lowercase()))
+}
+
+pub(super) fn principal_view(p: &PrincipalRow, owner: Option<String>) -> PrincipalView {
     PrincipalView {
         name: p.name.clone(),
         kind: match p.kind {
@@ -104,6 +123,7 @@ fn principal_view(p: &PrincipalRow, owner: Option<String>) -> PrincipalView {
         display_name: p.display_name.clone(),
         owner,
         disabled: p.disabled,
+        sso: p.sso_id.clone(),
     }
 }
 
@@ -146,7 +166,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClientAddr {
 }
 
 /// Creates and stores a token, returning its secret once.
-async fn issue_token(
+pub(super) async fn issue_token(
     state: &AppState,
     principal: PrincipalId,
     name: String,
@@ -215,6 +235,19 @@ async fn login(
         }
     };
     limiter.record_success(&req.name);
+    if state
+        .config()
+        .oidc
+        .as_ref()
+        .is_some_and(|o| o.password_login == PasswordLogin::Admins)
+        && !would_be_server_admin(&state, &principal).await?
+    {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "password sign-in is turned off on this server except for server administrators; \
+             sign in with single sign-on (lode login URL --sso)",
+        ));
+    }
     let label = req
         .token_name
         .filter(|n| !n.trim().is_empty())
@@ -228,6 +261,20 @@ async fn login(
         token,
         principal: principal_view(&principal, None),
     }))
+}
+
+/// Whether `principal`, signed in with every scope, would be a server administrator.
+async fn would_be_server_admin(state: &AppState, principal: &PrincipalRow) -> ApiResult<bool> {
+    let id = principal.id;
+    let groups = state.meta().read(move |tx| tx.groups_of(id)).await?;
+    let caller = Caller {
+        principal: principal.clone(),
+        scopes: state.scopes().all(),
+        token_id: lode_meta::TokenId(0),
+        groups,
+        via: lode_proto::commit::Via::Api,
+    };
+    Ok(state.permissions().is_server_admin(&caller))
 }
 
 async fn whoami(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<WhoAmI>> {
@@ -413,8 +460,17 @@ async fn create_principal(
         PrincipalKind::Agent if req.owner.is_none() => {
             return Err(ApiError::invalid_request("an agent needs an owner"));
         }
+        PrincipalKind::Agent if req.sso.is_some() => {
+            return Err(ApiError::invalid_request(
+                "agents sign in with tokens, not single sign-on",
+            ));
+        }
         _ => {}
     }
+    let sso = match &req.sso {
+        Some(s) => check_sso(s)?,
+        None => None,
+    };
     let password_hash = match req.password {
         Some(pw) => {
             check_password(&pw)?;
@@ -451,6 +507,9 @@ async fn create_principal(
                 },
                 now,
             )?;
+            if let Some(s) = &sso {
+                tx.set_principal_sso(id, Some(s))?;
+            }
             let row = tx
                 .principal(id)?
                 .ok_or_else(|| MetaError::NotFound("principal".into()))?;
@@ -475,6 +534,10 @@ async fn patch_principal(
         }
         None => None,
     };
+    let sso = match &req.sso {
+        Some(s) => Some(check_sso(s)?),
+        None => None,
+    };
     let disabled = req.disabled;
     let result = state
         .meta()
@@ -490,6 +553,14 @@ async fn patch_principal(
             if let Some(h) = &password_hash {
                 tx.set_password_hash(p.id, Some(h))?;
             }
+            if sso.as_ref().is_some_and(Option::is_some) && p.kind == PrincipalKind::Agent {
+                return Ok(Err(ApiError::invalid_request(
+                    "agents sign in with tokens, not single sign-on",
+                )));
+            }
+            if let Some(s) = &sso {
+                tx.set_principal_sso(p.id, s.as_deref())?;
+            }
             if let Some(d) = disabled {
                 tx.set_principal_disabled(p.id, d)?;
             }
@@ -499,7 +570,8 @@ async fn patch_principal(
             let owner = owner_name(tx, &row)?;
             Ok(Ok(principal_view(&row, owner)))
         })
-        .await??;
+        .await
+        .map_err(map_conflict)??;
     Ok(Json(result))
 }
 

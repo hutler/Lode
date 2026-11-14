@@ -182,6 +182,9 @@ lode logout</code></pre>
 <p>For automation, pass a token on standard input instead of typing a password:</p>
 <pre><code>lode login https://lode.example.com --token-stdin &lt; token.txt
 lode login https://lode.example.com --name alice --password-stdin &lt; password.txt</code></pre>
+<p>If your company signs in through its own sign-in page (Google, Microsoft, Okta and others), and the server is set up for it, sign in with that instead of a Lode password:</p>
+<pre><code>lode login https://lode.example.com --sso</code></pre>
+<p>Your browser opens the company's sign-in page. When you are through, the browser shows "Signed in" and the command finishes. On a machine without a browser at hand, <code>--no-browser</code> prints the address instead; open it in a browser on the same computer, because the result comes back to a port on that computer. Lode Desk has a <strong>Sign in with …</strong> button for the same thing.</p>
 <div class="note">The client refuses plain <code>http://</code> addresses, except for a server on your own machine. This protects your token on the network.</div>
 
 <h1>3. Getting a workspace</h1>
@@ -690,6 +693,22 @@ lode admin group add artists bob
 lode admin group add artists carol
 lode admin group list</code></pre>
 <p>Accounts are never deleted, because history refers to them. Disable them instead. In scripts, <code>--password-stdin</code> reads the password from standard input.</p>
+<h3>Single sign-on</h3>
+<p>People can sign in through your company's identity provider instead of a Lode password. Any provider that speaks OpenID Connect works: Google, Microsoft Entra ID, Okta, Keycloak and others. Register Lode there as a web application with the redirect address <code>https://lode.example.com/api/v1/auth/sso/callback</code> (your server's address), then add to <code>loded.toml</code> and restart the server:</p>
+<pre><code>[oidc]
+issuer = "https://accounts.google.com"
+client_id = "1234.apps.googleusercontent.com"
+client_secret_file = "oidc-secret.txt"     # the client secret, on its own line
+public_url = "https://lode.example.com"    # how browsers reach this server
+label = "Example Corp"                     # shown on sign-in buttons
+allowed_domains = ["example.com"]</code></pre>
+<p>Lode knows people by the identity the provider names them by, their e-mail address unless <code>user_claim</code> names another claim (Microsoft Entra ID, for instance, may need <code>user_claim = "preferred_username"</code>). Link each user to theirs:</p>
+<pre><code>lode admin user create bob --sso bob@example.com    # no Lode password needed
+lode admin user sso carol carol@example.com           # an existing user
+lode admin user sso carol --remove</code></pre>
+<p>Someone the provider lets in but who is not linked is refused, unless <code>auto_create = true</code>: then their first sign-in creates a user named after the part of the address before <code>@</code>. They still see only what the access rules give them. A disabled Lode user stays refused whatever the provider says, so disabling still locks someone out.</p>
+<p>With <code>password_login = "admins"</code>, only server administrators may still sign in with a password, so you keep a way in when the provider is down. Tokens already given out keep working either way.</p>
+<div class="note">The server checks the provider's signature, the address the token was issued for and its expiry, so the clocks of the server and the provider must agree within two minutes. The provider must use <code>https://</code>. Sign-in problems are explained to the person signing in and written to the server log.</div>
 <h3>Tokens</h3>
 <p>Signing in creates a token. Users can also create named tokens for scripts, and administrators can create them for anyone:</p>
 <pre><code>lode admin token create --for buildbot --name ci --scope read --expires-in-days 90

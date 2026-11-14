@@ -59,6 +59,7 @@ async fn setup_on(server: TestServer) -> Setup {
             display_name: None,
             owner: None,
             password: Some("correct horse".into()),
+            sso: None,
         })
         .await
         .unwrap();
@@ -501,6 +502,7 @@ async fn locks_are_taken_listed_refused_and_released() {
             display_name: None,
             owner: None,
             password: Some("battery staple".into()),
+            sso: None,
         })
         .await
         .unwrap();

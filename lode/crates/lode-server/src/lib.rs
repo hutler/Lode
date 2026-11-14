@@ -32,7 +32,7 @@ pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
     AcmeConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, Limits, ModulesConfig,
-    ServerConfig, TlsConfig, WebhooksConfig,
+    OidcConfig, PasswordLogin, ServerConfig, TlsConfig, WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};

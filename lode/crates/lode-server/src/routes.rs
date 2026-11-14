@@ -7,7 +7,7 @@ use axum::http::{HeaderName, Request, Response};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
-use lode_proto::auth::Info;
+use lode_proto::auth::{Info, SsoInfo};
 use lode_proto::consts::{paths, API_VERSION};
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -73,6 +73,10 @@ async fn info(State(state): State<AppState>) -> Json<Info> {
         server_version: env!("CARGO_PKG_VERSION").to_owned(),
         api_version: API_VERSION.to_owned(),
         modules: state.module_names().to_vec(),
+        sso: state.config().oidc.as_ref().map(|o| SsoInfo {
+            label: o.label.clone(),
+            password_login: o.password_login == crate::config::PasswordLogin::Everyone,
+        }),
     })
 }
 

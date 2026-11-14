@@ -12,15 +12,18 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+base64.workspace = true
 blake3.workspace = true
 bytes.workspace = true
 directories.workspace = true
 futures.workspace = true
 lode-core.workspace = true
 lode-proto.workspace = true
+rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

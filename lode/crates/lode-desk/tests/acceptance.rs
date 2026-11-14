@@ -56,6 +56,7 @@ async fn person(server: &TestServer, name: &str, password: &str) {
             display_name: None,
             owner: None,
             password: Some(password.into()),
+            sso: None,
         })
         .await
         .unwrap();

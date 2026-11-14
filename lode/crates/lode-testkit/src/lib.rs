@@ -6,9 +6,13 @@
 //! - [`TestWorkspace`] runs the real `lode` binary with its own home and config directories,
 //!   so tests never touch the developer's credentials and can run in parallel.
 //!
+//! - [`oidc::TestProvider`] is an OpenID Connect provider for single sign-on tests.
+//!
 //! Every server and workspace lives in its own temporary directory and is removed on drop.
 
 #![forbid(unsafe_code)]
+
+pub mod oidc;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -303,6 +307,7 @@ impl TestServer {
             display_name: None,
             owner: owner.map(str::to_owned),
             password: None,
+            sso: None,
         };
         must(
             self.admin().create_principal(&req).await,

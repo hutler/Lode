@@ -114,6 +114,11 @@ impl From<lode_client::Error> for OpError {
             E::HashMismatch { .. } => Self::new(Exit::Network, "hash_mismatch", e.to_string()),
             E::Protocol(_) => Self::new(Exit::Network, "protocol", e.to_string()),
             E::Io(io) => Self::failed("io", io.to_string()),
+            E::SignIn(m) => Self::new(
+                Exit::Auth,
+                "sso_failed",
+                format!("single sign-on failed: {m}"),
+            ),
         }
     }
 }

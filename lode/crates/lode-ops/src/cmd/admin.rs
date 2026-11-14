@@ -182,13 +182,17 @@ pub struct PasswordArgs {
 /// `lode admin user`.
 #[derive(Debug, clap::Subcommand)]
 pub enum UserCmd {
-    /// Create a user with a password.
+    /// Create a user with a password, or one who signs in with single sign-on (--sso).
     Create {
         /// Login name.
         name: String,
         /// Display name.
         #[arg(long)]
         display_name: Option<String>,
+        /// Link the identity the company's sign-in names them by, such as their e-mail
+        /// address. No password is asked for unless --password-stdin is given.
+        #[arg(long, value_name = "IDENTITY")]
+        sso: Option<String>,
         #[command(flatten)]
         password: PasswordArgs,
     },
@@ -208,6 +212,18 @@ pub enum UserCmd {
         name: String,
         #[command(flatten)]
         password: PasswordArgs,
+    },
+    /// Link a user to a single sign-on identity, such as their e-mail address, or remove
+    /// the link with --remove.
+    Sso {
+        /// Login name.
+        name: String,
+        /// The identity.
+        #[arg(required_unless_present = "remove", conflicts_with = "remove")]
+        identity: Option<String>,
+        /// Remove the link.
+        #[arg(long)]
+        remove: bool,
     },
 }
 
@@ -396,6 +412,9 @@ fn print_principals(ctx: &Ctx, list: &[&PrincipalView]) {
         if let Some(o) = &p.owner {
             line.push_str(&format!(", owner {o}"));
         }
+        if let Some(s) = &p.sso {
+            line.push_str(&format!(", sso {s}"));
+        }
         if p.disabled {
             line.push_str(" [disabled]");
         }
@@ -417,6 +436,7 @@ async fn set_disabled(ctx: &Ctx, c: &Client, name: &str, enable: bool) -> OpResu
             &PatchPrincipalRequest {
                 disabled: Some(!enable),
                 password: None,
+                sso: None,
             },
         )
         .await?;
@@ -767,19 +787,60 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         AdminCmd::User(UserCmd::Create {
             name,
             display_name,
+            sso,
             password: pw,
         }) => {
-            let password = password(ctx, &pw)?;
+            let password = if sso.is_none() || pw.password_stdin {
+                Some(password(ctx, &pw)?)
+            } else {
+                None
+            };
             let p = c
                 .create_principal(&CreatePrincipalRequest {
                     kind: PrincipalKind::User,
                     name,
                     display_name,
                     owner: None,
-                    password: Some(password),
+                    password,
+                    sso,
                 })
                 .await?;
-            ctx.out.line(format!("Created user {}", p.name));
+            match &p.sso {
+                Some(s) => ctx
+                    .out
+                    .line(format!("Created user {} (single sign-on as {s})", p.name)),
+                None => ctx.out.line(format!("Created user {}", p.name)),
+            }
+            to_json(&p)
+        }
+        AdminCmd::User(UserCmd::Sso {
+            name,
+            identity,
+            remove,
+        }) => {
+            let value = if remove {
+                String::new()
+            } else {
+                identity.unwrap_or_default()
+            };
+            let p = c
+                .patch_principal(
+                    &name,
+                    &PatchPrincipalRequest {
+                        disabled: None,
+                        password: None,
+                        sso: Some(value),
+                    },
+                )
+                .await?;
+            match &p.sso {
+                Some(s) => ctx
+                    .out
+                    .line(format!("{} signs in with single sign-on as {s}", p.name)),
+                None => ctx
+                    .out
+                    .line(format!("{} has no single sign-on identity", p.name)),
+            }
             to_json(&p)
         }
         AdminCmd::User(UserCmd::List) => principals_of(ctx, &c, PrincipalKind::User).await,
@@ -794,6 +855,7 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
                     &PatchPrincipalRequest {
                         disabled: None,
                         password: Some(password),
+                        sso: None,
                     },
                 )
                 .await?;
@@ -812,6 +874,7 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
                     display_name,
                     owner: Some(owner),
                     password: None,
+                    sso: None,
                 })
                 .await?;
             ctx.out.line(format!(

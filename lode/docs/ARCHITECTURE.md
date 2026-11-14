@@ -150,7 +150,8 @@ and ship their own migrations.
 ```sql
 depot      (id INTEGER PK, name TEXT UNIQUE, next_rev INTEGER NOT NULL, created_at)
 principal  (id INTEGER PK, kind TEXT CHECK(kind IN ('user','agent')), name TEXT UNIQUE,
-            display_name, owner_id REFERENCES principal, password_hash, disabled INT, created_at)
+            display_name, owner_id REFERENCES principal, password_hash, disabled INT, created_at,
+            sso_id TEXT NULL)   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
 grp        (id INTEGER PK, name TEXT UNIQUE)
 grp_member (grp_id, principal_id, PRIMARY KEY (grp_id, principal_id))
 token      (id INTEGER PK, principal_id, name, hash BLOB UNIQUE, scopes TEXT,
@@ -267,7 +268,9 @@ percent-encoded (`release%2F1.0`).
 | Method and path | Purpose |
 | --- | --- |
 | `GET /info` | Server version, API version, enabled modules |
+| `GET /info` with single sign-on | Adds `sso: {label, password_login}` when `[oidc]` is configured |
 | `POST /auth/login` · `GET /auth/whoami` | Password login → token; identity, scopes |
+| `GET /auth/sso/start?redirect_uri=&state=&code_challenge=[&token_name=]` · `GET /auth/sso/callback` · `POST /auth/sso/token {code, code_verifier}` | Single sign-on (§7). Start and callback are browser pages; the token call answers like a password login |
 | `GET/POST/DELETE /tokens[/{id}]` | Own tokens |
 | `GET/POST /depots` | List; create (admin) |
 | `GET/POST /depots/{d}/branches` · `GET/PATCH …/{b}` | List, create, show, archive |
@@ -283,7 +286,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision of a text file: `{path, rev, id, lines: [{rev, text}], revisions: [{rev, branch, author, created_at, summary}], truncated?}`. Walks `rev_change` for the path along the branch chain and through `copy_from`, diffing successive versions line by line (Myers, 2 s per pair before settling for a less minimal diff). At most 1000 versions and 1 MiB per version; history the caller cannot read ends the walk. Either sets `truncated`, and the oldest version looked at takes the remaining lines. Binary or symlink is `invalid_request`, over 1 MiB `too_large`. Results are cached in memory (64 entries) by depot, path and the revision of the newest version, which fixes the history walked; walks cut short by access are not cached |
 | `GET /admin/acl/check?principal=&depot=&branch=&path=` | The level the rules give a principal there, `{principal, depot, branch, path, level: read|write|admin|null}`, evaluated as for a token with every scope. Server admin only |
-| `…/admin/principals[/{name}]` (`GET`/`POST`; `PATCH` `{disabled?, password?}`), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
+| `…/admin/principals[/{name}]` (`GET`/`POST` with optional `sso`; `PATCH` `{disabled?, password?, sso?}`, an empty `sso` removes the link), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
 Manifests and trees are filtered by read permission and by `include`/`exclude` (repeatable
@@ -332,6 +335,30 @@ Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per comm
   non-loopback hosts unless `--insecure` is given.
 - **Passwords** are hashed with Argon2id. **Tokens** are 256 bits of randomness, shown once,
   stored as SHA-256. Login is rate-limited per name and per address.
+- **Single sign-on** (T122, `[oidc]`). The server is the OpenID Connect client, with the
+  authorization code flow and PKCE on both legs. A client (CLI or Desk) binds `127.0.0.1:0`
+  and opens `GET /auth/sso/start` in the browser with that loopback address, a state and an
+  S256 challenge; only `http` loopback addresses with a port are accepted. The server keeps
+  the sign-in in memory for 10 minutes (at most 10,000 at once, oldest dropped) and sends the
+  browser to the provider with its own state, nonce and PKCE pair. The callback address is
+  `public_url` + `/api/v1/auth/sso/callback`, or the request's `Host` when `public_url` is not
+  set. At the callback the server trades the code at the token endpoint (client secret by
+  HTTP Basic when the provider allows it, else in the form; the secret file is read on each
+  use), then checks the ID token: compact JWS, `RS256` (`RSA_PKCS1_2048_8192_SHA256`) or
+  `ES256` (P-256) against the provider's keys, verified with `ring` directly; `iss` equal to
+  the discovery document's issuer, `aud` holding the client id (and `azp`, when present,
+  equal to it), `exp` and `iat`/`nbf` with 120 s of clock skew, and `nonce` equal to the one
+  this sign-in sent. Discovery and keys are cached for an hour; a token naming an unknown key
+  fetches the keys again (at most every 30 s). The provider must be `https`, or `http` on a
+  loopback address. The user claim (`email` by default) is matched in lower case against
+  `principal.sso_id`; `email_verified: false` is refused, as are domains outside
+  `allowed_domains`, agents, and disabled users. With `auto_create` an unknown identity
+  becomes a user named after the part before `@` (made unique with `-2`, `-3`, …). The
+  browser then goes back to the client with a one-time code (2 minutes, one use), which the
+  client trades with its verifier at `POST /auth/sso/token` for a token with the default
+  scopes. Every refusal goes back to the client as `error=access_denied` with a description,
+  and is logged with its reason (never a code or token). With `password_login = "admins"`
+  a password login succeeds only for a principal that would be a server administrator.
 - **Scopes** are checked before permissions: `read` for all reads, `write` for commit and branch
   operations, `admin`. These three are the core scopes. Modules declare their own (`lock`,
   `shelve`, `checks`) through `Module::scopes()`. A token may be given any core scope and any

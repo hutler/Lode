@@ -17,6 +17,7 @@ mod error;
 mod io;
 mod manifest;
 mod retry;
+mod sso;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -58,6 +59,7 @@ pub use error::{ApiError, Error, Result};
 pub use manifest::ManifestStream;
 pub use reqwest::Url as ServerUrl;
 pub use retry::RetryPolicy;
+pub use sso::SsoLogin;
 
 /// `User-Agent` of every request: `lode-client/<version>`, after the product a caller names.
 pub const USER_AGENT: &str = concat!("lode-client/", env!("CARGO_PKG_VERSION"));
@@ -348,7 +350,7 @@ impl Client {
         decode(resp).await
     }
 
-    async fn json_body<B: Serialize, T: DeserializeOwned>(
+    pub(crate) async fn json_body<B: Serialize, T: DeserializeOwned>(
         &self,
         retry: Retry,
         method: Method,

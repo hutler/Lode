@@ -22,6 +22,9 @@ pub struct CreatePrincipalRequest {
     /// Initial password, for users.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    /// The single sign-on identity to link, for users, such as their e-mail address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso: Option<String>,
 }
 
 /// `GET /admin/principals`.
@@ -40,6 +43,9 @@ pub struct PatchPrincipalRequest {
     /// New password, for users.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    /// Link a single sign-on identity, for users; an empty string removes the link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso: Option<String>,
 }
 
 /// `POST /admin/groups`.

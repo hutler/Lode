@@ -84,6 +84,44 @@ pub trait Ui: Send + Sync {
     fn read_line(&self) -> OpResult<String> {
         Err(OpError::usage("there is no input stream to read from here"))
     }
+    /// Opens a web address in the user's browser; false when this UI cannot (the caller
+    /// then shows the address instead).
+    fn open_url(&self, url: &str) -> bool {
+        let _ = url;
+        false
+    }
+}
+
+/// Opens an `http(s)` address in the default browser with the platform's opener
+/// (`open` on macOS, `xdg-open` elsewhere on Unix, the URL handler on Windows). The address
+/// is passed as one argument, never through a shell.
+pub fn open_in_browser(url: &str) -> std::io::Result<()> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "only http and https addresses are opened",
+        ));
+    }
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    cmd.arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // The opener returns at once (or hands over to the browser); it is not waited for, so
+    // a reaper thread collects it.
+    let mut child = cmd.spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// A [`Ui`] that drops everything and asks nothing.

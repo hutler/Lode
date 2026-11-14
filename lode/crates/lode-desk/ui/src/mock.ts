@@ -16,6 +16,7 @@ import type {
   ProgressEvent,
   RecentWorkspace,
   Settings,
+  SsoOffer,
   StatusFile,
   StatusResult,
   TreeEntry,
@@ -60,6 +61,8 @@ export interface MockOptions {
   update?: UpdateCheck;
   /** Installing the update fails with this error. */
   refuseUpdate?: OpError;
+  /** The server offers single sign-on. */
+  sso?: SsoOffer;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -225,6 +228,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const recent = [...(opts.recent ?? DEMO_RECENT)];
   const signed = new Set((opts.signedIn ?? [DEMO_SERVER]).map(serverOf));
   const listeners = new Set<(e: ProgressEvent) => void>();
+  const ssoListeners = new Set<(url: string) => void>();
   const stepMs = opts.stepMs ?? 120;
   const workspaces = new Map<string, WorkspaceInfo>();
   for (const r of recent) {
@@ -544,6 +548,19 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       if (i >= 0) recent.splice(i, 1);
     },
     signedIn: async (server) => (signed.has(serverOf(server)) ? who(serverOf(server)) : null),
+    ssoOffer: async () => opts.sso ?? null,
+    signInSso: async (server) => {
+      const s = serverOf(server);
+      if (!opts.sso) fail("usage", "this server does not offer single sign-on; sign in without --sso");
+      ssoListeners.forEach((l) => l(`${s}/api/v1/auth/sso/start?state=demo`));
+      await pause();
+      signed.add(s);
+      return who(s);
+    },
+    onSsoUrl: (listener) => {
+      ssoListeners.add(listener);
+      return () => ssoListeners.delete(listener);
+    },
     signIn: async (server, name, password) => {
       const s = serverOf(server);
       if (!/^https?:\/\//.test(s)) fail("usage", `${server} is not a server URL: use https://host`);

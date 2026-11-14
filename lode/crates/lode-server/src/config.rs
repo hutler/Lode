@@ -78,6 +78,20 @@ grace_seconds = 86400
 # keep = 7            # complete backups kept; older ones are removed
 # dir = "backups"     # relative to this file; best on another disk
 
+# Single sign-on through your company's identity provider (OpenID Connect): Google,
+# Microsoft Entra ID, Okta, Keycloak and others. Register Lode as a web application there
+# with the redirect address <public_url>/api/v1/auth/sso/callback.
+# [oidc]
+# issuer = "https://accounts.google.com"
+# client_id = "1234.apps.googleusercontent.com"
+# client_secret_file = "oidc-secret.txt"   # or client_secret = "..."
+# public_url = "https://lode.example.com"   # how browsers reach this server
+# label = "Example Corp"                    # shown on sign-in buttons
+# user_claim = "email"                      # the claim that names a user
+# allowed_domains = ["example.com"]
+# auto_create = false     # true: create a user on first sign-in instead of refusing
+# password_login = "everyone"               # "admins": only server admins use passwords
+
 # Webhooks module, when enabled in [modules].
 [webhooks]
 # Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
@@ -136,6 +150,221 @@ pub struct ServerConfig {
     /// Webhooks module settings.
     #[serde(default)]
     pub webhooks: WebhooksConfig,
+    /// Single sign-on, when configured.
+    #[serde(default)]
+    pub oidc: Option<OidcConfig>,
+}
+
+/// Who may still sign in with a password when single sign-on is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PasswordLogin {
+    /// Everyone with a password.
+    #[default]
+    Everyone,
+    /// Only server administrators.
+    Admins,
+}
+
+/// The `[oidc]` table: single sign-on through an OpenID Connect provider (T122).
+#[derive(Clone, Deserialize)]
+#[serde(try_from = "RawOidc")]
+pub struct OidcConfig {
+    /// The provider's issuer URL, exactly as its ID tokens name it.
+    pub issuer: String,
+    /// Lode's client id at the provider.
+    pub client_id: String,
+    /// The client secret, given inline.
+    client_secret: Option<String>,
+    /// A file holding the client secret. Resolved against the config file's directory.
+    pub client_secret_file: Option<PathBuf>,
+    /// How browsers reach this server, such as `https://lode.example.com`. Without it the
+    /// request's own address is used.
+    pub public_url: Option<String>,
+    /// Scopes asked for; always includes `openid`.
+    pub scopes: Vec<String>,
+    /// The ID token claim that names a user. Default `email`.
+    pub user_claim: String,
+    /// When not empty, only identities in these domains (after `@`) may sign in.
+    pub allowed_domains: Vec<String>,
+    /// Create a user on first sign-in. Off by default: an administrator adds users first.
+    pub auto_create: bool,
+    /// What sign-in buttons call the provider. Default `SSO`.
+    pub label: String,
+    /// Who may still sign in with a password.
+    pub password_login: PasswordLogin,
+}
+
+impl std::fmt::Debug for OidcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The secret never reaches a log.
+        f.debug_struct("OidcConfig")
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &self.client_secret.as_ref().map(|_| "***"))
+            .field("client_secret_file", &self.client_secret_file)
+            .field("public_url", &self.public_url)
+            .field("scopes", &self.scopes)
+            .field("user_claim", &self.user_claim)
+            .field("allowed_domains", &self.allowed_domains)
+            .field("auto_create", &self.auto_create)
+            .field("label", &self.label)
+            .field("password_login", &self.password_login)
+            .finish()
+    }
+}
+
+impl OidcConfig {
+    /// A configuration for `issuer` and `client_id` with every other setting at its
+    /// default. For tests and embedding.
+    pub fn new(issuer: &str, client_id: &str) -> Result<Self, String> {
+        Self::try_from(RawOidc {
+            issuer: issuer.to_owned(),
+            client_id: client_id.to_owned(),
+            ..RawOidc::default()
+        })
+    }
+
+    /// Sets the inline client secret.
+    pub fn with_client_secret(mut self, secret: impl Into<String>) -> Self {
+        self.client_secret = Some(secret.into());
+        self
+    }
+
+    /// The client secret: the inline one, or the first line of `client_secret_file`, read
+    /// each time so that a changed file needs no restart. `None` for a public client.
+    pub fn client_secret(&self) -> std::io::Result<Option<String>> {
+        if let Some(s) = &self.client_secret {
+            return Ok(Some(s.clone()));
+        }
+        match &self.client_secret_file {
+            Some(path) => {
+                let text = std::fs::read_to_string(path)?;
+                let line = text.lines().next().unwrap_or("").trim().to_owned();
+                if line.is_empty() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("{} is empty", path.display()),
+                    ));
+                }
+                Ok(Some(line))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOidc {
+    issuer: String,
+    client_id: String,
+    client_secret: Option<String>,
+    client_secret_file: Option<PathBuf>,
+    public_url: Option<String>,
+    scopes: Option<Vec<String>>,
+    user_claim: Option<String>,
+    #[serde(default)]
+    allowed_domains: Vec<String>,
+    #[serde(default)]
+    auto_create: bool,
+    label: Option<String>,
+    #[serde(default)]
+    password_login: PasswordLogin,
+}
+
+/// Whether `url` may be used to reach an identity provider: `https`, or `http` to this
+/// machine (for tests and a provider on the same host).
+pub(crate) fn provider_url_ok(url: &reqwest::Url) -> bool {
+    match url.scheme() {
+        "https" => url.host_str().is_some(),
+        "http" => url.host_str().is_some_and(is_loopback_host),
+        _ => false,
+    }
+}
+
+/// `localhost` or a loopback IP address (IPv6 in brackets, as URLs write it).
+pub(crate) fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+impl TryFrom<RawOidc> for OidcConfig {
+    type Error = String;
+
+    fn try_from(raw: RawOidc) -> Result<Self, String> {
+        let issuer = reqwest::Url::parse(&raw.issuer)
+            .map_err(|e| format!("[oidc] issuer is not a URL: {e}"))?;
+        if !provider_url_ok(&issuer) {
+            return Err("[oidc] issuer must be an https:// URL".into());
+        }
+        if raw.client_id.trim().is_empty() {
+            return Err("[oidc] client_id is required".into());
+        }
+        if raw.client_secret.is_some() && raw.client_secret_file.is_some() {
+            return Err("[oidc] give client_secret or client_secret_file, not both".into());
+        }
+        let public_url = match raw.public_url {
+            Some(u) => {
+                let parsed = reqwest::Url::parse(&u)
+                    .map_err(|e| format!("[oidc] public_url is not a URL: {e}"))?;
+                if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
+                    return Err("[oidc] public_url must be an http:// or https:// address".into());
+                }
+                Some(u.trim_end_matches('/').to_owned())
+            }
+            None => None,
+        };
+        let mut scopes = raw
+            .scopes
+            .unwrap_or_else(|| vec!["openid".into(), "email".into(), "profile".into()]);
+        if !scopes.iter().any(|s| s == "openid") {
+            scopes.insert(0, "openid".into());
+        }
+        if scopes
+            .iter()
+            .any(|s| s.is_empty() || s.contains(char::is_whitespace))
+        {
+            return Err("[oidc] scopes must be single words".into());
+        }
+        let user_claim = raw.user_claim.unwrap_or_else(|| "email".into());
+        if user_claim.trim().is_empty() {
+            return Err("[oidc] user_claim must not be empty".into());
+        }
+        let allowed_domains = raw
+            .allowed_domains
+            .into_iter()
+            .map(|d| d.trim().trim_start_matches('@').to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if allowed_domains.iter().any(String::is_empty) {
+            return Err("[oidc] allowed_domains has an empty entry".into());
+        }
+        let label = raw
+            .label
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| "SSO".into());
+        if label.chars().count() > 60 {
+            return Err("[oidc] label is too long (at most 60 characters)".into());
+        }
+        Ok(Self {
+            issuer: raw.issuer,
+            client_id: raw.client_id,
+            client_secret: raw.client_secret,
+            client_secret_file: raw.client_secret_file,
+            public_url,
+            scopes,
+            user_claim,
+            allowed_domains,
+            auto_create: raw.auto_create,
+            label,
+            password_login: raw.password_login,
+        })
+    }
 }
 
 /// The `[webhooks]` table, read by the webhooks module.
@@ -472,6 +701,11 @@ impl ServerConfig {
             None => {}
         }
         cfg.backup.dir = base.join(&cfg.backup.dir);
+        if let Some(oidc) = &mut cfg.oidc {
+            if let Some(f) = &mut oidc.client_secret_file {
+                *f = base.join(&*f);
+            }
+        }
         Ok(cfg)
     }
 
@@ -498,6 +732,7 @@ impl ServerConfig {
             backup: BackupConfig::default(),
             modules: ModulesConfig::default(),
             webhooks: WebhooksConfig::default(),
+            oidc: None,
         }
     }
 }
@@ -625,5 +860,72 @@ mod tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn oidc_settings_defaults_and_mistakes() {
+        let parse = |oidc: &str| {
+            ServerConfig::parse(
+                &format!("data_dir = '.'\n[oidc]\n{oidc}"),
+                Path::new("/etc/lode"),
+                Path::new("x"),
+            )
+        };
+        let cfg = parse(
+            "issuer = 'https://idp.example.com'\nclient_id = 'lode'\nclient_secret = 'shh'\n\
+             allowed_domains = ['@Example.com']\nscopes = ['email']\npassword_login = 'admins'",
+        )
+        .unwrap();
+        let o = cfg.oidc.unwrap();
+        assert_eq!(o.scopes, ["openid", "email"], "openid is always asked for");
+        assert_eq!(o.user_claim, "email");
+        assert_eq!(o.label, "SSO");
+        assert_eq!(o.allowed_domains, ["example.com"]);
+        assert!(!o.auto_create);
+        assert_eq!(o.password_login, PasswordLogin::Admins);
+        assert_eq!(o.client_secret().unwrap().as_deref(), Some("shh"));
+        assert!(
+            !format!("{o:?}").contains("shh"),
+            "the secret is not printed"
+        );
+
+        let o = parse(
+            "issuer = 'http://127.0.0.1:9000'\nclient_id = 'lode'\nclient_secret_file = 's.txt'",
+        )
+        .unwrap()
+        .oidc
+        .unwrap();
+        assert_eq!(
+            o.client_secret_file.as_deref(),
+            Some(Path::new("/etc/lode/s.txt"))
+        );
+        assert_eq!(o.password_login, PasswordLogin::Everyone);
+
+        for bad in [
+            "issuer = 'http://idp.example.com'\nclient_id = 'lode'",
+            "issuer = 'not a url'\nclient_id = 'lode'",
+            "issuer = 'https://idp'\nclient_id = ''",
+            "issuer = 'https://idp'\nclient_id = 'x'\nclient_secret = 'a'\nclient_secret_file = 'b'",
+            "issuer = 'https://idp'\nclient_id = 'x'\npublic_url = 'ftp://x'",
+            "issuer = 'https://idp'\nclient_id = 'x'\npassword_login = 'nobody'",
+            "issuer = 'https://idp'\nclient_id = 'x'\nsurprise = 1",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_client_secret_file_is_read_when_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("secret.txt");
+        let mut o = OidcConfig::new("https://idp", "lode").unwrap();
+        o.client_secret_file = Some(file.clone());
+        assert!(o.client_secret().is_err(), "missing file");
+        std::fs::write(&file, "first\n").unwrap();
+        assert_eq!(o.client_secret().unwrap().as_deref(), Some("first"));
+        std::fs::write(&file, "second\r\n").unwrap();
+        assert_eq!(o.client_secret().unwrap().as_deref(), Some("second"));
+        std::fs::write(&file, "\n").unwrap();
+        assert!(o.client_secret().is_err(), "empty file");
     }
 }

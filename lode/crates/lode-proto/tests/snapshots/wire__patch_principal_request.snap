@@ -3,5 +3,6 @@ source: crates/lode-proto/tests/wire.rs
 expression: v
 ---
 {
-  "disabled": true
+  "disabled": true,
+  "sso": "ana@example.com"
 }

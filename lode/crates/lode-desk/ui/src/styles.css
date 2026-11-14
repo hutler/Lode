@@ -2519,3 +2519,15 @@ input[aria-invalid="true"] {
   gap: 8px;
   font-size: 13px;
 }
+
+/* Single sign-on in the sign-in dialog. */
+.sso {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sso-url {
+  word-break: break-all;
+  user-select: all;
+}

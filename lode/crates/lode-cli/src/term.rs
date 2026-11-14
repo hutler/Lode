@@ -40,6 +40,10 @@ impl Ui for Terminal {
         eprintln!("{text}");
     }
 
+    fn open_url(&self, url: &str) -> bool {
+        lode_ops::output::open_in_browser(url).is_ok()
+    }
+
     fn progress(&self, e: &ProgressEvent<'_>) {
         if !self.progress_enabled {
             return;

@@ -98,8 +98,9 @@ Only files and symlinks are versioned. Directories exist implicitly while they c
 
 ### 5.5 Identity and permissions
 
-- Principals authenticate with bearer tokens. Humans obtain one with `lode login`
-  (name + password in v1; single sign-on is a later module).
+- Principals authenticate with bearer tokens. Humans obtain one with `lode login`: with a
+  name and password, or (0.2) with single sign-on through the company's OpenID Connect
+  provider (`lode login URL --sso`, §5.9).
 - Tokens carry scopes. The core defines `read`, `write` and `admin`; modules add their own
   (`lock`, `shelve`, `checks`). A scope belonging to a module that is switched off has no effect.
 - Access rules grant `read`, `write` or `admin` on `depot / branch pattern / path pattern` to a
@@ -159,6 +160,25 @@ so, and uploading or committing the same content again is refused.
 Content still in the head of an active branch cannot be obliterated; commit its removal or a
 fixed file first. Copies outside the server are not reached: backups, workspaces and shared
 caches on people's computers, and webhook payloads already sent.
+
+### 5.9 Single sign-on (0.2)
+
+- A server with `[oidc]` in `loded.toml` signs people in through an OpenID Connect provider
+  (Google, Microsoft Entra ID, Okta, Keycloak and others). The server is the OIDC client:
+  authorization code flow with PKCE; the ID token's signature (RS256 or ES256), issuer,
+  audience, expiry and nonce are checked against the provider's discovery document and keys.
+- A sign-in ends with an ordinary Lode token with the default scopes, like a password login.
+- Users are linked to the identity the provider names them by (the `email` claim by default,
+  compared without case) with `lode admin user create NAME --sso IDENTITY` or
+  `lode admin user sso NAME IDENTITY`. An unlinked identity is refused unless
+  `auto_create` is on, which creates the user on first sign-in. `allowed_domains` limits who
+  may sign in at all. A disabled Lode user stays refused whatever the provider says.
+- `password_login = "admins"` turns password sign-in off for everyone but server
+  administrators.
+- `lode login URL --sso` opens the browser and receives the result on a loopback address;
+  `--no-browser` prints the address instead. Lode Desk offers "Sign in with …" when
+  `GET /info` names single sign-on.
+- Not in 0.2: SAML, group sync from the provider, SCIM.
 
 ## 6. Default modules
 
@@ -288,14 +308,14 @@ are JSON on stdout with a stable `code`; the process exit code is non-zero.
 ## 8. Optional modules (after v1)
 
 Caching proxy · S3 blob backend · chunked storage for very large files · streams
-(branch hierarchy with merge direction) · smarter merge using `merged_from` · single sign-on
-(OIDC) · Postgres metadata backend. Obliterate (§5.8, 0.2), the Git importer (0.1) and the
-SVN importer (0.2) are built.
+(branch hierarchy with merge direction) · smarter merge using `merged_from` · Postgres
+metadata backend. Obliterate (§5.8, 0.2), single sign-on (§5.9, 0.2), the Git importer (0.1)
+and the SVN importer (0.2) are built.
 
 ## 9. CLI summary
 
 ```
-lode login <server-url>
+lode login <server-url> [--sso [--no-browser]]
 lode checkout <server-url>/<depot> [dir] [--branch B] [--include P]… [--exclude P]…
 lode status | add | rm | mv | cp | diff
 lode revert <paths…> | revert --all        lode clean [--ignored] [--dry-run]

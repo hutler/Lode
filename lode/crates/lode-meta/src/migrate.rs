@@ -44,6 +44,11 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             name: "obliterated",
             sql: include_str!("../migrations/core/0003_obliterated.sql"),
         },
+        Migration {
+            version: 4,
+            name: "sso",
+            sql: include_str!("../migrations/core/0004_sso.sql"),
+        },
     ],
 };
 

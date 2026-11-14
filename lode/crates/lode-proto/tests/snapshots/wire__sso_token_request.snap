@@ -1,0 +1,8 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "code": "c0de",
+  "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+}

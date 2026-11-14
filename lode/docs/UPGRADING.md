@@ -81,11 +81,16 @@ First release.
 
 ### 0.2.0 (M12, not yet released)
 
-- The database gains the `obliterated` table (core schema 3), added automatically on the first
-  start. A 0.1 server refuses a database a 0.2 server has opened, so take a backup first if
+- The database gains the `obliterated` table (core schema 3) and a single sign-on column on
+  principals (core schema 4), both added automatically on the first start. A 0.1 server refuses a database a 0.2 server has opened, so take a backup first if
   you may need to go back.
 - New error code `obliterated` (HTTP 410). Older clients show it as an unknown error with the
   server's message; a 0.1 client fails a checkout or update that meets an obliterated file
   instead of leaving it out, so upgrade clients before obliterating content that people may
   still check out at old revisions.
 - `lode import svn <url> <server>/<depot>` imports a Subversion directory's history.
+- New optional `[oidc]` table in `loded.toml` for single sign-on (the commented example in a
+  new `loded init` config shows every key). Without it nothing changes. Link existing users
+  with `lode admin user sso NAME IDENTITY` before turning on `password_login = "admins"`.
+  `GET /info` gains an optional `sso` field and principals an optional `sso` field; older
+  clients ignore both. `lode login --sso` and Lode Desk's "Sign in with …" need 0.2 clients.

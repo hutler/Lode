@@ -24,6 +24,52 @@ pub struct LoginArgs {
     /// The password, for programs that already asked for it (not a command-line option).
     #[arg(skip)]
     pub password: Option<String>,
+    /// Sign in through the company's identity provider in a browser (single sign-on).
+    #[arg(long, conflicts_with_all = ["name", "token_stdin", "password_stdin"])]
+    pub sso: bool,
+    /// With --sso: print the sign-in address instead of opening a browser, for a browser on
+    /// another screen or computer that can still reach this one's loopback address.
+    #[arg(long, requires = "sso")]
+    pub no_browser: bool,
+}
+
+/// How long `--sso` waits for the browser.
+const SSO_WAIT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+fn token_label() -> String {
+    let host = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "this machine".into());
+    format!("lode on {host}")
+}
+
+/// Signs in through the browser and returns the new token.
+async fn sso_token(ctx: &Ctx, anon: &lode_client::Client, no_browser: bool) -> OpResult<String> {
+    let info = anon.info().await?;
+    let Some(sso) = info.sso else {
+        return Err(OpError::usage(
+            "this server does not offer single sign-on; sign in without --sso",
+        ));
+    };
+    let pending = anon.begin_sso(Some(&token_label())).await?;
+    let ui = ctx.out.ui();
+    // Straight to the UI, not through `out`: with --json the address still has to reach
+    // the person (stderr for the CLI).
+    if !no_browser && ui.open_url(pending.url()) {
+        ui.note(&format!(
+            "Your browser opened to sign in with {}. If it did not, open this address:\n  {}",
+            sso.label,
+            pending.url()
+        ));
+    } else {
+        ui.note(&format!(
+            "Open this address in a browser on this computer to sign in with {}:\n  {}",
+            sso.label,
+            pending.url()
+        ));
+    }
+    ui.note("Waiting for the browser (up to 5 minutes)...");
+    Ok(pending.finish(SSO_WAIT).await?.token)
 }
 
 fn read_stdin_line(ui: &dyn Ui, what: &str) -> OpResult<String> {
@@ -52,7 +98,9 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
     };
     let anon = ctx.anonymous_client(&server)?;
     let ui = ctx.out.ui();
-    let token = if args.token_stdin {
+    let token = if args.sso {
+        sso_token(ctx, &anon, args.no_browser).await?
+    } else if args.token_stdin {
         read_stdin_line(ui, "token")?
     } else {
         if ctx.g.json && (args.name.is_none() || !(args.password_stdin || args.password.is_some()))
@@ -77,14 +125,11 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
             }
             ui.prompt("Password: ", true)?
         };
-        let host = std::env::var("COMPUTERNAME")
-            .or_else(|_| std::env::var("HOSTNAME"))
-            .unwrap_or_else(|_| "this machine".into());
         let resp = anon
             .login(&LoginRequest {
                 name,
                 password,
-                token_name: Some(format!("lode on {host}")),
+                token_name: Some(token_label()),
             })
             .await?;
         resp.token
@@ -103,7 +148,19 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
         "kind": me.principal.kind,
         "scopes": me.scopes,
         "token_file": file,
+        "sso": args.sso,
     }))
+}
+
+/// The single sign-on a server offers (`{label, password_login}`), or `null` when it offers
+/// none. Needs no token.
+pub async fn sso_offer(ctx: &Ctx, url: &str) -> OpResult<Value> {
+    let server = ctx.parse_server(url)?;
+    let info = ctx.anonymous_client(&server)?.info().await?;
+    Ok(match info.sso {
+        Some(s) => json!({ "label": s.label, "password_login": s.password_login }),
+        None => Value::Null,
+    })
 }
 
 /// Revokes the stored token on the server (best effort) and forgets it.

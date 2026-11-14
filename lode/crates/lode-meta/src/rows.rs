@@ -85,6 +85,8 @@ pub struct PrincipalRow {
     pub disabled: bool,
     /// Creation time.
     pub created_at: Millis,
+    /// The single sign-on identity linked to this user, in lower case.
+    pub sso_id: Option<String>,
 }
 
 /// Fields for a new principal.

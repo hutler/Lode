@@ -123,6 +123,26 @@ fn auth_types() {
             server_version: "0.1.0".into(),
             api_version: lode_proto::consts::API_VERSION.into(),
             modules: vec!["locks".into(), "shelves".into(), "mcp".into()],
+            sso: None,
+        }
+    );
+    snap!(
+        "info_sso",
+        Info {
+            server_version: "0.2.0".into(),
+            api_version: lode_proto::consts::API_VERSION.into(),
+            modules: vec![],
+            sso: Some(SsoInfo {
+                label: "Example Corp".into(),
+                password_login: false,
+            }),
+        }
+    );
+    snap!(
+        "sso_token_request",
+        SsoTokenRequest {
+            code: "c0de".into(),
+            code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk".into(),
         }
     );
     snap!(
@@ -139,6 +159,7 @@ fn auth_types() {
         display_name: None,
         owner: Some("ana".into()),
         disabled: false,
+        sso: None,
     };
     snap!(
         "login_response",
@@ -438,6 +459,7 @@ fn admin_types() {
             display_name: Some("Build server".into()),
             owner: Some("svc-ci".into()),
             password: None,
+            sso: None,
         }
     );
     snap!(
@@ -445,6 +467,7 @@ fn admin_types() {
         PatchPrincipalRequest {
             disabled: Some(true),
             password: None,
+            sso: Some("ana@example.com".into()),
         }
     );
     snap!(

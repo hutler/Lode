@@ -282,6 +282,30 @@ impl Desk {
         .await
     }
 
+    /// The single sign-on `server` offers, or null.
+    pub async fn sso_offer(&self, server: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(&self.home, None)?;
+        run_op(move || async move { login::sso_offer(&ctx, &server).await }).await
+    }
+
+    /// Signs in through the company's sign-in page in the browser and stores the token
+    /// where `lode` keeps it.
+    pub async fn sign_in_sso(&self, server: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(&self.home, None)?;
+        run_op(move || async move {
+            login::login(
+                &ctx,
+                login::LoginArgs {
+                    url: Some(server),
+                    sso: true,
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
     /// Opens the workspace at `path` and remembers it.
     pub async fn open_workspace(&self, path: String) -> Result<Value, ErrorView> {
         let dir = PathBuf::from(&path);

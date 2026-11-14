@@ -42,6 +42,12 @@ Home lists the workspaces you opened recently. The × beside one forgets it (the
 Home, **Sign in to a server…**. Give the server address (such as `https://lode.example.com`),
 your name and your password. A wrong password says so and nothing is saved.
 
+When the server offers single sign-on, a **Sign in with …** button appears once the address is
+complete. It opens your browser at the company's sign-in page; finish there, and the dialog
+says as whom you are signed in. If the browser does not open, the dialog shows the address to
+open on this computer. Password sign-in may be for server administrators only; the dialog
+says so.
+
 ![Signing in](desk-guide/sign-in-light.png)
 
 ## Check out a depot
@@ -266,6 +272,7 @@ Errors show the message, a next step where one helps, and a code. The codes:
 | `conflicted` | Files are still in conflict. | Resolve them first. |
 | `conflict` | The shelf changed since you looked, or the name is taken. | Look again, then retry. |
 | `checks_required` | The shelf's required checks have not passed. | Wait for them or fix the change. |
+| `sso_failed` | The company sign-in was refused or not finished within 5 minutes; the message says why. | Ask a server administrator to add or enable your account if the message names it; otherwise sign in again. |
 | `obliterated` | An administrator removed this content from the server for good. | Nothing to fix: the file's other versions still open. An update leaves such files out and lists them. |
 | `module_disabled` | The server does not have that feature (locks, shelves, checks). | Ask the server's admin. |
 | `usage` | The request itself was wrong, such as a bad branch name. | Read the message. |

@@ -54,6 +54,14 @@ pub mod paths {
     pub const INFO: &str = "/api/v1/info";
     /// `POST` password login.
     pub const LOGIN: &str = "/api/v1/auth/login";
+    /// `GET` single sign-on: the browser starts here and is sent on to the identity provider.
+    /// Query: `redirect_uri` (a loopback `http` address of the client), `state`,
+    /// `code_challenge` (S256) and an optional `token_name`.
+    pub const SSO_START: &str = "/api/v1/auth/sso/start";
+    /// `GET` single sign-on: the identity provider sends the browser back here.
+    pub const SSO_CALLBACK: &str = "/api/v1/auth/sso/callback";
+    /// `POST` single sign-on: the client trades its one-time code for a token.
+    pub const SSO_TOKEN: &str = "/api/v1/auth/sso/token";
     /// `GET` identity of the caller.
     pub const WHOAMI: &str = "/api/v1/auth/whoami";
     /// `GET` and `POST` own tokens.

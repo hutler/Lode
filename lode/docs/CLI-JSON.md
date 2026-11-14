@@ -32,7 +32,7 @@ Failure:
 | 0 | success | |
 | 1 | operation failed | `not_found`, `out_of_date`, `conflict`, `conflicted`, `locked`, `lock_required`, `local_changes`, `nothing_to_commit`, `nothing_to_shelve`, `update_incomplete`, `missing`, `aborted`, `module_disabled`, `not_a_workspace`, `already_a_workspace`, `not_empty`, `workspace_in_use`, `checkout_incomplete`, `pending_commit`, `ignored`, `outside_view`, `unsafe_path`, `changed_during_commit` |
 | 2 | usage error | `usage`, `invalid_path`, `invalid_pattern`, `invalid_url`, `insecure_url` |
-| 3 | authentication or permission | `unauthenticated`, `permission_denied` |
+| 3 | authentication or permission | `unauthenticated`, `permission_denied`, `sso_failed` |
 | 4 | network or server | `network`, `internal`, `protocol`, `hash_mismatch`, any 5xx |
 
 Error codes from the server (`lode_core::ErrorCode`) are passed through unchanged.
@@ -65,9 +65,16 @@ command refuses the option with `usage`.
 
 ### `lode login <url>`
 
-Needs `--name` with `--password-stdin`, or `--token-stdin`.
+Needs `--name` with `--password-stdin`, or `--token-stdin`, or `--sso`.
 
-`{ "server", "name", "kind": "user"|"agent", "scopes": [..], "token_file" }`
+`{ "server", "name", "kind": "user"|"agent", "scopes": [..], "token_file", "sso": bool }`
+
+With `--sso` (single sign-on, 0.2) the command opens the browser (`--no-browser`: it does
+not) and prints the sign-in address to stderr, also with `--json`, then waits up to 5
+minutes for the browser to come back to its loopback address. A server without single
+sign-on is a `usage` error; a refused or unfinished sign-in is `sso_failed` (exit 3) with the
+reason in the message, such as the provider's refusal, an unlinked identity, a domain that
+is not allowed or a disabled user.
 
 ### `lode logout`
 
@@ -444,7 +451,8 @@ may also manage that agent's tokens).
 | Command | `--json` output |
 | --- | --- |
 | `depot create <name>` / `depot list` | the depot / `{ "depots": [ { "name", "created_at" } ] }` |
-| `user create <name> [--display-name D] [--password-stdin]` | the principal |
+| `user create <name> [--display-name D] [--sso IDENTITY] [--password-stdin]` | the principal, with `"sso"` when linked; with `--sso` no password is asked for unless `--password-stdin` is given |
+| `user sso <name> <identity>` / `user sso <name> --remove` | the principal; an identity linked to someone else is `conflict` |
 | `user list` / `agent list` | `{ "principals": [principal] }`, users or agents only |
 | `user disable <name> [--enable]` / `agent disable …` | the principal |
 | `user passwd <name> [--password-stdin]` | the principal |

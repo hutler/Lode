@@ -74,6 +74,9 @@ hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["server", "server-graceful", "http1", "http2", "tokio"] }
 ignore = "0.4"
 rand = "0.8"
+# Signature checks for single sign-on ID tokens (T122): RS256 and ES256. Already in the tree
+# through rustls and instant-acme; used directly instead of a JWT crate.
+ring = "0.17"
 # The official Rust MCP SDK. 3.x needs Rust 1.88.
 rmcp = { version = "3.10", default-features = false }
 rpassword = "7"

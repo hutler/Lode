@@ -109,6 +109,10 @@ pub enum Error {
     /// Local I/O, such as writing a download.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// A single sign-on did not complete: the provider or the server refused it, or the
+    /// browser did not come back in time.
+    #[error("single sign-on failed: {0}")]
+    SignIn(String),
 }
 
 impl Error {

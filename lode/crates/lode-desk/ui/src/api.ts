@@ -26,6 +26,14 @@ export interface WhoAmI {
   scopes: string[];
 }
 
+/** Single sign-on as a server offers it. */
+export interface SsoOffer {
+  /** What the sign-in button calls the company's sign-in, such as "Example Corp". */
+  label: string;
+  /** False when only server administrators may still sign in with a password. */
+  password_login: boolean;
+}
+
 /** A workspace the app has opened before. */
 export interface RecentWorkspace {
   path: string;
@@ -431,6 +439,13 @@ export interface Backend {
   /** Who is signed in to `server`, or null. */
   signedIn(server: string): Promise<WhoAmI | null>;
   signIn(server: string, name: string, password: string): Promise<WhoAmI>;
+  /** The server's single sign-on, or null when it offers none. */
+  ssoOffer(server: string): Promise<SsoOffer | null>;
+  /** Signs in through the company's sign-in page in the browser; resolves when the browser
+   * comes back (or fails after five minutes). */
+  signInSso(server: string): Promise<WhoAmI>;
+  /** Calls `listener` with the sign-in address when single sign-on opens the browser. */
+  onSsoUrl(listener: (url: string) => void): () => void;
   openWorkspace(path: string): Promise<WorkspaceInfo>;
   checkout(target: string, dir: string, branch: string): Promise<CheckoutResult>;
   status(workspace: string): Promise<StatusResult>;
@@ -603,6 +618,9 @@ async function tauriBackend(): Promise<Backend> {
     forgetWorkspace: (path) => invoke("forget_workspace", { path }),
     signedIn: (server) => invoke("signed_in", { server }),
     signIn: (server, name, password) => invoke("sign_in", { server, name, password }),
+    ssoOffer: (server) => invoke("sso_offer", { server }),
+    signInSso: (server) => invoke("sign_in_sso", { server }),
+    onSsoUrl: (listener) => subscribe<string>("lode://sso-url", listener),
     openWorkspace: (path) => invoke("open_workspace", { path }),
     checkout: (target, dir, branch) => invoke("checkout", { target, dir, branch }),
     status: (workspace) => invoke("status", { workspace }),

@@ -64,6 +64,32 @@ describe("sign in", () => {
     expect(alert).toHaveTextContent("unauthenticated");
     expect(alert).toHaveTextContent("Sign in to the server");
   });
+
+  it("offers single sign-on when the server has it", async () => {
+    setBackend(createMockBackend({ stepMs: 0, signedIn: [], sso: { label: "Example Corp", password_login: false } }));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Sign in to a server…" }));
+    const dialog = screen.getByRole("dialog", { name: "Sign in" });
+    await user.clear(within(dialog).getByLabelText("Server"));
+    await user.type(within(dialog).getByLabelText("Server"), SERVER);
+    const sso = await within(dialog).findByRole("button", { name: "Sign in with Example Corp" });
+    expect(dialog).toHaveTextContent("Password sign-in is for server administrators only.");
+    await user.click(sso);
+    expect(await within(dialog).findByText(/Signed in to/)).toHaveTextContent(`Signed in to ${SERVER} as alice.`);
+  });
+
+  it("shows no single sign-on button when the server has none", async () => {
+    setBackend(createMockBackend({ stepMs: 0, signedIn: [] }));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Sign in to a server…" }));
+    const dialog = screen.getByRole("dialog", { name: "Sign in" });
+    await user.clear(within(dialog).getByLabelText("Server"));
+    await user.type(within(dialog).getByLabelText("Server"), SERVER);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(within(dialog).queryByRole("button", { name: /Sign in with/ })).toBeNull();
+  });
 });
 
 describe("check out", () => {

@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 assert_cmd.workspace = true
 axum.workspace = true
+base64.workspace = true
 lode-client.workspace = true
 lode-core.workspace = true
 lode-mod-locks.workspace = true
@@ -23,7 +24,10 @@ lode-mod-webhooks.workspace = true
 lode-mod-shelves.workspace = true
 lode-proto.workspace = true
 lode-server.workspace = true
+reqwest.workspace = true
+ring.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 

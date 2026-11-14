@@ -14,6 +14,8 @@ const NEXT_STEP: Record<string, string> = {
   checkout_incomplete: "Check out into the same folder again to finish it.",
   update_incomplete: "An update or branch switch stopped before it finished. Finish it, then try again.",
   network: "Check the server address and your connection.",
+  sso_failed:
+    "The company sign-in did not finish. If the message names your account, ask a server administrator to add or enable it; otherwise sign in again.",
   obliterated: "An administrator removed this content from the server for good. Other versions of the file still open.",
 };
 

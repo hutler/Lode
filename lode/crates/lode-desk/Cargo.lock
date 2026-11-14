@@ -2779,15 +2779,18 @@ dependencies = [
 name = "lode-client"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "bytes",
  "directories",
  "futures",
  "lode-core",
  "lode-proto",
+ "rand 0.8.8",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -2841,6 +2844,7 @@ dependencies = [
  "lode-client",
  "lode-core",
  "lode-proto",
+ "quick-xml 0.38.4",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -3001,6 +3005,8 @@ dependencies = [
  "lode-store",
  "rand 0.8.8",
  "rcgen",
+ "reqwest 0.12.28",
+ "ring",
  "rustls",
  "serde",
  "serde_json",
@@ -3038,6 +3044,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "axum",
+ "base64 0.22.1",
  "lode-client",
  "lode-core",
  "lode-mod-checks",
@@ -3047,7 +3054,10 @@ dependencies = [
  "lode-mod-webhooks",
  "lode-proto",
  "lode-server",
+ "reqwest 0.12.28",
+ "ring",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
 ]
@@ -3868,7 +3878,7 @@ checksum = "327a4cb2ad49dc48adfdc9da89e22c64d488b508c67a044d71ba729e4521a285"
 dependencies = [
  "base64 0.23.1",
  "indexmap 2.14.2",
- "quick-xml",
+ "quick-xml 0.42.0",
  "serde",
  "time",
 ]
@@ -4032,6 +4042,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.38.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

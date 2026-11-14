@@ -14,6 +14,29 @@ pub struct Info {
     /// Names of the enabled modules.
     #[serde(default)]
     pub modules: Vec<String>,
+    /// Single sign-on, when the server offers it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso: Option<SsoInfo>,
+}
+
+/// Single sign-on as `GET /info` describes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsoInfo {
+    /// What sign-in buttons call the provider, such as `Example Corp`.
+    pub label: String,
+    /// Whether everyone may still sign in with a password; false when only server
+    /// administrators may.
+    pub password_login: bool,
+}
+
+/// `POST /auth/sso/token`: the one-time code the server handed the client's loopback
+/// address, and the PKCE verifier whose challenge started the sign-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsoTokenRequest {
+    /// The one-time code.
+    pub code: String,
+    /// The PKCE code verifier.
+    pub code_verifier: String,
 }
 
 /// `POST /auth/login`.
@@ -53,6 +76,9 @@ pub struct PrincipalView {
     /// Disabled principals cannot authenticate.
     #[serde(default, skip_serializing_if = "crate::is_false")]
     pub disabled: bool,
+    /// The single sign-on identity linked to this user, such as an e-mail address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sso: Option<String>,
 }
 
 /// `GET /auth/whoami`.

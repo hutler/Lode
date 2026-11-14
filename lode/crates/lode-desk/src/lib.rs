@@ -41,6 +41,12 @@ impl Ui for WindowUi {
     fn progress(&self, event: &ProgressEvent<'_>) {
         let _ = self.app.emit("lode://progress", event);
     }
+
+    fn open_url(&self, url: &str) -> bool {
+        // The window shows the address too, for when no browser opens.
+        let _ = self.app.emit("lode://sso-url", url);
+        lode_ops::output::open_in_browser(url).is_ok()
+    }
 }
 
 /// The app's own files.
@@ -141,6 +147,16 @@ async fn sign_in(
     password: String,
 ) -> Result<Value, ErrorView> {
     desk.sign_in(server, name, password).await
+}
+
+#[tauri::command]
+async fn sso_offer(desk: State<'_, Desk>, server: String) -> Result<Value, ErrorView> {
+    desk.sso_offer(server).await
+}
+
+#[tauri::command]
+async fn sign_in_sso(desk: State<'_, Desk>, server: String) -> Result<Value, ErrorView> {
+    desk.sign_in_sso(server).await
 }
 
 #[tauri::command]
@@ -568,6 +584,8 @@ pub fn run() -> Result<(), tauri::Error> {
             forget_workspace,
             signed_in,
             sign_in,
+            sso_offer,
+            sign_in_sso,
             open_workspace,
             checkout,
             status,

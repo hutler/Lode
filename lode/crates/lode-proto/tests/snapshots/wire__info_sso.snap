@@ -1,0 +1,13 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "server_version": "0.2.0",
+  "api_version": "1",
+  "modules": [],
+  "sso": {
+    "label": "Example Corp",
+    "password_login": false
+  }
+}

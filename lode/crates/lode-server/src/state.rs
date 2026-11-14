@@ -8,7 +8,7 @@ use lode_core::{DepotId, LodeConfig, ObjectId};
 use lode_meta::MetaStore;
 use lode_store::BlobStore;
 
-use crate::auth::{LoginLimiter, ScopeRegistry};
+use crate::auth::{LoginLimiter, ScopeRegistry, Sso};
 use crate::clock::SharedClock;
 use crate::commit::TreeLoader;
 use crate::config::ServerConfig;
@@ -43,6 +43,7 @@ struct Inner {
     gc_running: tokio::sync::Mutex<()>,
     obliterated: Mutex<HashMap<DepotId, Arc<HashSet<ObjectId>>>>,
     failpoints: Arc<Failpoints>,
+    sso: Option<Sso>,
 }
 
 /// Serializes commits to one branch.
@@ -72,6 +73,7 @@ impl AppState {
             inner: Arc::new(Inner {
                 meta,
                 trees: TreeLoader::new(blobs.clone(), TREE_CACHE_ENTRIES),
+                sso: config.oidc.clone().map(Sso::new),
                 blobs,
                 config,
                 clock,
@@ -118,6 +120,11 @@ impl AppState {
     /// Time source.
     pub fn clock(&self) -> &SharedClock {
         &self.inner.clock
+    }
+
+    /// Single sign-on, when `[oidc]` is configured.
+    pub fn sso(&self) -> Option<&Sso> {
+        self.inner.sso.as_ref()
     }
 
     /// Registered scopes.

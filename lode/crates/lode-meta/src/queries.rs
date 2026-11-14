@@ -67,7 +67,7 @@ fn depot_row(r: &Row<'_>) -> rusqlite::Result<DepotRow> {
 }
 
 const PRINCIPAL_COLS: &str =
-    "id, kind, name, display_name, owner_id, password_hash, disabled, created_at";
+    "id, kind, name, display_name, owner_id, password_hash, disabled, created_at, sso_id";
 fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
     let kind: String = r.get(1)?;
     Ok(PrincipalRow {
@@ -83,6 +83,7 @@ fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
         password_hash: r.get(5)?,
         disabled: r.get::<_, i64>(6)? != 0,
         created_at: r.get(7)?,
+        sso_id: r.get(8)?,
     })
 }
 
@@ -274,6 +275,18 @@ pub trait Reads {
             .query_row(
                 &format!("SELECT {PRINCIPAL_COLS} FROM principal WHERE name = ?1"),
                 [name],
+                principal_row,
+            )
+            .optional()?)
+    }
+
+    /// The principal linked to a single sign-on identity (compared in lower case).
+    fn principal_by_sso(&self, sso_id: &str) -> Result<Option<PrincipalRow>> {
+        Ok(self
+            .db()
+            .query_row(
+                &format!("SELECT {PRINCIPAL_COLS} FROM principal WHERE sso_id = ?1"),
+                [sso_id.to_lowercase()],
                 principal_row,
             )
             .optional()?)
@@ -878,6 +891,20 @@ impl WriteTx<'_> {
             )?,
             "principal",
         )
+    }
+
+    /// Links a principal to a single sign-on identity (stored in lower case), or removes the
+    /// link. An identity already linked to someone else is `AlreadyExists`.
+    pub fn set_principal_sso(&self, id: PrincipalId, sso_id: Option<&str>) -> Result<()> {
+        let value = sso_id.map(str::to_lowercase);
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE principal SET sso_id = ?2 WHERE id = ?1",
+                params![id.0, value],
+            )
+            .map_err(unique("single sign-on identity"))?;
+        self.expect_one(n, "principal")
     }
 
     /// Enables or disables a principal.

@@ -11,4 +11,9 @@ describe("ErrorBanner", () => {
     expect(alert).toHaveTextContent("removed this content from the server for good");
     expect(alert).toHaveTextContent("obliterated");
   });
+
+  it("explains a failed single sign-on", () => {
+    render(<ErrorBanner error={{ code: "sso_failed", message: "single sign-on failed: no Lode user is linked" }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("ask a server administrator to add or enable it");
+  });
 });
