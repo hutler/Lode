@@ -5,6 +5,10 @@
 //! every object the copied database references is already on disk when the copy of
 //! `depots/` starts. Revisions are never removed, so garbage collection cannot delete those
 //! objects either.
+//!
+//! With S3 storage (`[storage] kind = "s3"`) the content is not copied: it stays in the
+//! bucket, which the bucket's own versioning or replication protects. The backup then holds
+//! the database and the configuration.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -20,6 +24,8 @@ pub struct BackupReport {
     pub objects: u64,
     /// Bytes of object files copied.
     pub bytes: u64,
+    /// The content is in an S3 bucket and was not copied.
+    pub content_in_bucket: bool,
 }
 
 /// Why a backup failed.
@@ -61,7 +67,8 @@ pub async fn backup(state: &AppState, dest: &Path) -> Result<BackupReport, Backu
 
     let src_root = state.config().data_dir.clone();
     let dest_root = dest.to_owned();
-    tokio::task::spawn_blocking(move || copy_store(&src_root, &dest_root))
+    let objects = state.config().storage.s3_in_use().is_none();
+    tokio::task::spawn_blocking(move || copy_store(&src_root, &dest_root, objects))
         .await
         .map_err(|e| BackupError::Io {
             context: "copy task failed".into(),
@@ -69,12 +76,20 @@ pub async fn backup(state: &AppState, dest: &Path) -> Result<BackupReport, Backu
         })?
 }
 
-fn copy_store(src_root: &Path, dest_root: &Path) -> Result<BackupReport, BackupError> {
+fn copy_store(
+    src_root: &Path,
+    dest_root: &Path,
+    objects: bool,
+) -> Result<BackupReport, BackupError> {
     let mut report = BackupReport::default();
     let config = src_root.join(CONFIG_FILE_NAME);
     if config.is_file() {
         std::fs::copy(&config, dest_root.join(CONFIG_FILE_NAME))
             .map_err(io_err("cannot copy the configuration"))?;
+    }
+    if !objects {
+        report.content_in_bucket = true;
+        return Ok(report);
     }
     let depots = src_root.join("depots");
     std::fs::create_dir_all(dest_root.join("depots")).map_err(io_err("cannot create depots/"))?;

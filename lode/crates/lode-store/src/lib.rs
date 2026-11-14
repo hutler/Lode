@@ -1,12 +1,14 @@
 //! Content-addressed object storage for the Lode server (ARCHITECTURE §3.3–3.4).
 //!
-//! Objects are immutable files named by their id. Content is streamed in and out with fixed
+//! Objects are immutable files (or S3 objects) named by their id. Content is streamed in and out with fixed
 //! buffers, verified against its id on write, and never overwritten.
 
 #![forbid(unsafe_code)]
 
+mod encode;
 mod error;
 mod fs;
+pub mod s3;
 mod zstd_reader;
 
 use std::pin::Pin;
@@ -18,6 +20,7 @@ use tokio::io::AsyncRead;
 
 pub use error::{Result, StoreError};
 pub use fs::{FsBlobStore, FsBlobStoreConfig};
+pub use s3::{S3BlobStore, S3Config};
 
 /// Result of a `put`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

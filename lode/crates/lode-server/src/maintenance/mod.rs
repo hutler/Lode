@@ -1,14 +1,17 @@
-//! Depot maintenance (ARCHITECTURE §11): garbage collection, consistency checks, backup.
+//! Depot maintenance (ARCHITECTURE §11): garbage collection, consistency checks, backup,
+//! moving content to S3.
 
 mod backup;
 mod fsck;
 mod gc;
+mod migrate;
 mod obliterate;
 mod schedule;
 
 pub use backup::{backup, BackupError, BackupReport};
 pub use fsck::{fsck, FsckOptions};
 pub use gc::{collect_garbage, GcOptions};
+pub use migrate::{migrate_to_s3, MigrateError, MigrateOptions, MigrateReport};
 pub use obliterate::{gone, missing_object, obliterate, obliterations, MAX_REASON, MAX_TARGETS};
 pub use schedule::{backup_tick, run_backups, BackupSchedule, BackupTick, BACKUP_PREFIX};
 

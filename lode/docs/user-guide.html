@@ -611,6 +611,24 @@ checks = false
 [gc]
 grace_seconds = 86400              # unused data younger than this is kept</code></pre>
 <p>Restart the server after changing the file. The log level is set with the environment variable <code>LODED_LOG</code> (<code>info</code> by default; <code>debug</code> for more).</p>
+<h3>Keeping content in S3</h3>
+<p>File content can live in an S3-compatible bucket (Amazon S3, Backblaze B2, MinIO, Wasabi and others) instead of the data directory, so a small server can hold a large depot. The database stays in the data directory. Create the bucket first, then add a <code>[storage]</code> table:</p>
+<pre><code>[storage]
+kind = "s3"
+bucket = "lode-content"
+prefix = "main"                       # keys start with this; may be empty
+region = "eu-central-1"               # default: AWS_REGION, then us-east-1
+endpoint = "https://s3.eu-central-003.backblazeb2.com"   # leave out for Amazon S3
+path_style = false                    # true for MinIO and most self-hosted services
+access_key_id = "AKIA..."
+secret_access_key_file = "s3-secret.txt"   # first line is the secret</code></pre>
+<p>Without <code>access_key_id</code> and <code>secret_access_key_file</code>, the server uses the environment variables <code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code> and, for temporary credentials, <code>AWS_SESSION_TOKEN</code>. The key needs to list, read, write and delete objects under the prefix. The server checks the bucket when it starts and refuses to start if it cannot list it. Each object is one S3 object named <code>&lt;prefix&gt;/&lt;depot id&gt;/ab/cd/&lt;id&gt;</code>, written once and never replaced; uploads are prepared in <code>s3-tmp/</code> in the data directory first, so leave room there for the largest file. A single file can be at most 5 GiB with S3 storage. Use <code>https</code> endpoints except for a service on the same machine or a trusted network.</p>
+<p>To move an existing server's content into a bucket, fill in the S3 settings but keep <code>kind = "fs"</code>, then:</p>
+<pre><code>loded migrate-storage --config /var/lib/lode/loded.toml --to s3 --copy-only   # while the server runs
+loded service stop
+loded migrate-storage --config /var/lib/lode/loded.toml --to s3               # copies the rest, sets kind = "s3"
+loded service start</code></pre>
+<p>Each run copies only what the bucket does not have yet, so an interrupted copy just runs again. The second run keeps the old file as <code>loded.toml.before-s3</code>. The local copies under <code>depots/</code> are no longer used afterwards; remove them once the server works from the bucket.</p>
 
 <h1>4. TLS</h1>
 <p>Clients refuse unencrypted connections to remote servers, so one of these is required:</p>
@@ -860,6 +878,7 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
 
 <h1>13. Backup and restore</h1>
 <p>Everything is in the data directory: a database file (<code>meta.db</code>) and the stored content (<code>depots/</code>). A certificate from Let's Encrypt (<code>acme/</code>) is not backed up; the server obtains a new one if it is lost.</p>
+<p>With content in S3 (chapter 3), backups hold the database and <code>loded.toml</code> only; the content stays in the bucket. Protect it with the bucket's own tools: turn on versioning, so a deleted or damaged object can be brought back, and replication to a second bucket or region if the provider offers it. Restoring then means restoring the database: objects it names are still in the bucket, because only garbage collection and obliterate delete them.</p>
 <h3>Scheduled backups</h3>
 <p>With a <code>[backup]</code> table, the running server makes a backup on a schedule and keeps the newest few:</p>
 <pre><code>[backup]

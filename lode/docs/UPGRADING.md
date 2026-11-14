@@ -94,3 +94,8 @@ First release.
   with `lode admin user sso NAME IDENTITY` before turning on `password_login = "admins"`.
   `GET /info` gains an optional `sso` field and principals an optional `sso` field; older
   clients ignore both. `lode login --sso` and Lode Desk's "Sign in with …" need 0.2 clients.
+- New optional `[storage]` table: `kind = "s3"` keeps file content in an S3-compatible bucket.
+  Without it nothing changes. Move an existing server with `loded migrate-storage --to s3`
+  (see the user guide, "Keeping content in S3"). With S3 storage, `loded backup` and
+  scheduled backups copy only the database and `loded.toml`; use the bucket's versioning or
+  replication for the content.

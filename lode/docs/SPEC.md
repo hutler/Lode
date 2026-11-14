@@ -307,9 +307,9 @@ are JSON on stdout with a stable `code`; the process exit code is non-zero.
 
 ## 8. Optional modules (after v1)
 
-Caching proxy · S3 blob backend · chunked storage for very large files · streams
-(branch hierarchy with merge direction) · smarter merge using `merged_from` · Postgres
-metadata backend. Obliterate (§5.8, 0.2), single sign-on (§5.9, 0.2), the Git importer (0.1)
+Caching proxy · chunked storage for very large files · streams (branch hierarchy with merge
+direction) · smarter merge using `merged_from` · Postgres metadata backend. Obliterate (§5.8,
+0.2), single sign-on (§5.9, 0.2), S3-compatible blob storage (0.2), the Git importer (0.1)
 and the SVN importer (0.2) are built.
 
 ## 9. CLI summary

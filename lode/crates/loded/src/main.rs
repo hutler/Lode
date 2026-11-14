@@ -56,6 +56,19 @@ enum Command {
         /// Destination directory; must be missing or empty.
         dest: PathBuf,
     },
+    /// Move file content to the S3 bucket named in [storage], then switch loded.toml to it.
+    /// Safe to repeat; each run copies only what the bucket lacks.
+    MigrateStorage {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// Where to move the content.
+        #[arg(long, value_enum)]
+        to: StorageTarget,
+        /// Copy but do not switch loded.toml (a first pass while the server runs).
+        #[arg(long)]
+        copy_only: bool,
+    },
     /// Run the server.
     Serve {
         /// Path to loded.toml.
@@ -71,6 +84,13 @@ enum Command {
     /// Register loded as a system service (Windows service, or systemd on Linux).
     #[command(subcommand)]
     Service(service::ServiceCommand),
+}
+
+/// A storage `loded migrate-storage` moves to.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum StorageTarget {
+    /// The S3 bucket in [storage].
+    S3,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -170,12 +190,52 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let cfg = ServerConfig::load(&config)?;
             let state = lode_server::open_state(cfg, Arc::new(SystemClock), Vec::new()).await?;
             let report = lode_server::maintenance::backup(&state, &dest).await?;
+            if report.content_in_bucket {
+                println!("Backed up the database to {}", dest.display());
+                println!(
+                    "File content stays in the S3 bucket: protect it with the bucket's \
+                     versioning or replication."
+                );
+            } else {
+                println!(
+                    "Backed up the database and {} objects ({} bytes) to {}",
+                    report.objects,
+                    report.bytes,
+                    dest.display()
+                );
+            }
+            Ok(())
+        }
+        Command::MigrateStorage {
+            config,
+            to: StorageTarget::S3,
+            copy_only,
+        } => {
+            let report = lode_server::maintenance::migrate_to_s3(
+                &config,
+                lode_server::maintenance::MigrateOptions { copy_only },
+            )
+            .await?;
             println!(
-                "Backed up the database and {} objects ({} bytes) to {}",
-                report.objects,
-                report.bytes,
-                dest.display()
+                "{} depot(s): copied {} objects ({} bytes); {} were already in the bucket",
+                report.depots, report.copied, report.bytes, report.already_there
             );
+            match report.switched {
+                Some(path) => {
+                    println!(
+                        "Switched {} to S3 storage ([storage] kind = \"s3\").",
+                        path.display()
+                    );
+                    println!(
+                        "Start the server. The local copies under depots/ are no longer used; \
+                         remove them once the server works from the bucket."
+                    );
+                }
+                None => println!(
+                    "loded.toml is unchanged. Stop the server and run this again without \
+                     --copy-only to copy the rest and switch."
+                ),
+            }
             Ok(())
         }
         Command::Serve { config, .. } => {

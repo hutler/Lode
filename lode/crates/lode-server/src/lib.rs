@@ -32,14 +32,15 @@ pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
     AcmeConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, Limits, ModulesConfig,
-    OidcConfig, PasswordLogin, ServerConfig, TlsConfig, WebhooksConfig,
+    OidcConfig, PasswordLogin, S3Settings, ServerConfig, StorageConfig, StorageKind, TlsConfig,
+    WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};
 pub use perm::{BranchAccess, DepotAccess, Level, Permissions};
 pub use routes::{core_routes, finish, router, REQUEST_ID_HEADER};
 pub use server::{
-    init, open_state, reset_admin, set_admin_password, shutdown_signal, BoundServer, ClientInfo,
-    InitReport, ServerError,
+    init, open_blob_store, open_state, reset_admin, set_admin_password, shutdown_signal,
+    BoundServer, ClientInfo, InitReport, ServerError,
 };
 pub use state::AppState;

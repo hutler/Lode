@@ -92,6 +92,19 @@ grace_seconds = 86400
 # auto_create = false     # true: create a user on first sign-in instead of refusing
 # password_login = "everyone"               # "admins": only server admins use passwords
 
+# Where file content is kept. By default it is files under depots/ in the data directory.
+# With kind = "s3" it goes to an S3-compatible bucket (AWS S3, Backblaze B2, MinIO, ...);
+# the database stays here. Move existing content with `loded migrate-storage --to s3`.
+# [storage]
+# kind = "s3"
+# bucket = "lode-content"
+# prefix = "main"                       # keys start with this; may be empty
+# region = "eu-central-1"               # or AWS_REGION; default us-east-1
+# endpoint = "https://s3.eu-central-003.backblazeb2.com"   # leave out for AWS
+# path_style = false                    # true for MinIO and most self-hosted services
+# access_key_id = "AKIA..."             # with the secret's file; leave both out to use
+# secret_access_key_file = "s3-secret.txt"   # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+
 # Webhooks module, when enabled in [modules].
 [webhooks]
 # Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
@@ -153,6 +166,273 @@ pub struct ServerConfig {
     /// Single sign-on, when configured.
     #[serde(default)]
     pub oidc: Option<OidcConfig>,
+    /// Where object content is kept.
+    #[serde(default)]
+    pub storage: StorageConfig,
+}
+
+/// The `[storage]` table: where object content is kept (T123).
+///
+/// S3 settings may be filled in while `kind` is still `fs`: `loded migrate-storage --to s3`
+/// copies the content into that bucket and then sets `kind = "s3"`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "RawStorage")]
+pub struct StorageConfig {
+    /// Which store the server uses.
+    pub kind: StorageKind,
+    /// S3 settings; required when `kind` is `s3`.
+    pub s3: Option<S3Settings>,
+}
+
+/// Which object store the server uses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageKind {
+    /// Files under `<data_dir>/depots/` (the default).
+    #[default]
+    Fs,
+    /// An S3-compatible bucket.
+    S3,
+}
+
+impl StorageConfig {
+    /// S3 storage with these settings.
+    pub fn s3(settings: S3Settings) -> Self {
+        Self {
+            kind: StorageKind::S3,
+            s3: Some(settings),
+        }
+    }
+
+    /// The S3 settings when the server uses S3.
+    pub fn s3_in_use(&self) -> Option<&S3Settings> {
+        match self.kind {
+            StorageKind::S3 => self.s3.as_ref(),
+            StorageKind::Fs => None,
+        }
+    }
+}
+
+/// S3 storage settings. Credentials come from `access_key_id` with
+/// `secret_access_key_file`, or else from the `AWS_*` environment variables.
+#[derive(Clone, PartialEq, Eq)]
+pub struct S3Settings {
+    /// Bucket name.
+    pub bucket: String,
+    /// Key prefix, without leading or trailing `/`.
+    pub prefix: String,
+    /// Region; else `AWS_REGION`, `AWS_DEFAULT_REGION`, then `us-east-1`.
+    pub region: Option<String>,
+    /// Endpoint of a non-AWS service, `http(s)://host[:port]`.
+    pub endpoint: Option<String>,
+    /// Bucket in the path instead of the host name.
+    pub path_style: bool,
+    /// Access key id.
+    pub access_key_id: Option<String>,
+    /// A file whose first line is the secret access key. Resolved against the config file's
+    /// directory.
+    pub secret_access_key_file: Option<PathBuf>,
+    /// A secret given in code, for tests and embedding; never read from `loded.toml`.
+    secret_access_key: Option<String>,
+}
+
+impl std::fmt::Debug for S3Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("S3Settings")
+            .field("bucket", &self.bucket)
+            .field("prefix", &self.prefix)
+            .field("region", &self.region)
+            .field("endpoint", &self.endpoint)
+            .field("path_style", &self.path_style)
+            .field("access_key_id", &self.access_key_id)
+            .field("secret_access_key_file", &self.secret_access_key_file)
+            .field(
+                "secret_access_key",
+                &self.secret_access_key.as_ref().map(|_| "***"),
+            )
+            .finish()
+    }
+}
+
+impl S3Settings {
+    /// Settings for `bucket` with everything else unset.
+    pub fn new(bucket: impl Into<String>) -> Self {
+        Self {
+            bucket: bucket.into(),
+            prefix: String::new(),
+            region: None,
+            endpoint: None,
+            path_style: false,
+            access_key_id: None,
+            secret_access_key_file: None,
+            secret_access_key: None,
+        }
+    }
+
+    /// Sets the credentials directly, for tests and embedding.
+    pub fn with_credentials(mut self, access_key_id: &str, secret_access_key: &str) -> Self {
+        self.access_key_id = Some(access_key_id.to_owned());
+        self.secret_access_key = Some(secret_access_key.to_owned());
+        self
+    }
+
+    /// The store settings, with credentials and region resolved. `env` looks up
+    /// environment variables (`std::env::var` in the server; a map in tests).
+    pub fn store_config(
+        &self,
+        data_dir: &Path,
+        max_object_size: u64,
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<lode_store::S3Config, String> {
+        let nonempty = |name: &str| env(name).filter(|v| !v.trim().is_empty());
+        let credentials = match &self.access_key_id {
+            Some(id) => {
+                let secret = match (&self.secret_access_key, &self.secret_access_key_file) {
+                    (Some(s), _) => s.clone(),
+                    (None, Some(file)) => {
+                        let text = std::fs::read_to_string(file).map_err(|e| {
+                            format!("cannot read secret_access_key_file {}: {e}", file.display())
+                        })?;
+                        let first = text.lines().next().unwrap_or("").trim().to_owned();
+                        if first.is_empty() {
+                            return Err(format!("{} is empty", file.display()));
+                        }
+                        first
+                    }
+                    (None, None) => {
+                        return Err("[storage] access_key_id needs secret_access_key_file".into())
+                    }
+                };
+                lode_store::s3::sigv4::Credentials {
+                    access_key_id: id.clone(),
+                    secret_access_key: secret,
+                    session_token: None,
+                }
+            }
+            None => match (
+                nonempty("AWS_ACCESS_KEY_ID"),
+                nonempty("AWS_SECRET_ACCESS_KEY"),
+            ) {
+                (Some(id), Some(secret)) => lode_store::s3::sigv4::Credentials {
+                    access_key_id: id.trim().to_owned(),
+                    secret_access_key: secret.trim().to_owned(),
+                    session_token: nonempty("AWS_SESSION_TOKEN").map(|t| t.trim().to_owned()),
+                },
+                _ => {
+                    return Err("S3 storage needs credentials: set access_key_id and \
+                                secret_access_key_file in [storage], or the environment \
+                                variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+                        .into())
+                }
+            },
+        };
+        let region = self
+            .region
+            .clone()
+            .or_else(|| nonempty("AWS_REGION"))
+            .or_else(|| nonempty("AWS_DEFAULT_REGION"))
+            .map(|r| r.trim().to_owned())
+            .unwrap_or_else(|| "us-east-1".to_owned());
+        Ok(lode_store::S3Config {
+            bucket: self.bucket.clone(),
+            prefix: self.prefix.clone(),
+            region,
+            endpoint: self.endpoint.clone(),
+            path_style: self.path_style,
+            credentials,
+            max_object_size,
+            tmp_dir: data_dir.join("s3-tmp"),
+        })
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStorage {
+    #[serde(default)]
+    kind: StorageKind,
+    bucket: Option<String>,
+    prefix: Option<String>,
+    region: Option<String>,
+    endpoint: Option<String>,
+    #[serde(default)]
+    path_style: bool,
+    access_key_id: Option<String>,
+    secret_access_key_file: Option<PathBuf>,
+}
+
+impl TryFrom<RawStorage> for StorageConfig {
+    type Error = String;
+
+    fn try_from(raw: RawStorage) -> Result<Self, String> {
+        let s3_keys = raw.bucket.is_some()
+            || raw.prefix.is_some()
+            || raw.region.is_some()
+            || raw.endpoint.is_some()
+            || raw.path_style
+            || raw.access_key_id.is_some()
+            || raw.secret_access_key_file.is_some();
+        if !s3_keys {
+            if raw.kind == StorageKind::S3 {
+                return Err("[storage] kind = \"s3\" needs a bucket".into());
+            }
+            return Ok(Self::default());
+        }
+        let bucket = raw.bucket.unwrap_or_default();
+        let bucket_ok = (3..=63).contains(&bucket.len())
+            && bucket
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+        if !bucket_ok {
+            return Err(format!(
+                "[storage] bucket {bucket:?} is not a bucket name (3-63 lower-case letters, \
+                 digits, dots and dashes)"
+            ));
+        }
+        let prefix = raw.prefix.unwrap_or_default().trim_matches('/').to_owned();
+        if prefix.split('/').any(|p| p == "." || p == "..") || prefix.contains("//") {
+            return Err("[storage] prefix must not have empty, . or .. parts".into());
+        }
+        if let Some(e) = &raw.endpoint {
+            let ok = reqwest::Url::parse(e).is_ok_and(|u| {
+                matches!(u.scheme(), "http" | "https")
+                    && u.host_str().is_some()
+                    && u.path() == "/"
+                    && u.query().is_none()
+                    && u.username().is_empty()
+            });
+            if !ok {
+                return Err(format!(
+                    "[storage] endpoint {e:?} must be http(s)://host[:port] with nothing after it"
+                ));
+            }
+        }
+        if raw.access_key_id.is_some() != raw.secret_access_key_file.is_some() {
+            return Err(
+                "[storage] give access_key_id and secret_access_key_file together, or \
+                        neither to use the AWS_* environment variables"
+                    .into(),
+            );
+        }
+        if let Some(r) = &raw.region {
+            if r.is_empty() || !r.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                return Err(format!("[storage] region {r:?} is not a region name"));
+            }
+        }
+        Ok(Self {
+            kind: raw.kind,
+            s3: Some(S3Settings {
+                bucket,
+                prefix,
+                region: raw.region,
+                endpoint: raw.endpoint,
+                path_style: raw.path_style,
+                access_key_id: raw.access_key_id,
+                secret_access_key_file: raw.secret_access_key_file,
+                secret_access_key: None,
+            }),
+        })
+    }
 }
 
 /// Who may still sign in with a password when single sign-on is on.
@@ -706,6 +986,11 @@ impl ServerConfig {
                 *f = base.join(&*f);
             }
         }
+        if let Some(s3) = &mut cfg.storage.s3 {
+            if let Some(f) = &mut s3.secret_access_key_file {
+                *f = base.join(&*f);
+            }
+        }
         Ok(cfg)
     }
 
@@ -733,6 +1018,7 @@ impl ServerConfig {
             modules: ModulesConfig::default(),
             webhooks: WebhooksConfig::default(),
             oidc: None,
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -927,5 +1213,110 @@ mod tests {
         assert_eq!(o.client_secret().unwrap().as_deref(), Some("second"));
         std::fs::write(&file, "\n").unwrap();
         assert!(o.client_secret().is_err(), "empty file");
+    }
+
+    #[test]
+    fn storage_settings() {
+        let parse = |storage: &str| {
+            ServerConfig::parse(
+                &format!("data_dir = '.'\n[storage]\n{storage}"),
+                Path::new("/etc/lode"),
+                Path::new("x"),
+            )
+        };
+        let plain = ServerConfig::parse("data_dir = '.'", Path::new("/"), Path::new("x")).unwrap();
+        assert_eq!(plain.storage, StorageConfig::default());
+        assert_eq!(plain.storage.kind, StorageKind::Fs);
+        assert_eq!(
+            parse("kind = 'fs'").unwrap().storage,
+            StorageConfig::default()
+        );
+        let cfg = parse(
+            "kind = 's3'\nbucket = 'lode-data'\nprefix = '/main/'\nendpoint = 'http://127.0.0.1:9000'\n\
+             path_style = true\naccess_key_id = 'AK'\nsecret_access_key_file = 's3.txt'",
+        )
+        .unwrap();
+        let s3 = cfg.storage.s3_in_use().unwrap();
+        assert_eq!(s3.bucket, "lode-data");
+        assert_eq!(s3.prefix, "main");
+        assert!(s3.path_style);
+        assert_eq!(
+            s3.secret_access_key_file.as_deref(),
+            Some(Path::new("/etc/lode/s3.txt"))
+        );
+        for bad in [
+            "bucket = 'b'",
+            "kind = 'gcs'",
+            "kind = 's3'",
+            "kind = 's3'\nbucket = 'Upper'",
+            "kind = 's3'\nbucket = 'ok-name'\nendpoint = 'ftp://x'",
+            "kind = 's3'\nbucket = 'ok-name'\nendpoint = 'https://x/path'",
+            "kind = 's3'\nbucket = 'ok-name'\nendpoint = 'https://user:pw@x'",
+            "kind = 's3'\nbucket = 'ok-name'\naccess_key_id = 'AK'",
+            "kind = 's3'\nbucket = 'ok-name'\nsecret_access_key = 'inline'",
+            "kind = 's3'\nbucket = 'ok-name'\nprefix = 'a/../b'",
+            "kind = 's3'\nbucket = 'ok-name'\nregion = 'eu central'",
+        ] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+        // Prepared for `loded migrate-storage`: S3 settings, still on files.
+        let prepared = parse("bucket = 'lode-data'\nregion = 'eu-west-1'")
+            .unwrap()
+            .storage;
+        assert_eq!(prepared.kind, StorageKind::Fs);
+        assert!(prepared.s3_in_use().is_none());
+        assert_eq!(prepared.s3.unwrap().bucket, "lode-data");
+    }
+
+    #[test]
+    fn s3_credentials_and_region_are_resolved() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| (*v).to_owned())
+            }
+        };
+        let none = env(&[]);
+        let aws = env(&[
+            ("AWS_ACCESS_KEY_ID", "ENVKEY"),
+            ("AWS_SECRET_ACCESS_KEY", "envsecret"),
+            ("AWS_SESSION_TOKEN", "tok"),
+            ("AWS_DEFAULT_REGION", "ap-south-1"),
+        ]);
+
+        let mut s = S3Settings::new("bucket");
+        assert!(s
+            .store_config(dir.path(), 10, &none)
+            .unwrap_err()
+            .contains("AWS_ACCESS_KEY_ID"));
+        let c = s.store_config(dir.path(), 10, &aws).unwrap();
+        assert_eq!(c.credentials.access_key_id, "ENVKEY");
+        assert_eq!(c.credentials.secret_access_key, "envsecret");
+        assert_eq!(c.credentials.session_token.as_deref(), Some("tok"));
+        assert_eq!(c.region, "ap-south-1");
+        assert_eq!(c.tmp_dir, dir.path().join("s3-tmp"));
+        assert_eq!(c.max_object_size, 10);
+
+        let file = dir.path().join("secret.txt");
+        s.access_key_id = Some("FILEKEY".into());
+        s.secret_access_key_file = Some(file.clone());
+        s.region = Some("eu-west-1".into());
+        let err = s.store_config(dir.path(), 10, &aws).unwrap_err();
+        assert!(err.contains("secret.txt"), "{err}");
+        std::fs::write(&file, "filesecret\r\nignored\n").unwrap();
+        let c = s.store_config(dir.path(), 10, &aws).unwrap();
+        assert_eq!(c.credentials.access_key_id, "FILEKEY");
+        assert_eq!(c.credentials.secret_access_key, "filesecret");
+        assert_eq!(c.credentials.session_token, None);
+        assert_eq!(c.region, "eu-west-1");
+
+        let s = S3Settings::new("bucket").with_credentials("K", "inline-secret");
+        let c = s.store_config(dir.path(), 10, &none).unwrap();
+        assert_eq!(c.credentials.secret_access_key, "inline-secret");
+        assert_eq!(c.region, "us-east-1");
+        assert!(!format!("{s:?}").contains("inline-secret"));
+        assert!(!format!("{c:?}").contains("inline-secret"));
     }
 }

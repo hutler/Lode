@@ -129,6 +129,29 @@ file is dropped and the result is `AlreadyPresent`. Objects are never overwritte
 Blobs are namespaced per depot, so dedup works within a depot only. This keeps depots fully
 separable (backup, deletion, permissions).
 
+**S3 storage** (T123): `[storage] kind = "s3"` puts objects in an S3-compatible bucket with
+`S3BlobStore`; the database stays local. Keys are `<prefix>/<depot-id>/<h0h1>/<h2h3>/<64-hex>`
+and hold the stored format of §3.3 unchanged. A put is encoded into
+`<data>/s3-tmp/<random>` exactly as the filesystem write path does (hash check, compression,
+cap), then sent as one `PUT` with `If-None-Match: *`: `412` is `AlreadyPresent`, `409` (a
+concurrent conditional write) is tried again, so an object is never replaced. Single `PUT`s
+limit objects to 5 GiB. Reads stream the `GET` body (the header is read and checked first);
+`list` pages through ListObjectsV2 and skips keys that are not objects; `delete` sends `HEAD`
+first so a missing object is `NotFound`. Requests are signed with Signature Version 4,
+written in `lode-store` over `reqwest` and `sha2` (no AWS SDK; HMAC is a few lines), with the
+payload hash `UNSIGNED-PAYLOAD` for bodies. Transport errors and 5xx answers are tried three
+times. Credentials come from `access_key_id` plus `secret_access_key_file`, or else
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`; the region from `region`,
+`AWS_REGION`, `AWS_DEFAULT_REGION`, then `us-east-1`. `open_state` lists the bucket once, so
+wrong settings stop the start with S3's error code. GC and fsck use the `BlobStore` trait and
+work unchanged. `loded migrate-storage --to s3` copies `depots/*/objects` into the bucket with
+`put_stored_file` (no re-encoding), skipping what a listing shows is there, checks the bucket
+has every local object, and then sets `kind = "s3"` in `loded.toml` (keeping
+`loded.toml.before-s3`); `--copy-only` leaves the config alone for a first pass beside a live
+server. `lode-store`'s feature `test-util` adds an in-process fake S3 that checks signatures,
+and the store suite runs against the filesystem store, the fake and, with `LODE_TEST_S3`, a
+real service (MinIO in CI).
+
 ## 4. Metadata
 
 ### 4.1 Store
@@ -937,7 +960,9 @@ absorbs.
 - **Backup:** SQLite online backup of `meta.db` first, then copy `depots/` (objects are
   immutable; any object referenced by the copied database is already on disk).
   `loded backup --config <file> <dest>` runs beside a live server; `dest` must be missing or
-  empty and becomes a data directory, including `loded.toml`.
+  empty and becomes a data directory, including `loded.toml`. With S3 storage only the
+  database and `loded.toml` are copied (`content_in_bucket` in the report); the bucket's
+  versioning or replication protects the content.
 - **Obliterate** (T120, SPEC §5.8): `POST /admin/depots/{d}/obliterate` with
   `{targets: [{path, rev?}], reason, dry_run}`, server admins only. A target without `rev`
   selects every `new_id` that `rev_change` recorded for the path or under it; with `rev`, the

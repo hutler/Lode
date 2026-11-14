@@ -168,6 +168,7 @@ pub async fn run_backups(state: AppState, schedule: BackupSchedule, mut stop: St
                     path = %path.display(),
                     objects = report.objects,
                     bytes = report.bytes,
+                    content_in_bucket = report.content_in_bucket,
                     removed = removed.len(),
                     "scheduled backup done"
                 );

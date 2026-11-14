@@ -11,18 +11,31 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# The in-process fake S3 server and raw object access, for tests.
+test-util = ["dep:axum"]
+
 [dependencies]
 async-trait.workspace = true
+axum = { workspace = true, optional = true }
 blake3.workspace = true
+bytes.workspace = true
 futures.workspace = true
+hex.workspace = true
 lode-core.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 zstd.workspace = true
 
 [dev-dependencies]
+lode-store = { path = ".", features = ["test-util"] }
+uuid.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 blake3.workspace = true

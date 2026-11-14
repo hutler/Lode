@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use axum::Router;
 use lode_meta::{MetaConfig, MetaStore, MigrationSet, NewPrincipal, PrincipalKind, Reads};
-use lode_store::{FsBlobStore, FsBlobStoreConfig};
+use lode_store::{BlobStore, FsBlobStore, FsBlobStoreConfig, S3BlobStore};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -63,6 +63,9 @@ pub enum ServerError {
     /// Blob store error.
     #[error("blob store: {0}")]
     Store(#[from] lode_store::StoreError),
+    /// The `[storage]` settings cannot be used.
+    #[error("{0}")]
+    Storage(String),
     /// TLS setup error.
     #[error(transparent)]
     Tls(#[from] TlsError),
@@ -251,16 +254,36 @@ pub async fn open_state(
         })
         .collect();
     let meta = open_meta(db, sets).await?;
-    let blobs = FsBlobStore::open(
-        &dir,
-        FsBlobStoreConfig {
-            max_object_size: config.limits.max_blob_size,
-        },
-    )
-    .await?;
-    let state = AppState::new(meta, Arc::new(blobs), config, clock, modules);
+    let blobs = open_blob_store(&config).await?;
+    let state = AppState::new(meta, blobs, config, clock, modules);
     state.permissions().reload(state.meta()).await?;
     Ok(state)
+}
+
+/// Opens the configured object store: files under the data directory, or an S3 bucket,
+/// which must answer a listing with these credentials.
+pub async fn open_blob_store(config: &ServerConfig) -> Result<Arc<dyn BlobStore>, ServerError> {
+    match config.storage.s3_in_use() {
+        None => Ok(Arc::new(
+            FsBlobStore::open(
+                &config.data_dir,
+                FsBlobStoreConfig {
+                    max_object_size: config.limits.max_blob_size,
+                },
+            )
+            .await?,
+        )),
+        Some(s3) => {
+            let env = |name: &str| std::env::var(name).ok();
+            let cfg = s3
+                .store_config(&config.data_dir, config.limits.max_blob_size, &env)
+                .map_err(ServerError::Storage)?;
+            let store = S3BlobStore::open(cfg).await?;
+            // Fail at start, with S3's answer, rather than on the first upload.
+            store.check().await?;
+            Ok(Arc::new(store))
+        }
+    }
 }
 
 /// The remote address of a connection, available to handlers as

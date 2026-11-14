@@ -3,12 +3,7 @@
 //! Layout: `<root>/depots/<depot-id>/objects/<h0h1>/<h2h3>/<64-hex>`, with uploads in
 //! progress under `<root>/depots/<depot-id>/tmp/`.
 //!
-//! **Compression heuristic.** zstd level 3 is used unless it saves less than 3 %. Content up
-//! to 1 MiB is compressed in one go and the decision uses its exact size. For longer content
-//! the decision is made once, on the first 1 MiB, and then kept for the rest of the stream,
-//! so large incompressible files (video, archives, already compressed textures) are never
-//! compressed twice. The first MiB is therefore held in memory; everything else streams
-//! through a 64 KiB buffer.
+//! Objects are encoded into a temp file by [`crate::encode`] (compression heuristic there).
 //!
 //! **No-replace publish.** A finished temp file is published with a hard link, which fails
 //! if the target exists on every supported platform, then the temp name is removed. On a
@@ -16,21 +11,19 @@
 //! atomic against a concurrent writer of the same object; both writers hold identical
 //! verified content, so the only effect is a lost `AlreadyPresent` answer.
 
-use std::io::{self, SeekFrom, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use futures::stream::{self, BoxStream, StreamExt};
-use lode_core::{Codec, DepotId, ObjectHeader, ObjectId, ObjectKind, TREE_ID_CONTEXT};
+use lode_core::{Codec, DepotId, ObjectHeader, ObjectId, ObjectKind};
 use tokio::fs::{self as tfs, File, OpenOptions};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt};
 
+use crate::encode::{encode, Limits, CHUNK};
 use crate::zstd_reader::ZstdReader;
 use crate::{BlobStore, ObjectReader, PutOptions, PutOutcome, Result, StoreError, StoredReader};
 
-const CHUNK: usize = 64 * 1024;
-const PROBE: usize = 1024 * 1024;
-const ZSTD_LEVEL: i32 = 3;
 const STALE_TMP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Settings for [`FsBlobStore`].
@@ -75,7 +68,8 @@ impl FsBlobStore {
         self.root.join("depots").join(depot.0.to_string())
     }
 
-    fn object_path(&self, depot: DepotId, id: &ObjectId) -> PathBuf {
+    /// The file that holds an object.
+    pub fn object_path(&self, depot: DepotId, id: &ObjectId) -> PathBuf {
         let hex = id.to_hex();
         self.depot_dir(depot)
             .join("objects")
@@ -119,78 +113,15 @@ fn corrupt(id: &ObjectId, reason: &str) -> StoreError {
     }
 }
 
-enum Hasher {
-    Blob(blake3::Hasher),
-    Tree(blake3::Hasher),
-}
-
-impl Hasher {
-    fn new(kind: ObjectKind) -> Result<Self> {
-        match kind {
-            ObjectKind::Blob => Ok(Hasher::Blob(blake3::Hasher::new())),
-            ObjectKind::Tree => Ok(Hasher::Tree(blake3::Hasher::new_derive_key(
-                TREE_ID_CONTEXT,
-            ))),
-            ObjectKind::ChunkList => Err(StoreError::UnsupportedKind(kind)),
-        }
-    }
-
-    fn update(&mut self, b: &[u8]) {
-        match self {
-            Hasher::Blob(h) | Hasher::Tree(h) => {
-                h.update(b);
-            }
-        }
-    }
-
-    fn finish(&self) -> ObjectId {
-        match self {
-            Hasher::Blob(h) | Hasher::Tree(h) => ObjectId::from_bytes(*h.finalize().as_bytes()),
-        }
-    }
-}
-
 /// Deletes the temp file on drop unless disarmed, so every failure path cleans up.
-struct TempGuard {
-    path: Option<PathBuf>,
+pub(crate) struct TempGuard {
+    pub(crate) path: Option<PathBuf>,
 }
 
 impl Drop for TempGuard {
     fn drop(&mut self) {
         if let Some(p) = self.path.take() {
             let _ = std::fs::remove_file(p);
-        }
-    }
-}
-
-struct Limits {
-    cap: u64,
-    expected: Option<u64>,
-}
-
-impl Limits {
-    fn check(&self, total: u64) -> Result<()> {
-        if total > self.cap {
-            return Err(StoreError::TooLarge { limit: self.cap });
-        }
-        if let Some(exp) = self.expected {
-            if total > exp {
-                return Err(StoreError::LengthMismatch {
-                    expected: exp,
-                    actual: total,
-                });
-            }
-        }
-        Ok(())
-    }
-}
-
-async fn read_some(r: &mut (dyn AsyncRead + Send + Unpin), buf: &mut [u8]) -> Result<usize> {
-    loop {
-        match r.read(buf).await {
-            Ok(n) => return Ok(n),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e.into()),
         }
     }
 }
@@ -209,17 +140,11 @@ impl BlobStore for FsBlobStore {
         raw: &mut (dyn AsyncRead + Send + Unpin),
         opts: PutOptions,
     ) -> Result<PutOutcome> {
-        let mut hasher = Hasher::new(kind)?;
         let limits = Limits {
             cap: self.config.max_object_size,
             expected: opts.expected_len,
         };
-        if let Some(exp) = opts.expected_len {
-            if exp > limits.cap {
-                return Err(StoreError::TooLarge { limit: limits.cap });
-            }
-        }
-
+        limits.precheck()?;
         let tmp_dir = self.depot_dir(depot).join("tmp");
         tfs::create_dir_all(&tmp_dir).await?;
         let tmp_path = tmp_dir.join(uuid::Uuid::new_v4().simple().to_string());
@@ -231,97 +156,7 @@ impl BlobStore for FsBlobStore {
         let mut guard = TempGuard {
             path: Some(tmp_path.clone()),
         };
-        // Placeholder; the real header is written once the codec and length are known.
-        file.write_all(&[0u8; ObjectHeader::LEN]).await?;
-
-        // Probe: read up to 1 MiB to choose the codec.
-        let mut probe =
-            Vec::with_capacity(PROBE.min(opts.expected_len.unwrap_or(PROBE as u64) as usize));
-        let mut chunk = vec![0u8; CHUNK];
-        let mut total: u64 = 0;
-        let mut eof = false;
-        while probe.len() < PROBE {
-            let want = (PROBE - probe.len()).min(CHUNK);
-            let n = read_some(raw, &mut chunk[..want]).await?;
-            if n == 0 {
-                eof = true;
-                break;
-            }
-            total += n as u64;
-            limits.check(total)?;
-            hasher.update(&chunk[..n]);
-            probe.extend_from_slice(&chunk[..n]);
-        }
-        let compressed_probe = zstd::bulk::compress(&probe, ZSTD_LEVEL)?;
-        // Use zstd only if it saves at least 3 %.
-        let use_zstd = (compressed_probe.len() as u128) * 100 <= (probe.len() as u128) * 97;
-        let codec = if use_zstd { Codec::Zstd } else { Codec::None };
-
-        if eof {
-            let payload = if use_zstd { &compressed_probe } else { &probe };
-            file.write_all(payload).await?;
-        } else if !use_zstd {
-            file.write_all(&probe).await?;
-            loop {
-                let n = read_some(raw, &mut chunk).await?;
-                if n == 0 {
-                    break;
-                }
-                total += n as u64;
-                limits.check(total)?;
-                hasher.update(&chunk[..n]);
-                file.write_all(&chunk[..n]).await?;
-            }
-        } else {
-            drop(compressed_probe);
-            let mut enc = zstd::stream::write::Encoder::new(Vec::with_capacity(CHUNK), ZSTD_LEVEL)?;
-            enc.write_all(&probe)?;
-            drop(probe);
-            file.write_all(enc.get_ref()).await?;
-            enc.get_mut().clear();
-            loop {
-                let n = read_some(raw, &mut chunk).await?;
-                if n == 0 {
-                    break;
-                }
-                total += n as u64;
-                limits.check(total)?;
-                hasher.update(&chunk[..n]);
-                enc.write_all(&chunk[..n])?;
-                if !enc.get_ref().is_empty() {
-                    file.write_all(enc.get_ref()).await?;
-                    enc.get_mut().clear();
-                }
-            }
-            let rest = enc.finish()?;
-            file.write_all(&rest).await?;
-        }
-
-        if let Some(exp) = opts.expected_len {
-            if total != exp {
-                return Err(StoreError::LengthMismatch {
-                    expected: exp,
-                    actual: total,
-                });
-            }
-        }
-        let actual = hasher.finish();
-        if actual != *expect {
-            return Err(StoreError::HashMismatch {
-                expected: *expect,
-                actual,
-            });
-        }
-
-        let header = ObjectHeader {
-            kind,
-            codec,
-            raw_len: total,
-        };
-        file.seek(SeekFrom::Start(0)).await?;
-        file.write_all(&header.encode()).await?;
-        file.flush().await?;
-        file.sync_all().await?;
+        encode(&mut file, kind, expect, raw, &limits).await?;
         drop(file);
 
         let target = self.object_path(depot, expect);
@@ -480,23 +315,25 @@ fn list_objects(objects: &Path) -> Vec<Result<(ObjectId, SystemTime)>> {
     out
 }
 
-fn remove_stale_tmp(depots: &Path, max_age: Duration) -> io::Result<()> {
-    let now = SystemTime::now();
+pub(crate) fn remove_stale_tmp(depots: &Path, max_age: Duration) -> io::Result<()> {
     for depot in std::fs::read_dir(depots)?.filter_map(|e| e.ok()) {
-        let tmp = depot.path().join("tmp");
-        let Ok(rd) = std::fs::read_dir(&tmp) else {
-            continue;
-        };
-        for entry in rd.filter_map(|e| e.ok()) {
-            let old = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .map(|t| now.duration_since(t).unwrap_or_default() > max_age)
-                .unwrap_or(false);
-            if old {
-                if let Err(e) = std::fs::remove_file(entry.path()) {
-                    tracing::warn!(path = %entry.path().display(), error = %e, "could not remove stale temp file");
-                }
+        let _ = remove_stale_tmp_dir(&depot.path().join("tmp"), max_age);
+    }
+    Ok(())
+}
+
+/// Removes files older than `max_age` from one temp directory.
+pub(crate) fn remove_stale_tmp_dir(tmp: &Path, max_age: Duration) -> io::Result<()> {
+    let now = SystemTime::now();
+    for entry in std::fs::read_dir(tmp)?.filter_map(|e| e.ok()) {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| now.duration_since(t).unwrap_or_default() > max_age)
+            .unwrap_or(false);
+        if old {
+            if let Err(e) = std::fs::remove_file(entry.path()) {
+                tracing::warn!(path = %entry.path().display(), error = %e, "could not remove stale temp file");
             }
         }
     }
