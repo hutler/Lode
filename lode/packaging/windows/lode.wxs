@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows installer of the Lode client (WiX Toolset 5). Built by the release workflow:
+    wix build packaging/windows/lode.wxs -arch x64 -ext WixToolset.UI.wixext
+      -d Version=0.1.0 -d BinDir=<folder with lode.exe> -o lode-0.1.0-x64.msi
+  Installs lode.exe in Program Files\Lode and adds that folder to PATH. The server installer
+  uses the same folder and the same component for lode.exe and PATH, so the two can be
+  installed side by side and either can be removed alone. The winget package
+  SimpleDevOps.Lode installs this file.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Lode"
+           Manufacturer="SimpleDevOps"
+           Version="$(var.Version)"
+           UpgradeCode="0B6F4E2C-9A7D-4F1B-8C3E-5D2A6E9F1C47"
+           Scope="perMachine"
+           Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer Lode is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hutler/simpledevops" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Lode" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+      <!-- Same path and same generated GUID as in the server installer: one shared component. -->
+      <Component Id="Lode">
+        <File Id="lode.exe" Source="$(var.BinDir)\lode.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="ClientLicense">
+        <File Id="LICENSE_client.txt" Source="$(sys.SOURCEFILEDIR)..\..\LICENSE" Name="LICENSE-lode.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="Path" Guid="A3E7F0D2-6C1B-4E0A-8F5D-2B9C7E4A1D63">
+        <CreateFolder />
+        <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last"
+                     Action="set" System="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Lode">
+      <ComponentGroupRef Id="Files" />
+    </Feature>
+
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)license.rtf" />
+    <UI>
+      <ui:WixUI Id="WixUI_Minimal" />
+    </UI>
+  </Package>
+</Wix>

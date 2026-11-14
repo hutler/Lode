@@ -105,6 +105,14 @@ submodule-only), `rev` the branch head and `last_commit` the last Git commit now
 revisions that were not imported), `import_diverged` (the last imported commit is not in the
 branch's history), `invalid_path`, `import_mismatch`.
 
+### `lode self-update [--check]`
+
+`{"current","latest","update_available","updated","path"}`: `path` is this executable,
+`updated` whether it was replaced. Codes: `package_managed` (installed by winget, the MSI,
+Homebrew or a Linux package; the message names the command to use), `checksum_mismatch` (the
+download does not match `SHA256SUMS`; nothing changed), `update_failed`. `LODE_UPDATE_URL`
+replaces the release list URL (a GitHub-style `releases` JSON).
+
 ### `lode view show|include|exclude`
 
 - `show`: `{ "view": { "include": [..], "exclude": [..] } }`

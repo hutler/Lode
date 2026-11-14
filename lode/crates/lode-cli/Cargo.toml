@@ -21,15 +21,18 @@ clap.workspace = true
 directories.workspace = true
 diffy.workspace = true
 futures.workspace = true
+hex.workspace = true
 lode-client.workspace = true
 lode-core.workspace = true
 lode-import.workspace = true
 lode-proto.workspace = true
 lode-workspace.workspace = true
 rmcp = { workspace = true, features = ["server", "transport-io"] }
+reqwest.workspace = true
 rpassword.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["io-std"] }

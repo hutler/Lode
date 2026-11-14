@@ -51,7 +51,9 @@ checked out fresh and their changes re-applied.
 
 ## Clients
 
-Replace `lode` (unpack the archive over it). Nothing else is needed. Upgrade the server first:
+Run `lode self-update` for a `lode` installed from an archive, or update it the way it was
+installed (winget, the MSI, Homebrew, apt or dnf; `self-update` names the command). Nothing
+else is needed. Upgrade the server first:
 a newer client may use requests that an older server does not know.
 
 ## Release notes
@@ -74,3 +76,5 @@ First release.
   `loded setup` (`LODED_DOMAIN`, `LODED_EMAIL`, `LODED_ADMIN_PASSWORD_FILE`); without them it
   behaves as before.
 - `lode init` (new depot from a folder, with templates) and `lode import git`.
+- Client installers: a Windows MSI (also for winget), a Homebrew formula, and
+  `lode self-update` for archive installs. Releases also carry the bare `lode` executables.

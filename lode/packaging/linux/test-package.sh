@@ -43,6 +43,7 @@ for _ in $(seq 1 50); do
 done
 [ -n "$ok" ] || fail "cannot sign in: $(cat /tmp/loded.log)"
 lode --json whoami | grep -q '"admin"' || fail "whoami is not admin"
+lode --json self-update | grep -q '"package_managed"' || fail "self-update does not leave a packaged lode to the package manager"
 kill "$server"
 wait "$server" || true
 

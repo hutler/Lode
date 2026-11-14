@@ -81,6 +81,13 @@ jobs:
             shasum -a 256 "$archive" > "$archive.sha256"
           fi
           cat "$archive.sha256"
+          # The bare client executable, which `lode self-update` downloads.
+          cp "../target/$target/release/lode$ext" "lode-$version-$target$ext"
+          if command -v sha256sum > /dev/null; then
+            sha256sum "lode-$version-$target$ext" > "lode-$version-$target$ext.sha256"
+          else
+            shasum -a 256 "lode-$version-$target$ext" > "lode-$version-$target$ext.sha256"
+          fi
       - uses: actions/setup-go@v5
         if: contains(matrix.target, 'linux')
         with:
@@ -127,12 +134,20 @@ jobs:
           wix build packaging/windows/lode-server.wxs -arch x64 \
             -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext \
             -d Version="$msi_version" -d BinDir="target/${{ matrix.target }}/release" -o "$msi"
+          client="dist/lode-$version-x64.msi"
+          wix build packaging/windows/lode.wxs -arch x64 -ext WixToolset.UI.wixext \
+            -d Version="$msi_version" -d BinDir="target/${{ matrix.target }}/release" -o "$client"
           rm -f dist/*.wixpdb
-          (cd dist && sha256sum "$(basename "$msi")" > "$(basename "$msi").sha256")
+          cd dist
+          for f in *.msi; do sha256sum "$f" > "$f.sha256"; done
       - name: Install, start and uninstall the MSI
         if: contains(matrix.target, 'windows')
         shell: pwsh
-        run: ./packaging/windows/test-msi.ps1 (Get-ChildItem dist/*.msi).FullName
+        run: |
+          ./packaging/windows/test-msi.ps1 (Get-ChildItem dist/lode-server-*.msi).FullName
+          ./packaging/windows/test-client-msi.ps1 `
+            (Get-ChildItem dist/lode-*-x64.msi -Exclude lode-server-*).FullName `
+            (Get-ChildItem dist/lode-server-*.msi).FullName
       - uses: actions/upload-artifact@v4
         with:
           name: lode-${{ matrix.target }}
@@ -142,6 +157,9 @@ jobs:
             lode/dist/*.deb
             lode/dist/*.rpm
             lode/dist/*.msi
+            lode/dist/lode-*-unknown-linux-musl
+            lode/dist/lode-*-apple-darwin
+            lode/dist/lode-*-pc-windows-msvc.exe
             lode/dist/*.sha256
           if-no-files-found: error
 
@@ -180,10 +198,23 @@ jobs:
           cat *.sha256 | sed 's/ \*/  /' > SHA256SUMS
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
+      - uses: actions/checkout@v4
+        with:
+          path: src
+      - name: winget and Homebrew manifests
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          src/lode/packaging/render-manifests.sh "$version" dist/SHA256SUMS manifests
       - uses: actions/upload-artifact@v4
         with:
           name: lode-release
-          path: dist/
+          path: |
+            dist/
+            manifests/
       - name: Publish the release
         if: github.ref_type == 'tag'
         working-directory: dist
@@ -192,7 +223,8 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Lode ${GITHUB_REF_NAME#lode-v}" --generate-notes \
-            ./*.tar.gz ./*.zip ./*.deb ./*.rpm ./*.msi SHA256SUMS
+            ./*.tar.gz ./*.zip ./*.deb ./*.rpm ./*.msi \
+            ./lode-*-unknown-linux-musl ./lode-*-apple-darwin ./lode-*-pc-windows-msvc.exe SHA256SUMS
 
   image:
     needs: build

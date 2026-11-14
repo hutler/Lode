@@ -70,6 +70,8 @@ enum Command {
     /// Import history from another version control system into a depot.
     #[command(subcommand)]
     Import(cmd::import::ImportCmd),
+    /// Replace this lode with the newest release for this platform.
+    SelfUpdate(cmd::self_update::SelfUpdateArgs),
     /// Show or change which paths are checked out.
     #[command(subcommand)]
     View(cmd::view::ViewCmd),
@@ -160,6 +162,7 @@ async fn run(cli: Cli) -> CliResult<Value> {
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
         Some(Command::Init(a)) => cmd::init::init(&ctx, a).await,
         Some(Command::Import(c)) => cmd::import::import(&ctx, c).await,
+        Some(Command::SelfUpdate(a)) => cmd::self_update::self_update(&ctx, a).await,
         Some(Command::View(c)) => cmd::view::view(&ctx, c).await,
         Some(Command::Status(a)) => cmd::status::status(&ctx, a).await,
         Some(Command::Add(a)) => cmd::files::add(&ctx, a).await,

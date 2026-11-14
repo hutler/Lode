@@ -17,6 +17,7 @@ pub mod login;
 pub mod mcp;
 pub mod merge;
 pub mod revert;
+pub mod self_update;
 pub mod shelve;
 pub mod status;
 pub mod update;
