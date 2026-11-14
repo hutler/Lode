@@ -242,7 +242,9 @@ fn old_path(exe: &Path) -> PathBuf {
 /// Runs `lode self-update`.
 pub async fn self_update(ctx: &Ctx, args: SelfUpdateArgs) -> OpResult<Value> {
     let exe = std::env::current_exe()?;
-    let exe = exe.canonicalize().unwrap_or(exe);
+    // Without the `\\?\` prefix that `canonicalize` adds on Windows, so the path compares
+    // with Program Files.
+    let exe = lode_workspace::paths::canonical(&exe).unwrap_or(exe);
     if cfg!(windows) {
         let _ = std::fs::remove_file(old_path(&exe));
     }

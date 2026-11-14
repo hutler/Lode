@@ -82,6 +82,8 @@ jobs:
             shasum -a 256 "$archive" > "$archive.sha256"
           fi
           cat "$archive.sha256"
+          # The staging folder has the bare executable's name on Linux and macOS.
+          rm -rf "$name"
           # The bare client executable, which `lode self-update` downloads.
           cp "../target/$target/release/lode$ext" "lode-$version-$target$ext"
           if command -v sha256sum > /dev/null; then
