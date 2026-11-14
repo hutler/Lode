@@ -25,6 +25,7 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M12.md](M12.md) | Lode 0.2: obliterate, SVN import, single sign-on, S3 storage | T120–T124 |
 | [M13.md](M13.md) | Lode Desk on Slint | T130–T135 |
 | [M14.md](M14.md) | Server admin web UI | T140–T143 |
+| [M15.md](M15.md) | Lode 0.3: chunked large files, Postgres, caching proxy | T150–T155 |
 
 ## Dependency graph
 
@@ -105,6 +106,11 @@ M13  T130                             (after T116)
 M14  T140                             (after T122; independent of M13)
      T141  T142                       (after T140)
      T143                             (after T141 T142)
+
+M15  T150  T152                       (T150 after T123; T152 independent)
+     T151  T153                       (T151 after T150; T153 after T152)
+     T154                             (after T151)
+     T155                             (after T150-T154)
 ```
 
 ## Status
@@ -199,3 +205,9 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T141 | review | `main` | Depots: list with size, revisions and last commit, create; a depot's page lists branches (archived too), recent revisions and locks with Break, runs GC and fsck (dry run, then the report's button) and obliterate (dry run listing every use and the heads holding content, then confirm with a reason), and lists obliterated content. Sizes come from a directory walk cached for 10 minutes |
 | T142 | review | `main` | People: users, agents and groups (create, disable and enable, password, SSO link, members); a person's tokens (create with scopes and expiry, value shown once with Copy, revoke). Access: rules in evaluation order, add, remove, and a check whose answer now carries `depot_admin`, `matched` and `decided_by` (`DepotAccess::explain`), with the deciding rule highlighted |
 | T143 | review | `main` | Webhooks page (only with the module): every depot's hooks, add (secret shown once), send a test (queued; the hook's page lists deliveries and refreshes), remove. Settings: `ServerConfig::effective_toml()` with secrets as `***`. `AppState::listening()` gives the bound address. Guide chapter 15 "The admin web UI" with screenshots in `docs/admin-guide/` (from `cargo run -p lode-testkit --example admin_demo` and `shoot.mjs`), security checklist and troubleshooting entries, PDF regenerated; SPEC §5.10, ARCHITECTURE §6.1, CLI-JSON, UPGRADING |
+| T150 | todo | | |
+| T151 | todo | | |
+| T152 | todo | | |
+| T153 | todo | | |
+| T154 | todo | | |
+| T155 | todo | | |
