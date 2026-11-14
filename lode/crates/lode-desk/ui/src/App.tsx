@@ -104,7 +104,7 @@ export function App() {
 
       <main className="page">
         {current ? (
-          <WorkspaceView key={current.root} info={current} onError={setError} />
+          <WorkspaceView key={current.root} info={current} onError={setError} onInfo={show} />
         ) : (
           <Welcome
             recent={recent}

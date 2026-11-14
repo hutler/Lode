@@ -218,6 +218,32 @@ const scenes = {
     await d.getByLabel("Description").fill("Rough water: boats roll and pitch with the waves");
     await d.getByLabel(/Put on/).waitFor();
   },
+  async branches(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: /: change branch$/ }).click();
+    const d = page.getByRole("dialog", { name: "Branches" });
+    await d.getByRole("checkbox", { name: "Show archived" }).check();
+    await d.getByRole("option", { name: /^proto\/boats/ }).waitFor();
+    await d.getByRole("option", { name: /^release-1\.2/ }).click();
+  },
+  async "new-branch"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: /: change branch$/ }).click();
+    await page.getByRole("dialog", { name: "Branches" }).getByRole("button", { name: "New branch…" }).click();
+    const d = page.getByRole("dialog", { name: "New branch" });
+    await d.getByRole("textbox", { name: /^Name/ }).fill("fix/harbor-lights");
+    await d.getByRole("radio", { name: "Another branch or revision" }).check();
+    await d.getByRole("combobox", { name: "Branch to start from" }).selectOption("release-1.2");
+    await d.getByRole("textbox", { name: "Revision to start from" }).fill("r1400");
+  },
+  async switched(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: /: change branch$/ }).click();
+    const d = page.getByRole("dialog", { name: "Branches" });
+    await d.getByRole("option", { name: /^release-1\.2/ }).click();
+    await d.getByRole("button", { name: "Switch" }).click();
+    await page.getByRole("dialog", { name: "Switched to release-1.2" }).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();
@@ -232,7 +258,9 @@ const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePa
 try {
   for (const scheme of ["light", "dark"]) {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, colorScheme: scheme });
-    for (const [name, scene] of Object.entries(scenes)) {
+    // SCENES=a,b renders only those scenes.
+    const only = process.env.SCENES?.split(",").filter(Boolean);
+    for (const [name, scene] of Object.entries(scenes).filter(([n]) => !only || only.includes(n))) {
       const page = await context.newPage();
       await page.goto(url);
       await page.getByRole("button", { name: "Check out a depot…" }).waitFor();

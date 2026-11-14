@@ -1026,3 +1026,116 @@ async fn image_sides_of_a_working_file_and_of_a_revision() {
         .unwrap_err();
     assert_eq!(err.code, "not_found", "{err:?}");
 }
+
+/// T110: the branch picker's list, creating with and without switching, a switch that carries a
+/// local change and leaves a lock behind, and archiving.
+#[tokio::test]
+async fn branches_create_switch_and_archive() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    s.server
+        .commit_files("game", "main", &[("b.txt", b"banana split\n")])
+        .await;
+
+    let list = s.desk.branches(root.clone(), false).await.unwrap();
+    assert_eq!(list["current"], "main", "{list}");
+    let names: Vec<_> = list["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["main"]);
+
+    // From the workspace's own revision (r2), not main's head (r3), and without switching.
+    let made = s
+        .desk
+        .branch_create(root.clone(), "art".into(), Some(" ".into()), false)
+        .await
+        .unwrap();
+    assert_eq!(made["name"], "art", "{made}");
+    assert_eq!(made["parent"]["branch"], "main");
+    assert_eq!(made["parent"]["rev"], 2, "{made}");
+    assert!(made.get("switch").is_none());
+    let info = s.desk.open_workspace(root.clone()).await.unwrap();
+    assert_eq!(info["branch"], "main", "{info}");
+
+    // From another branch at a revision, switching to it.
+    let made = s
+        .desk
+        .branch_create(root.clone(), "hotfix".into(), Some("main@r3".into()), true)
+        .await
+        .unwrap();
+    assert_eq!(made["parent"]["rev"], 3, "{made}");
+    assert_eq!(made["switch"]["branch"], "hotfix", "{made}");
+    assert_eq!(made["switch"]["switched_from"], "main");
+    assert_eq!(std::fs::read(dir.join("b.txt")).unwrap(), b"banana split\n");
+
+    // Switch to `art` with a local change and a held lock: the change comes along, the lock stays.
+    std::fs::write(dir.join("a.txt"), "apricot\n").unwrap();
+    s.desk
+        .lock(root.clone(), vec!["d/c.txt".into()], None)
+        .await
+        .unwrap();
+    let out = s
+        .desk
+        .switch(root.clone(), "art".into(), None)
+        .await
+        .unwrap();
+    assert_eq!(out["branch"], "art", "{out}");
+    assert_eq!(out["switched_from"], "hotfix");
+    assert_eq!(out["locks_left"], serde_json::json!(["d/c.txt"]), "{out}");
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"apricot\n");
+    assert_eq!(std::fs::read(dir.join("b.txt")).unwrap(), b"banana\n");
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert_eq!(paths(&st), [("a.txt".to_owned(), "modified".to_owned())]);
+    let info = s.desk.open_workspace(root.clone()).await.unwrap();
+    assert_eq!(info["branch"], "art", "{info}");
+
+    // Update brings the workspace to the branch head; nothing new here.
+    let up = s.desk.update(root.clone(), None).await.unwrap();
+    assert_eq!(up["branch"], "art", "{up}");
+
+    // Archiving needs depot admin.
+    let err = s
+        .desk
+        .branch_archive(root.clone(), "hotfix".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "permission_denied", "{err:?}");
+    s.server
+        .acl(
+            "game",
+            "alice",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Admin,
+        )
+        .await;
+    let gone = s
+        .desk
+        .branch_archive(root.clone(), "hotfix".into())
+        .await
+        .unwrap();
+    assert_eq!(gone["state"], "archived", "{gone}");
+    let list = s.desk.branches(root.clone(), false).await.unwrap();
+    assert_eq!(list["current"], "art");
+    assert!(
+        !list["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["name"] == "hotfix"),
+        "{list}"
+    );
+    let all = s.desk.branches(root, true).await.unwrap();
+    let hotfix = all["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "hotfix")
+        .unwrap();
+    assert_eq!(hotfix["state"], "archived");
+}

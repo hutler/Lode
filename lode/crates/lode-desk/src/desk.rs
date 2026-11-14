@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lode_ops::cmd::{
-    changelist, checkout, checks, commit, diff, files, history, info, locks, login, revert, shelve,
-    status,
+    branch, changelist, checkout, checks, commit, diff, files, history, info, locks, login, revert,
+    shelve, status, update,
 };
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
@@ -801,6 +801,68 @@ impl Desk {
             Ok(json!({ "available": true, "checks": found }))
         })
         .await
+    }
+
+    /// The depot's branches (`all` adds archived ones), with the workspace's as `current`.
+    pub async fn branches(&self, workspace: String, all: bool) -> Result<Value, ErrorView> {
+        self.branch_command(workspace, branch::BranchCmd::List { all })
+            .await
+    }
+
+    /// Creates a branch from `from` (`BRANCH` or `BRANCH@REV`; default: the workspace's branch
+    /// at its revision), and switches the workspace to it when `switch`.
+    pub async fn branch_create(
+        &self,
+        workspace: String,
+        name: String,
+        from: Option<String>,
+        switch: bool,
+    ) -> Result<Value, ErrorView> {
+        let from = from.filter(|f| !f.trim().is_empty());
+        self.branch_command(workspace, branch::BranchCmd::Create { name, from, switch })
+            .await
+    }
+
+    /// Archives a branch: hidden from lists and closed to commits (depot admin).
+    pub async fn branch_archive(
+        &self,
+        workspace: String,
+        name: String,
+    ) -> Result<Value, ErrorView> {
+        self.branch_command(workspace, branch::BranchCmd::Archive { name })
+            .await
+    }
+
+    async fn branch_command(
+        &self,
+        workspace: String,
+        command: branch::BranchCmd,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { branch::branch(&ctx, branch::BranchArgs { command }).await })
+            .await
+    }
+
+    /// `lode switch`: moves the workspace to `branch` (its head, or `rev`), carrying local
+    /// changes over.
+    pub async fn switch(
+        &self,
+        workspace: String,
+        branch: String,
+        rev: Option<u64>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(
+            move || async move { branch::switch(&ctx, branch::SwitchArgs { branch, rev }).await },
+        )
+        .await
+    }
+
+    /// `lode update`: to the branch head, or `rev`; also finishes an update or switch that
+    /// stopped.
+    pub async fn update(&self, workspace: String, rev: Option<u64>) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { update::update(&ctx, update::UpdateArgs { rev }).await }).await
     }
 
     /// Watches `workspace` for changes until [`Desk::unwatch`]; a second call is a no-op.

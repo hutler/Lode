@@ -3,6 +3,7 @@
 
 import type {
   Backend,
+  BranchInfo,
   ChangelistInfo,
   LockInfo,
   LogPage,
@@ -13,6 +14,7 @@ import type {
   RecentWorkspace,
   StatusFile,
   StatusResult,
+  UpdateResult,
   WhoAmI,
   WorkspaceInfo,
 } from "./api";
@@ -40,6 +42,8 @@ export interface MockOptions {
   noShelves?: boolean;
   /** The server has no checks module. */
   noChecks?: boolean;
+  /** An update of the first workspace stopped half way, so commits are refused until it is finished. */
+  unfinishedUpdate?: boolean;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -49,6 +53,21 @@ const DEMO_RECENT: RecentWorkspace[] = [
   { path: "D:\\Work\\Skyfall-release", depot: "skyfall", server: DEMO_SERVER, branch: "release-1.2" },
   { path: "D:\\Tools\\pipeline", depot: "pipeline", server: DEMO_SERVER, branch: "main" },
 ];
+
+/** The demo depots' branches. Only `main` and `release-1.2` of skyfall have their own history; the
+ * others show their parent's up to where they started. */
+function demoBranches(depot: string): BranchInfo[] {
+  if (depot !== "skyfall") return [{ name: "main", head_rev: 311, created_rev: 1, parent: null, state: "active" }];
+  return [
+    { name: "main", head_rev: 1482, created_rev: 1, parent: null, state: "active" },
+    { name: "release-1.2", head_rev: 1404, created_rev: 1391, parent: { branch: "main", rev: 1390 }, state: "active" },
+    { name: "art/harbor-night", head_rev: 1470, created_rev: 1471, parent: { branch: "main", rev: 1470 }, state: "active" },
+    { name: "proto/boats", head_rev: 1150, created_rev: 1151, parent: { branch: "main", rev: 1150 }, state: "archived" },
+  ];
+}
+
+/** Files an update or switch of the demo depot brings in from the server. */
+const INCOMING = ["Content/Maps/Harbor_BuiltData.uasset", "Source/Skyfall/Skyfall.Build.cs", "Config/DefaultGame.ini"];
 
 const DEPOTS: Record<string, { rev: number; files: number; branches: string[] }> = {
   skyfall: { rev: 1482, files: 18234, branches: ["main", "release-1.2"] },
@@ -220,6 +239,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const emit = (e: ProgressEvent) => listeners.forEach((l) => l(e));
   const commitFiles = async (workspace: string, picked: StatusFile[], message: string): Promise<CommitResult> => {
     const st = statusFor(workspace);
+    refuseUnfinished(workspace);
     if (opts.refuseCommit) throw opts.refuseCommit;
     if (!message.trim()) fail("aborted", "empty commit message; nothing was committed");
     if (picked.length === 0) fail("nothing_to_commit", "nothing to commit in the given paths");
@@ -296,6 +316,92 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     return s;
   };
   const now = () => new Date(Date.UTC(2026, 10, 14, 9, 30)).toISOString();
+  // Branches per depot.
+  const branchTables = new Map<string, BranchInfo[]>();
+  const branchesOf = (depot: string): BranchInfo[] => {
+    let t = branchTables.get(depot);
+    if (!t) {
+      t = demoBranches(depot);
+      branchTables.set(depot, t);
+    }
+    return t;
+  };
+  const infoOf = (workspace: string): WorkspaceInfo => {
+    const info = workspaces.get(workspace);
+    if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+    return info;
+  };
+  /** The demo branch whose history `branch` shows, and the newest revision of it that does. */
+  const historyOf = (depot: string, branch: string): { branch: string; cap: number } => {
+    let name = branch;
+    let cap = Number.MAX_SAFE_INTEGER;
+    for (let i = 0; i < 8 && demoHead(name) === null; i++) {
+      const b = branchesOf(depot).find((x) => x.name === name);
+      if (!b?.parent) break;
+      cap = Math.min(cap, b.parent.rev);
+      name = b.parent.branch;
+    }
+    return { branch: name, cap };
+  };
+  let unfinished = opts.unfinishedUpdate ? (recent[0]?.path ?? null) : null;
+  const refuseUnfinished = (workspace: string) => {
+    if (unfinished === workspace) fail("update_incomplete", "an update did not finish; run `lode update` first");
+  };
+  /** Moves a workspace to `branch` at `rev` (its head when null), as `lode update` and `lode switch` do. */
+  const sync = async (workspace: string, branch: string, rev: number | null): Promise<UpdateResult> => {
+    const info = infoOf(workspace);
+    const st = statusFor(workspace);
+    const b = branchesOf(info.depot).find((x) => x.name === branch);
+    if (!b) fail("not_found", `branch \`${branch}\` not found`);
+    const target = rev ?? b.head_rev;
+    if (target > b.head_rev || target < 1) fail("not_found", `revision ${target} is not on branch \`${branch}\``);
+    const switching = branch !== info.branch;
+    // Locks stay on the old branch: keep them in its table before the files forget them.
+    const locksLeft = switching ? st.files.filter((f) => f.locked).map((f) => f.path) : [];
+    if (switching && locksLeft.length && !opts.noLocks) locksOf(workspace);
+    const incoming = info.depot === "skyfall" && (target !== info.rev || switching || unfinished === workspace) ? INCOMING : [];
+    for (let i = 1; i <= 4; i++) {
+      await pause();
+      emit({ label: "Fetching", done: Math.round((incoming.length * i) / 4), total: incoming.length, bytes: i * 3_100_000, finished: false });
+    }
+    emit({ label: "Fetching", done: incoming.length, total: incoming.length, bytes: 12_400_000, finished: true });
+    const files: UpdateResult["files"] = incoming.map((path) => ({ path, outcome: "updated" }));
+    if (switching) {
+      for (const f of st.files) {
+        if (f.status === "untracked") continue;
+        f.locked = false;
+        // The release branch has its own fix to the boat, so the local edit does not merge.
+        if (branch === "release-1.2" && f.path === "Source/Skyfall/Boat.cpp") {
+          f.status = "conflicted";
+          files.push({ path: f.path, outcome: "conflicted" });
+        } else if (f.status === "modified") {
+          files.push({ path: f.path, outcome: "merged" });
+        }
+      }
+    }
+    const counts: Record<string, number> = {};
+    for (const f of files) counts[f.outcome] = (counts[f.outcome] ?? 0) + 1;
+    const from = info.rev;
+    const switchedFrom = switching ? info.branch : null;
+    info.branch = branch;
+    info.rev = target;
+    st.branch = branch;
+    st.rev = target;
+    if (unfinished === workspace) unfinished = null;
+    remember(info);
+    changed.forEach((l) => l(workspace));
+    return {
+      rev: target,
+      branch,
+      switched_from: switchedFrom,
+      locks_left: locksLeft,
+      from,
+      full: false,
+      files,
+      counts,
+      downloaded: incoming.length * 3_100_000,
+    };
+  };
 
   return {
     appVersion: async () => "0.1.0",
@@ -416,19 +522,23 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const info = workspaces.get(workspace);
       if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
       await pause();
-      return { depot: info.depot, branch: info.branch, ...demoLog(info.branch, path, before, max) };
+      const h = historyOf(info.depot, info.branch);
+      const upTo = Math.min(before ?? Number.MAX_SAFE_INTEGER, h.cap + 1);
+      return { depot: info.depot, branch: info.branch, ...demoLog(h.branch, path, upTo, max) };
     },
     revision: async (workspace, rev) => {
       const info = workspaces.get(workspace);
       if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
-      const r = demoRevision(info.branch, rev);
+      const h = historyOf(info.depot, info.branch);
+      const r = rev <= h.cap ? demoRevision(h.branch, rev) : null;
       if (!r) fail("not_found", `revision ${rev} not found on ${info.branch}`);
       return r;
     },
     blame: async (workspace, path, rev) => {
       const info = workspaces.get(workspace);
       if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
-      return demoBlame(info.branch, path, rev);
+      const h = historyOf(info.depot, info.branch);
+      return demoBlame(h.branch, path, rev ?? (h.cap < Number.MAX_SAFE_INTEGER ? h.cap : null));
     },
     diff: async (workspace, path) => {
       const f = statusFor(workspace).files.find((x) => x.path === path);
@@ -437,7 +547,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     diffRevision: async (workspace, rev, path) => {
       const info = workspaces.get(workspace);
       if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
-      const change = demoRevision(info.branch, rev)?.changes?.find((c) => c.path === path);
+      const change = demoRevision(historyOf(info.depot, info.branch).branch, rev)?.changes?.find((c) => c.path === path);
       if (!change) fail("not_found", `r${rev} did not change ${path}`);
       return demoRevisionDiff(rev, path, change.action);
     },
@@ -653,12 +763,64 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         action = f?.status === "added" ? "add" : f?.status === "deleted" ? "delete" : f ? "modify" : undefined;
       } else {
         const info = workspaces.get(workspace);
-        action = demoRevision(info?.branch ?? "main", rev)?.changes?.find((c) => c.path === path)?.action;
+        action = demoRevision(info ? historyOf(info.depot, info.branch).branch : "main", rev)?.changes?.find((c) => c.path === path)?.action;
       }
       if (!action) fail("not_found", rev === null ? `${path} has no changes` : `r${rev} did not change ${path}`);
       if (side === "old") return action === "add" ? null : image(false);
       return action === "delete" ? null : image(true);
     },
+    branches: async (workspace, all) => {
+      const info = infoOf(workspace);
+      await pause();
+      const list = branchesOf(info.depot).filter((b) => all || b.state === "active" || b.name === info.branch);
+      return { current: info.branch, branches: list.map((b) => ({ ...b, parent: b.parent && { ...b.parent } })) };
+    },
+    branchCreate: async (workspace, name, from, switchTo) => {
+      const info = infoOf(workspace);
+      const table = branchesOf(info.depot);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(name) || name.includes("//") || name.endsWith("/")) {
+        fail("invalid_request", `invalid branch name \`${name}\`: use letters, digits, \`.\`, \`_\`, \`-\` and \`/\``);
+      }
+      if (table.some((b) => b.name === name)) fail("conflict", `branch \`${name}\` already exists`);
+      let fromBranch = info.branch;
+      let fromRev: number | null = info.rev;
+      const spec = from?.trim();
+      if (spec) {
+        const at = spec.lastIndexOf("@");
+        if (at >= 0) {
+          const digits = spec.slice(at + 1).replace(/^r/, "");
+          if (!/^\d+$/.test(digits)) fail("usage", `\`${spec}\` is not BRANCH or BRANCH@REV`);
+          fromBranch = spec.slice(0, at);
+          fromRev = Number(digits);
+        } else {
+          fromBranch = spec;
+          fromRev = null;
+        }
+      }
+      const parent = table.find((b) => b.name === fromBranch);
+      if (!parent) fail("not_found", `branch \`${fromBranch}\` not found`);
+      const rev = fromRev ?? parent.head_rev;
+      if (rev > parent.head_rev || rev < 1) fail("not_found", `revision ${rev} is not on branch \`${fromBranch}\``);
+      const made: BranchInfo = { name, head_rev: rev, created_rev: rev, parent: { branch: fromBranch, rev }, state: "active" };
+      table.push(made);
+      return switchTo ? { ...made, switch: await sync(workspace, name, null) } : { ...made };
+    },
+    branchArchive: async (workspace, name) => {
+      const info = infoOf(workspace);
+      if (!opts.admin) fail("permission_denied", "archiving a branch needs admin on the depot");
+      const b = branchesOf(info.depot).find((x) => x.name === name);
+      if (!b) fail("not_found", `branch \`${name}\` not found`);
+      b.state = "archived";
+      return { ...b };
+    },
+    switchBranch: async (workspace, branch, rev) => {
+      const info = infoOf(workspace);
+      if (unfinished === workspace) {
+        fail("update_incomplete", `an update to r${info.rev} did not finish; run \`lode update\` to complete it first`);
+      }
+      return sync(workspace, branch, rev);
+    },
+    update: async (workspace, rev) => sync(workspace, infoOf(workspace).branch, rev),
     openLink: async () => {},
     bumpShelf: (workspace, id) => {
       const s = shelfOf(workspace, id);

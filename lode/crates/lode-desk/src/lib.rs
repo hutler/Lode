@@ -297,6 +297,50 @@ async fn image_side(
 }
 
 #[tauri::command]
+async fn branches(desk: State<'_, Desk>, workspace: String, all: bool) -> Result<Value, ErrorView> {
+    desk.branches(workspace, all).await
+}
+
+#[tauri::command]
+async fn branch_create(
+    desk: State<'_, Desk>,
+    workspace: String,
+    name: String,
+    from: Option<String>,
+    switch: bool,
+) -> Result<Value, ErrorView> {
+    desk.branch_create(workspace, name, from, switch).await
+}
+
+#[tauri::command]
+async fn branch_archive(
+    desk: State<'_, Desk>,
+    workspace: String,
+    name: String,
+) -> Result<Value, ErrorView> {
+    desk.branch_archive(workspace, name).await
+}
+
+#[tauri::command]
+async fn switch(
+    desk: State<'_, Desk>,
+    workspace: String,
+    branch: String,
+    rev: Option<u64>,
+) -> Result<Value, ErrorView> {
+    desk.switch(workspace, branch, rev).await
+}
+
+#[tauri::command]
+async fn update(
+    desk: State<'_, Desk>,
+    workspace: String,
+    rev: Option<u64>,
+) -> Result<Value, ErrorView> {
+    desk.update(workspace, rev).await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -363,6 +407,11 @@ pub fn run() -> Result<(), tauri::Error> {
             checks,
             open_link,
             image_side,
+            branches,
+            branch_create,
+            branch_archive,
+            switch,
+            update,
             watch,
             unwatch,
         ])

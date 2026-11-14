@@ -28,6 +28,6 @@ npx --prefix ui tauri build --no-bundle   # an optimized binary in target/releas
 - `cargo test`: every command the window calls, against a test server.
 - `npm test` in `ui/`: the screens, against the mocked backend (`ui/src/mock.ts`).
 - `npm run screenshots` in `ui/`: renders each screen in light and dark into
-  `ui/screenshots/` with Playwright. `npm run mock` opens the same mocked app in a browser.
+  `ui/screenshots/` with Playwright (`SCENES=branches,switched` renders only those). `npm run mock` opens the same mocked app in a browser.
 
 Installers and auto-update come with M11 (T114).

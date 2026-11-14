@@ -264,6 +264,40 @@ export interface ImageSide {
   url: string | null;
 }
 
+/** A branch of a depot (`lode branch list --json`). */
+export interface BranchInfo {
+  name: string;
+  head_rev: number;
+  created_rev: number;
+  /** Where it started; null for the depot's first branch. */
+  parent: { branch: string; rev: number } | null;
+  state: "active" | "archived";
+}
+
+/** `lode branch list --json`: the depot's branches and the workspace's. */
+export interface BranchList {
+  current: string;
+  branches: BranchInfo[];
+}
+
+/** `lode update --json` and `lode switch --json`: what happened to each file. */
+export interface UpdateResult {
+  rev: number;
+  branch: string;
+  /** The branch the workspace left, after a switch; null after an update. */
+  switched_from: string | null;
+  /** Locks held on the old branch, which stay there. */
+  locks_left: string[];
+  from: number;
+  full: boolean;
+  files: { path: string; outcome: "added" | "updated" | "merged" | "conflicted" | "deleted" | "kept" | string }[];
+  counts: Record<string, number>;
+  downloaded: number;
+}
+
+/** `lode branch create --json`, with the switch's result when it switched. */
+export type CreatedBranch = BranchInfo & { switch?: UpdateResult };
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -331,6 +365,17 @@ export interface Backend {
   /** One side of an image diff: a working file (`rev` null) against its base, or a file as
    * revision `rev` changed it; null when that side has no file. */
   imageSide(workspace: string, path: string, rev: number | null, side: "old" | "new"): Promise<ImageSide | null>;
+  /** The depot's branches; `all` adds archived ones. */
+  branches(workspace: string, all: boolean): Promise<BranchList>;
+  /** Creates a branch from `from` (`BRANCH` or `BRANCH@REV`; the workspace's branch at its
+   * revision when null), switching the workspace to it when `switchTo`. */
+  branchCreate(workspace: string, name: string, from: string | null, switchTo: boolean): Promise<CreatedBranch>;
+  /** Archives a branch (depot admin). */
+  branchArchive(workspace: string, name: string): Promise<BranchInfo>;
+  /** Moves the workspace to `branch` (its head, or `rev`), carrying local changes over. */
+  switchBranch(workspace: string, branch: string, rev: number | null): Promise<UpdateResult>;
+  /** Updates to the branch head (or `rev`); also finishes an update or switch that stopped. */
+  update(workspace: string, rev: number | null): Promise<UpdateResult>;
   /** Opens a web link in the system browser. */
   openLink(url: string): Promise<void>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
@@ -435,6 +480,11 @@ async function tauriBackend(): Promise<Backend> {
     },
     unshelve: (workspace, id) => invoke("unshelve", { workspace, id }),
     checks: (workspace, targets) => invoke("checks", { workspace, targets }),
+    branches: (workspace, all) => invoke("branches", { workspace, all }),
+    branchCreate: (workspace, name, from, switchTo) => invoke("branch_create", { workspace, name, from, switch: switchTo }),
+    branchArchive: (workspace, name) => invoke("branch_archive", { workspace, name }),
+    switchBranch: (workspace, branch, rev) => invoke("switch", { workspace, branch, rev }),
+    update: (workspace, rev) => invoke("update", { workspace, rev }),
     imageSide: async (workspace, path, rev, side) => {
       const raw = await invoke<ArrayBuffer>("image_side", { workspace, path, rev, side });
       return decodeImageSide(raw, path);

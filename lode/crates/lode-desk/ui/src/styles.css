@@ -1950,3 +1950,167 @@ select {
       linear-gradient(45deg, transparent 75%, #262b35 75%), linear-gradient(-45deg, transparent 75%, #262b35 75%);
   }
 }
+
+/* Branches (T110) */
+
+button.sidebar-branch {
+  width: 100%;
+  border: none;
+  color: inherit;
+  text-align: left;
+  font-weight: 500;
+}
+
+button.sidebar-branch:hover:not(:disabled) {
+  background: var(--sidebar-muted);
+  background: color-mix(in srgb, var(--sidebar-active) 70%, var(--sidebar-muted));
+}
+
+.branch-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal.wide {
+  width: 640px;
+}
+
+.branch-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.branch-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.branch-filter input[type="search"] {
+  flex: 1;
+}
+
+.branch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.branch-row:last-child {
+  border-bottom: none;
+}
+
+.branch-row:hover {
+  background: var(--surface-2);
+}
+
+.branch-row.selected {
+  background: var(--accent-soft);
+}
+
+.branch-row.archived .branch-name {
+  color: var(--muted);
+}
+
+.branch-name {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.branch-meta {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.branch-empty {
+  padding: 10px 12px;
+}
+
+.branch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.branch-actions .spacer {
+  flex: 1;
+}
+
+.branch-rev {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--error-text);
+}
+
+.form fieldset.choice {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form fieldset.choice legend {
+  font-weight: 500;
+  padding: 0;
+  margin-bottom: 5px;
+}
+
+.input-row.indent {
+  padding-left: 22px;
+}
+
+.input-row select {
+  flex: 1;
+}
+
+.notice {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.notice.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-color: transparent;
+}
+
+.locks-left {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.sync-outcomes {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.error-action {
+  margin-top: 8px;
+}

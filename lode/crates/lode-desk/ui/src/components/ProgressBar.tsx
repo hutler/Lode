@@ -1,4 +1,23 @@
-import type { ProgressEvent } from "../api";
+import { useEffect, useState } from "react";
+
+import { backend, type ProgressEvent } from "../api";
+
+/** The latest progress update of whatever operation is running. */
+export function useProgress(): ProgressEvent | null {
+  const [progress, setProgress] = useState<ProgressEvent | null>(null);
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let live = true;
+    void backend().then((b) => {
+      if (live) stop = b.onProgress(setProgress);
+    });
+    return () => {
+      live = false;
+      stop?.();
+    };
+  }, []);
+  return progress;
+}
 
 /** `12.3 MB` style sizes, like the command line prints. */
 export function humanBytes(n: number): string {
