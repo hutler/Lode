@@ -295,7 +295,9 @@ async fn gc_during_commits_leaves_a_consistent_depot() {
                         break;
                     }
                     assert_eq!(body["code"], "missing_objects", "{body}");
-                    assert!(attempt < 50);
+                    // A GC between upload and commit sends the writer back; under a loaded
+                    // machine that can happen many times in a row (seen 50 on Windows).
+                    assert!(attempt < 1000, "the writer never got a commit through");
                 }
             }
         })
@@ -310,7 +312,8 @@ async fn gc_during_commits_leaves_a_consistent_depot() {
             )
             .await;
         assert!(s.is_success() || s == StatusCode::CONFLICT, "{body}");
-        tokio::task::yield_now().await;
+        // Leave the writer room between collections; correctness does not depend on it.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
     writer.await.unwrap();
     assert_eq!(h.check(true).await, Vec::<String>::new());
