@@ -7,7 +7,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lode_ops::cmd::{checkout, commit, diff, files, history, info, login, revert, status};
+use lode_ops::cmd::{checkout, commit, diff, files, history, info, locks, login, revert, status};
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
 use lode_ops::output::Ui;
@@ -442,6 +442,57 @@ impl Desk {
             )
             .await
         })
+        .await
+    }
+
+    /// `lode lock` of `paths` (depot paths) in `workspace`, all or none.
+    pub async fn lock(
+        &self,
+        workspace: String,
+        paths: Vec<String>,
+        comment: Option<String>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            locks::lock(
+                &ctx,
+                locks::LockArgs {
+                    paths: paths.into_iter().map(PathBuf::from).collect(),
+                    comment: comment.filter(|c| !c.trim().is_empty()),
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode unlock` of `paths`; `force` breaks other people's locks (depot admin).
+    pub async fn unlock(
+        &self,
+        workspace: String,
+        paths: Vec<String>,
+        force: bool,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            locks::unlock(
+                &ctx,
+                locks::UnlockArgs {
+                    paths: paths.into_iter().map(PathBuf::from).collect(),
+                    force,
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode locks` of the workspace's branch; `mine` keeps only this workspace's.
+    pub async fn locks(&self, workspace: String, mine: bool) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(
+            move || async move { locks::locks(&ctx, locks::LocksArgs { path: None, mine }).await },
+        )
         .await
     }
 

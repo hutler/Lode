@@ -143,6 +143,18 @@ export interface FileDiff {
   patch?: string;
 }
 
+/** One lock of `lode locks --json`. */
+export interface LockInfo {
+  path: string;
+  branch: string;
+  owner: PrincipalRef;
+  workspace: string;
+  comment?: string;
+  created_at: string;
+  /** Held by this workspace. */
+  mine: boolean;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -179,6 +191,12 @@ export interface Backend {
   diff(workspace: string, path: string): Promise<FileDiff | null>;
   /** A file as revision `rev` changed it. */
   diffRevision(workspace: string, rev: number, path: string): Promise<FileDiff>;
+  /** Locks `paths` (depot paths), all or none. */
+  lock(workspace: string, paths: string[], comment: string | null): Promise<{ locked: string[] }>;
+  /** Releases locks; `force` breaks other people's (depot admin). */
+  unlock(workspace: string, paths: string[], force: boolean): Promise<{ released: string[] }>;
+  /** The branch's locks; `mine` keeps this workspace's only. */
+  locks(workspace: string, mine: boolean): Promise<{ locks: LockInfo[] }>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
   watch(workspace: string): Promise<void>;
   unwatch(workspace: string): Promise<void>;
@@ -230,6 +248,9 @@ async function tauriBackend(): Promise<Backend> {
     blame: (workspace, path, rev) => invoke("blame", { workspace, path, rev }),
     diff: (workspace, path) => invoke("diff", { workspace, path }),
     diffRevision: (workspace, rev, path) => invoke("diff_revision", { workspace, rev, path }),
+    lock: (workspace, paths, comment) => invoke("lock", { workspace, paths, comment }),
+    unlock: (workspace, paths, force) => invoke("unlock", { workspace, paths, force }),
+    locks: (workspace, mine) => invoke("locks", { workspace, mine }),
     watch: (workspace) => invoke("watch", { workspace }),
     unwatch: (workspace) => invoke("unwatch", { workspace }),
     onChanged: (listener) => subscribe<string>("lode://changed", listener),

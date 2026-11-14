@@ -152,6 +152,31 @@ async fn diff_revision(
 }
 
 #[tauri::command]
+async fn lock(
+    desk: State<'_, Desk>,
+    workspace: String,
+    paths: Vec<String>,
+    comment: Option<String>,
+) -> Result<Value, ErrorView> {
+    desk.lock(workspace, paths, comment).await
+}
+
+#[tauri::command]
+async fn unlock(
+    desk: State<'_, Desk>,
+    workspace: String,
+    paths: Vec<String>,
+    force: bool,
+) -> Result<Value, ErrorView> {
+    desk.unlock(workspace, paths, force).await
+}
+
+#[tauri::command]
+async fn locks(desk: State<'_, Desk>, workspace: String, mine: bool) -> Result<Value, ErrorView> {
+    desk.locks(workspace, mine).await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -201,6 +226,9 @@ pub fn run() -> Result<(), tauri::Error> {
             blame,
             diff,
             diff_revision,
+            lock,
+            unlock,
+            locks,
             watch,
             unwatch,
         ])

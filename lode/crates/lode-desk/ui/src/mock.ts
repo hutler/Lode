@@ -3,6 +3,7 @@
 
 import type {
   Backend,
+  LockInfo,
   LogPage,
   CheckoutResult,
   CommitResult,
@@ -26,6 +27,10 @@ export interface MockOptions {
   stepMs?: number;
   /** Makes every commit fail with this error. */
   refuseCommit?: OpError;
+  /** The user is a depot admin, so they may break other people's locks. */
+  admin?: boolean;
+  /** The server has no locks module. */
+  noLocks?: boolean;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -98,6 +103,40 @@ const DEMO_STATUS: StatusResult = {
   ],
 };
 
+const LOCK_TIME = "2026-11-14T07:12:00Z";
+
+/** Locks other people hold on the demo depot's `main`. */
+function demoLocks(): LockInfo[] {
+  return [
+    {
+      path: "Content/Props/Crate_02.uasset",
+      branch: "main",
+      owner: { name: "carol", kind: "user" },
+      workspace: "carol-studio",
+      comment: "Repainting for the market",
+      created_at: "2026-11-13T16:40:00Z",
+      mine: false,
+    },
+    {
+      path: "Content/Maps/Docks.umap",
+      branch: "main",
+      owner: { name: "bob", kind: "user" },
+      workspace: "bob-laptop",
+      comment: "Lighting pass",
+      created_at: "2026-11-14T06:05:00Z",
+      mine: false,
+    },
+    {
+      path: "Source/Skyfall/Weather.cpp",
+      branch: "main",
+      owner: { name: "refactor-bot", kind: "agent" },
+      workspace: "ci-agent-3",
+      created_at: "2026-11-14T08:30:00Z",
+      mine: false,
+    },
+  ];
+}
+
 function fail(code: string, message: string): never {
   const e: OpError = { code, message };
   throw e;
@@ -168,6 +207,24 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     return st;
   };
   const emit = (e: ProgressEvent) => listeners.forEach((l) => l(e));
+  // Locks per depot and branch; `workspace` names the holder's workspace root.
+  const lockTables = new Map<string, LockInfo[]>();
+  const locksOf = (workspace: string): LockInfo[] => {
+    const info = workspaces.get(workspace);
+    if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+    if (opts.noLocks) fail("module_disabled", "the locks module is not enabled on this server");
+    const key = `${info.depot}/${info.branch}`;
+    let table = lockTables.get(key);
+    if (!table) {
+      table = info.depot === "skyfall" && info.branch === "main" ? demoLocks() : [];
+      // Locks the demo status shows as held here.
+      for (const f of statusFor(workspace).files.filter((x) => x.locked)) {
+        table.push({ path: f.path, branch: info.branch, owner: { name: "alice", kind: "user" }, workspace, created_at: LOCK_TIME, mine: true });
+      }
+      lockTables.set(key, table);
+    }
+    return table;
+  };
   const pause = () => new Promise((r) => setTimeout(r, stepMs));
 
   return {
@@ -287,6 +344,60 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const change = demoRevision(info.branch, rev)?.changes?.find((c) => c.path === path);
       if (!change) fail("not_found", `r${rev} did not change ${path}`);
       return demoRevisionDiff(rev, path, change.action);
+    },
+    lock: async (workspace, paths, comment) => {
+      const table = locksOf(workspace);
+      const st = statusFor(workspace);
+      const held = table.filter((l) => paths.includes(l.path) && l.workspace !== workspace);
+      if (held.length) {
+        const e: OpError = {
+          code: "locked",
+          message: `locked by someone else: ${held.map((l) => `${l.path} (${l.owner.name})`).join(", ")}`,
+          details: { paths: held.map((l) => l.path) },
+        };
+        throw e;
+      }
+      for (const p of paths) {
+        if (table.some((l) => l.path === p)) continue;
+        table.push({
+          path: p,
+          branch: st.branch,
+          owner: { name: "alice", kind: "user" },
+          workspace,
+          ...(comment?.trim() ? { comment: comment.trim() } : {}),
+          created_at: LOCK_TIME,
+          mine: true,
+        });
+        const f = st.files.find((x) => x.path === p);
+        if (f) {
+          f.locked = true;
+          f.needs_lock = false;
+        }
+      }
+      return { locked: paths };
+    },
+    unlock: async (workspace, paths, force) => {
+      const table = locksOf(workspace);
+      const others = table.filter((l) => paths.includes(l.path) && l.workspace !== workspace);
+      if (others.length && !force) {
+        fail("not_locked", `you hold no lock on ${others.map((l) => l.path).join(", ")}`);
+      }
+      if (others.length && !opts.admin) fail("permission_denied", "breaking locks needs admin on the depot");
+      const st = statusFor(workspace);
+      for (const p of paths) {
+        const i = table.findIndex((l) => l.path === p);
+        if (i >= 0) table.splice(i, 1);
+        const f = st.files.find((x) => x.path === p);
+        if (f) {
+          f.locked = false;
+          f.needs_lock = f.lock_required;
+        }
+      }
+      return { released: paths };
+    },
+    locks: async (workspace, mine) => {
+      const table = locksOf(workspace).map((l) => ({ ...l, mine: l.workspace === workspace }));
+      return { locks: mine ? table.filter((l) => l.mine) : table };
     },
     watch: async () => {},
     unwatch: async () => {},

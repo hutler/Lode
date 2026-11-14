@@ -5,6 +5,7 @@ import { BlameView } from "./BlameView";
 import { ChangesView } from "./ChangesView";
 import { DiffView } from "./DiffView";
 import { HistoryView } from "./HistoryView";
+import { LocksView } from "./LocksView";
 
 interface Props {
   info: WorkspaceInfo;
@@ -25,11 +26,13 @@ type Section = (typeof SECTIONS)[number];
 /** What the main area shows. */
 type View =
   | { kind: "changes" }
+  | { kind: "locks" }
   | { kind: "history"; path: string | null; rev: number | null }
   | { kind: "blame"; path: string; rev: number | null }
   | { kind: "diff"; path: string; rev: number | null };
 
 function sectionOf(v: View): Section {
+  if (v.kind === "locks") return "Locks";
   return v.kind === "changes" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
 }
 
@@ -65,8 +68,16 @@ export function WorkspaceView({ info, onError }: Props) {
               key={s}
               className={s === active ? "active" : ""}
               aria-current={s === active ? "page" : undefined}
-              disabled={s !== "Changes" && s !== "History"}
-              onClick={() => setView(s === "Changes" ? { kind: "changes" } : { kind: "history", path: null, rev: null })}
+              disabled={s === "Shelves"}
+              onClick={() =>
+                setView(
+                  s === "Changes"
+                    ? { kind: "changes" }
+                    : s === "Locks"
+                      ? { kind: "locks" }
+                      : { kind: "history", path: null, rev: null },
+                )
+              }
             >
               {s}
               {s === "Changes" && changed > 0 && <span className="count">{changed}</span>}
@@ -84,6 +95,7 @@ export function WorkspaceView({ info, onError }: Props) {
           onHistory={(path) => history(path)}
           onBlame={(path) => blame(path, null)}
           onDiff={(path) => diff(path, null)}
+          active={view.kind === "changes"}
         />
       </div>
       {view.kind === "history" && (
@@ -97,6 +109,11 @@ export function WorkspaceView({ info, onError }: Props) {
             onBlame={blame}
             onDiff={diff}
           />
+        </div>
+      )}
+      {view.kind === "locks" && (
+        <div className="section">
+          <LocksView info={info} />
         </div>
       )}
       {view.kind === "diff" && (

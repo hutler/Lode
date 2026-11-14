@@ -781,7 +781,12 @@ button.danger {
 
 .details-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.details-actions button {
+  white-space: nowrap;
 }
 
 .menu {
@@ -1352,4 +1357,113 @@ button.danger {
     --diff-del-word: #6a2a2f;
     --diff-del-text: #f28b8b;
   }
+}
+
+/* Locks */
+
+.locks {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.lock-filter {
+  margin-left: auto;
+  width: 220px;
+}
+
+.check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.locks .changes-head .refresh {
+  margin-left: 0;
+}
+
+.lock-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.lock-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.lock-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+.lock-table td {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.lock-table tr.mine td {
+  background: var(--accent-soft);
+}
+
+.lock-table .tag {
+  margin-left: 6px;
+}
+
+.lock-path {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lock-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.lock-what {
+  margin: 0;
+}
+
+.holders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.holders li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 12px;
+}
+
+.holders li + li {
+  border-top: 1px solid var(--border);
+}
+
+.holders li .muted {
+  grid-column: 1 / -1;
+}
+
+.holders .tag {
+  margin-left: 6px;
 }

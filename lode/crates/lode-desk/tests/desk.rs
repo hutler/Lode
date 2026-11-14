@@ -483,3 +483,106 @@ async fn diffs_of_working_files_and_revisions() {
         .unwrap_err();
     assert_eq!(err.code, "not_found", "{err:?}");
 }
+
+#[tokio::test]
+async fn locks_are_taken_listed_refused_and_released() {
+    let s = setup().await;
+    let url = s.server.url().trim_end_matches('/').to_owned();
+    s.server
+        .admin()
+        .create_principal(&CreatePrincipalRequest {
+            kind: PrincipalKind::User,
+            name: "bob".into(),
+            display_name: None,
+            owner: None,
+            password: Some("battery staple".into()),
+        })
+        .await
+        .unwrap();
+    s.server
+        .acl(
+            "game",
+            "bob",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Write,
+        )
+        .await;
+    let root = checked_out(&s).await;
+
+    // Bob, in his own app and workspace, locks b.txt.
+    let bob_home = tempfile::tempdir().unwrap();
+    let bob = Desk::new(
+        bob_home.path().to_path_buf(),
+        &bob_home.path().join("app"),
+        Arc::new(Events::default()),
+    )
+    .with_config_dir(bob_home.path().join("config"));
+    bob.sign_in(url.clone(), "bob".into(), "battery staple".into())
+        .await
+        .unwrap();
+    let bob_dir = bob_home.path().join("game");
+    bob.checkout(
+        format!("{url}/game"),
+        bob_dir.display().to_string(),
+        "main".into(),
+    )
+    .await
+    .unwrap();
+    let bob_root = bob.recent()[0].path.clone();
+    bob.lock(
+        bob_root.clone(),
+        vec!["b.txt".into()],
+        Some("door art".into()),
+    )
+    .await
+    .unwrap();
+
+    // Alice locks a.txt with a comment and sees both locks, hers marked.
+    let out = s
+        .desk
+        .lock(root.clone(), vec!["a.txt".into()], Some("  ".into()))
+        .await
+        .unwrap();
+    assert_eq!(out["locked"], serde_json::json!(["a.txt"]));
+    let all = s.desk.locks(root.clone(), false).await.unwrap();
+    let list = all["locks"].as_array().unwrap();
+    assert_eq!(list.len(), 2, "{all}");
+    let b = list.iter().find(|l| l["path"] == "b.txt").unwrap();
+    assert_eq!(b["owner"]["name"], "bob");
+    assert_eq!(b["mine"], false);
+    assert_eq!(b["comment"], "door art");
+    let mine = s.desk.locks(root.clone(), true).await.unwrap();
+    assert_eq!(mine["locks"].as_array().unwrap().len(), 1, "{mine}");
+    assert!(
+        mine["locks"][0].get("comment").is_none(),
+        "a blank comment is left out: {mine}"
+    );
+
+    // b.txt is Bob's: the lock is refused and names the file.
+    let err = s
+        .desk
+        .lock(root.clone(), vec!["b.txt".into()], None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "locked", "{err:?}");
+    assert_eq!(err.details["paths"][0], "b.txt", "{err:?}");
+
+    // Breaking it needs depot admin, which Alice is not.
+    let err = s
+        .desk
+        .unlock(root.clone(), vec!["b.txt".into()], true)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "permission_denied", "{err:?}");
+
+    let out = s
+        .desk
+        .unlock(root.clone(), vec!["a.txt".into()], false)
+        .await
+        .unwrap();
+    assert_eq!(out["released"], serde_json::json!(["a.txt"]));
+    let mine = s.desk.locks(root, true).await.unwrap();
+    assert!(mine["locks"].as_array().unwrap().is_empty(), "{mine}");
+}

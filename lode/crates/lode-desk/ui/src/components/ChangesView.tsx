@@ -10,6 +10,7 @@ import {
   type WorkspaceInfo,
 } from "../api";
 import { ErrorBanner } from "./ErrorBanner";
+import { LockDialog } from "./LockDialog";
 import { Modal } from "./Modal";
 import { ProgressBar } from "./ProgressBar";
 
@@ -23,6 +24,8 @@ interface Props {
   onBlame?: (path: string) => void;
   /** Opens a file's diff against its base. */
   onDiff?: (path: string) => void;
+  /** Whether the view is showing; it refreshes when it comes back. */
+  active?: boolean;
 }
 
 /** One group of the list: the default changes, a named changelist, or new files. */
@@ -85,7 +88,7 @@ interface Menu {
 }
 
 /** The pending changes of a workspace, with picking, committing, adding and reverting. */
-export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDiff }: Props) {
+export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDiff, active = true }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
@@ -96,6 +99,7 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   const [done, setDone] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [confirmRevert, setConfirmRevert] = useState<string[] | null>(null);
+  const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const root = info.root;
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
@@ -138,6 +142,13 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
     };
   }, [root, refresh]);
 
+  // Locks and commits made elsewhere in the app show when the view comes back.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) void refresh();
+    wasActive.current = active;
+  }, [active, refresh]);
+
   useEffect(() => {
     if (!menu) return;
     const close = () => setMenu(null);
@@ -179,6 +190,13 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
 
   const add = (paths: string[]) => run("Adding", async () => (await backend()).add(root, paths));
   const revert = (paths: string[]) => run("Reverting", async () => (await backend()).revert(root, paths));
+  const unlock = (paths: string[]) =>
+    run("Unlocking", async () => {
+      await (await backend()).unlock(root, paths, false);
+    });
+  // The right-clicked file, or every picked file when it is one of them.
+  const targets = (f: StatusFile) => (picked.has(f.path) && pickedFiles.length > 1 ? pickedFiles : [f.path]);
+  const lockable = (f: StatusFile | undefined) => !!f && f.status !== "untracked" && f.status !== "added";
 
   const commit = async (e: FormEvent) => {
     e.preventDefault();
@@ -377,8 +395,13 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
               </dd>
             </dl>
             <div className="details-actions">
+              {sel.needs_lock && (
+                <button className="primary" onClick={() => setLockPaths([sel.path])} disabled={!!busy}>
+                  Lock…
+                </button>
+              )}
               {onDiff && sel.status !== "untracked" && (
-                <button className="primary" onClick={() => onDiff(sel.path)}>
+                <button className={sel.needs_lock ? "" : "primary"} onClick={() => onDiff(sel.path)}>
                   Show diff
                 </button>
               )}
@@ -390,6 +413,18 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                 <button onClick={() => setConfirmRevert([sel.path])} disabled={!!busy}>
                   Revert…
                 </button>
+              )}
+              {sel.locked ? (
+                <button onClick={() => void unlock([sel.path])} disabled={!!busy}>
+                  Unlock
+                </button>
+              ) : (
+                lockable(sel) &&
+                !sel.needs_lock && (
+                  <button onClick={() => setLockPaths([sel.path])} disabled={!!busy}>
+                    Lock…
+                  </button>
+                )
               )}
               {sel.status !== "untracked" && sel.status !== "added" && (
                 <>
@@ -412,7 +447,7 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
               <dt>Revision</dt>
               <dd>r{status?.rev ?? info.rev}</dd>
             </dl>
-            <p className="muted small">Select a file to see more about it. Right-click a file to add or revert it.</p>
+            <p className="muted small">Select a file to see more about it. Right-click a file to add, revert or lock it.</p>
           </>
         )}
       </aside>
@@ -428,10 +463,34 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
               Revert…
             </button>
           )}
+          {lockable(menu.file) &&
+            (() => {
+              const t = targets(menu.file).filter((p) => lockable(byPath.get(p)));
+              const held = t.filter((p) => byPath.get(p)?.locked);
+              const n = (k: number) => (k > 1 ? ` ${k} files` : "");
+              return (
+                <>
+                  {held.length < t.length && (
+                    <button role="menuitem" onClick={() => setLockPaths(t.filter((p) => !byPath.get(p)?.locked))}>
+                      Lock{n(t.length - held.length)}…
+                    </button>
+                  )}
+                  {held.length > 0 && (
+                    <button role="menuitem" onClick={() => void unlock(held)}>
+                      Unlock{n(held.length)}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           <button role="menuitem" onClick={() => toggle([menu.file.path], !picked.has(menu.file.path))}>
             {picked.has(menu.file.path) ? "Unpick" : "Pick"}
           </button>
         </div>
+      )}
+
+      {lockPaths && (
+        <LockDialog workspace={root} paths={lockPaths} onClose={() => setLockPaths(null)} onLocked={() => void refresh()} />
       )}
 
       {confirmRevert && (

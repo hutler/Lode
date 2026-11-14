@@ -138,6 +138,20 @@ const scenes = {
     await page.getByRole("button", { name: "Diff of Source/Skyfall/Boat.h" }).click();
     await page.getByRole("table", { name: "Unified diff" }).waitFor();
   },
+  async locks(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: /^Locks/ }).click();
+    await page.getByText("Content/Maps/Docks.umap").waitFor();
+  },
+  async "lock-refused"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("region", { name: "Pending changes" }).getByText("Crate_02.uasset").click();
+    await page.getByRole("complementary", { name: "Details" }).getByRole("button", { name: "Lock…" }).click();
+    const d = page.getByRole("dialog");
+    await d.getByLabel(/Comment/).fill("New crate colours");
+    await d.getByRole("button", { name: "Lock" }).click();
+    await d.getByRole("list", { name: "Held by others" }).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();
