@@ -6,6 +6,9 @@ import { Modal } from "./Modal";
 import { ProgressBar } from "./ProgressBar";
 
 interface Props {
+  /** Filled in when a link asked for the checkout. */
+  initialTarget?: string;
+  initialBranch?: string;
   onClose: () => void;
   onDone: (info: WorkspaceInfo) => void;
   onNeedSignIn: (server: string) => void;
@@ -20,10 +23,10 @@ export function serverOfTarget(target: string): string | null {
 }
 
 /** Creates a workspace from a depot: `lode checkout <server>/<depot> <folder> -b <branch>`. */
-export function CheckoutDialog({ onClose, onDone, onNeedSignIn }: Props) {
-  const [target, setTarget] = useState("https://");
+export function CheckoutDialog({ initialTarget, initialBranch, onClose, onDone, onNeedSignIn }: Props) {
+  const [target, setTarget] = useState(initialTarget ?? "https://");
   const [folder, setFolder] = useState("");
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranch] = useState(initialBranch ?? "main");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [error, setError] = useState<OpError | null>(null);
@@ -82,7 +85,13 @@ export function CheckoutDialog({ onClose, onDone, onNeedSignIn }: Props) {
         <label>
           Folder
           <span className="input-row">
-            <input value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="Where the files go" required disabled={busy} />
+            <input
+              value={folder}
+              onChange={(e) => setFolder(e.target.value)}
+              placeholder="Where the files go"
+              required
+              disabled={busy}
+            />
             <button type="button" onClick={pick} disabled={busy}>
               Browse…
             </button>

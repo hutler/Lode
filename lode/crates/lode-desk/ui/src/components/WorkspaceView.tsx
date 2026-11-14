@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   asOpError,
@@ -10,6 +10,7 @@ import {
   type UpdateResult,
   type WorkspaceInfo,
 } from "../api";
+import { type Link } from "../links";
 import { BlameView } from "./BlameView";
 import { BranchPicker, CreateBranchDialog, SyncResultDialog } from "./BranchPicker";
 import { ConflictView } from "./ConflictView";
@@ -29,6 +30,10 @@ interface Props {
   onError: (e: OpError) => void;
   /** The workspace moved (another branch or revision). */
   onInfo?: (info: WorkspaceInfo) => void;
+  /** A link to show: its revision, its file's history at its revision, or its shelf. */
+  goto?: Link | null;
+  /** The link was shown. */
+  onGone?: () => void;
 }
 
 type Dialog =
@@ -65,7 +70,7 @@ type Section = (typeof SECTIONS)[number];
 type View =
   | { kind: "changes" }
   | { kind: "locks" }
-  | { kind: "shelves" }
+  | { kind: "shelves"; id?: number }
   | { kind: "workspace" }
   | { kind: "history"; path: string | null; rev: number | null }
   | { kind: "blame"; path: string; rev: number | null }
@@ -79,8 +84,15 @@ function sectionOf(v: View): Section {
   return v.kind === "changes" || v.kind === "conflict" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
 }
 
+/** Where a link goes. */
+function viewOf(link: Link): View {
+  if (link.kind === "revision") return { kind: "history", path: null, rev: link.rev };
+  if (link.kind === "shelf") return { kind: "shelves", id: link.id };
+  return { kind: "history", path: link.path, rev: link.rev };
+}
+
 /** One open workspace: the sidebar and the section it shows. */
-export function WorkspaceView({ info, onError, onInfo }: Props) {
+export function WorkspaceView({ info, onError, onInfo, goto, onGone }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
   const [view, setView] = useState<View>({ kind: "changes" });
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -92,6 +104,12 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
   const [viewOpened, setViewOpened] = useState(false);
   const [viewBusy, setViewBusy] = useState(false);
   if (view.kind === "workspace" && !viewOpened) setViewOpened(true);
+
+  useEffect(() => {
+    if (!goto) return;
+    setView(viewOf(goto));
+    onGone?.();
+  }, [goto, onGone]);
 
   const synced = useCallback(
     async (result: UpdateResult) => {
@@ -239,7 +257,7 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
         )}
         {view.kind === "shelves" && (
           <div className="section">
-            <ShelvesView key={generation} info={info} />
+            <ShelvesView key={`${generation}:${view.id ?? ""}`} info={info} initialId={view.id} />
           </div>
         )}
         {view.kind === "diff" && (

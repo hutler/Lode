@@ -503,6 +503,10 @@ export interface Backend {
   ): Promise<ViewApplied>;
   /** Opens a web link in the system browser. */
   openLink(url: string): Promise<void>;
+  /** Takes the `lode://` link the app was started with or handed since, as given; null when none waits. */
+  pendingLink(): Promise<string | null>;
+  /** Calls `listener` when a `lode://` link is waiting for {@link Backend.pendingLink}. */
+  onOpenLink(listener: () => void): () => void;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
   watch(workspace: string): Promise<void>;
   unwatch(workspace: string): Promise<void>;
@@ -630,6 +634,8 @@ async function tauriBackend(): Promise<Backend> {
     openLink: async (url) => {
       await invoke("open_link", { url });
     },
+    pendingLink: () => invoke("pending_link"),
+    onOpenLink: (listener) => subscribe<null>("lode://open-link", () => listener()),
     watch: (workspace) => invoke("watch", { workspace }),
     unwatch: (workspace) => invoke("unwatch", { workspace }),
     onChanged: (listener) => subscribe<string>("lode://changed", listener),
@@ -659,7 +665,11 @@ let current: Promise<Backend> | null = null;
 /** The backend: Tauri in the app, the mock elsewhere. */
 export function backend(): Promise<Backend> {
   if (!current) {
-    current = inTauri() ? tauriBackend() : import("./mock").then((m) => m.createMockBackend());
+    // The mock takes a launch link from `?link=`, as the app takes one from its arguments.
+    const link = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("link");
+    current = inTauri()
+      ? tauriBackend()
+      : import("./mock").then((m) => m.createMockBackend({ launchLink: link ?? undefined }));
   }
   return current;
 }

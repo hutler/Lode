@@ -52,6 +52,8 @@ export interface MockOptions {
   noChecks?: boolean;
   /** An update of the first workspace stopped half way, so commits are refused until it is finished. */
   unfinishedUpdate?: boolean;
+  /** The `lode://` link the app was started with. */
+  launchLink?: string;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -209,6 +211,8 @@ export type MockBackend = Backend & {
   touch(workspace: string, file: StatusFile): void;
   /** Updates a shelf as its owner would from elsewhere, raising its version. */
   bumpShelf(workspace: string, id: number): void;
+  /** Hands the running app a `lode://` link, as a second start of the app would. */
+  handLink(text: string): void;
 };
 
 export function createMockBackend(opts: MockOptions = {}): MockBackend {
@@ -241,6 +245,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   };
 
   const changed = new Set<(workspace: string) => void>();
+  let pending: string | null = opts.launchLink ?? null;
+  const linkListeners = new Set<() => void>();
   const statusOf = new Map<string, StatusResult>();
   const statusFor = (workspace: string): StatusResult => {
     let st = statusOf.get(workspace);
@@ -1154,6 +1160,19 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return { view: next, added: fetch.files, removed: remove.files };
     }) as MockBackend["viewApply"],
     openLink: async () => {},
+    pendingLink: async () => {
+      const p = pending;
+      pending = null;
+      return p;
+    },
+    onOpenLink: (listener) => {
+      linkListeners.add(listener);
+      return () => linkListeners.delete(listener);
+    },
+    handLink: (text) => {
+      pending = text;
+      linkListeners.forEach((l) => l());
+    },
     bumpShelf: (workspace, id) => {
       const s = shelfOf(workspace, id);
       s.version += 1;

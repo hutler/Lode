@@ -5,6 +5,7 @@ import { useChecks } from "../checks";
 import { LANE, layoutGraph, type GraphRow } from "../graph";
 import { CheckBadge, ChecksList } from "./Checks";
 import { ErrorBanner } from "./ErrorBanner";
+import { CopyLink } from "./LinkDialogs";
 
 interface Props {
   info: WorkspaceInfo;
@@ -35,9 +36,7 @@ export function summary(message: string): string {
 
 export function formatDate(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 function fileName(path: string): string {
@@ -61,7 +60,11 @@ function Badges({ r }: { r: Revision }) {
         </span>
       )}
       {r.merged_from.map((m) => (
-        <span key={`${m.branch}:${m.from_rev}`} className="tag merge" title={`Merged ${m.branch} r${m.from_rev}..r${m.to_rev}`}>
+        <span
+          key={`${m.branch}:${m.from_rev}`}
+          className="tag merge"
+          title={`Merged ${m.branch} r${m.from_rev}..r${m.to_rev}`}
+        >
           merge {m.branch}
         </span>
       ))}
@@ -262,8 +265,7 @@ export function HistoryView({ info, path, initialRev, onPath, onBlame, onDiff }:
               const i = first + k;
               const row = graph.rows[i];
               if (!row) return null;
-              const label =
-                (i === 0 && !row.inherited) || row.branchPoint ? r.branch : null;
+              const label = (i === 0 && !row.inherited) || row.branchPoint ? r.branch : null;
               return (
                 <div
                   key={r.rev}
@@ -296,7 +298,14 @@ export function HistoryView({ info, path, initialRev, onPath, onBlame, onDiff }:
 
       <aside className="details" aria-label="Revision">
         {detail ? (
-          <RevisionDetails r={detail} checks={checks.get(`r${detail.rev}`)} branch={info.branch} onPath={onPath} onBlame={onBlame} onDiff={onDiff} />
+          <RevisionDetails
+            r={detail}
+            info={info}
+            checks={checks.get(`r${detail.rev}`)}
+            onPath={onPath}
+            onBlame={onBlame}
+            onDiff={onDiff}
+          />
         ) : (
           <p className="muted small">Select a revision to see what it changed.</p>
         )}
@@ -309,15 +318,15 @@ const ACTION: Record<string, string> = { add: "A", modify: "M", delete: "D" };
 
 function RevisionDetails({
   r,
+  info,
   checks,
-  branch,
   onPath,
   onBlame,
   onDiff,
 }: {
   r: Revision;
+  info: WorkspaceInfo;
   checks: CheckInfo[] | undefined;
-  branch: string;
   onPath: (path: string) => void;
   onBlame: (path: string, rev: number) => void;
   onDiff: (path: string, rev: number) => void;
@@ -325,11 +334,16 @@ function RevisionDetails({
   const [, ...rest] = r.message.split("\n");
   const body = rest.join("\n").trim();
   const p = r.provenance;
+  const branch = info.branch;
+  const at = { server: info.server, depot: info.depot };
   return (
     <>
       <h2 className="details-title">
         r{r.rev} <span className="muted">{r.branch !== branch ? `on ${r.branch}` : ""}</span>
       </h2>
+      <div className="rev-links">
+        <CopyLink link={{ kind: "revision", ...at, rev: r.rev }} label={`Copy link to r${r.rev}`} />
+      </div>
       <p className="rev-message">{summary(r.message)}</p>
       {body && <p className="rev-body">{body}</p>}
       <div className="rev-badges block">
@@ -411,6 +425,11 @@ function RevisionDetails({
                   Blame
                 </button>
               )}
+              <CopyLink
+                link={{ kind: "file", ...at, path: c.path, rev: r.rev, branch: null }}
+                label={`Copy link to ${c.path} at r${r.rev}`}
+                text="Link"
+              />
             </span>
           </li>
         ))}

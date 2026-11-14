@@ -5,14 +5,19 @@
 //! progress and warnings arrive as `lode://progress` and `lode://warning` events, and a
 //! watched workspace whose files changed as `lode://changed` with its root. Operations
 //! open the workspace only while they run, so `lode` and editor plugins work next to the app.
+//!
+//! A `lode://` link that starts the app, or reaches it while it runs, is kept until the
+//! window takes it with `pending_link`; `lode://open-link` tells the window one is waiting.
+//! Only one copy of the app runs: a second start hands its link to the first and exits.
 
 #![forbid(unsafe_code)]
 
 pub mod desk;
+pub mod links;
 pub mod watch;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use lode_ops::output::{ProgressEvent, Ui};
 use serde_json::Value;
@@ -35,6 +40,35 @@ impl Ui for WindowUi {
     fn progress(&self, event: &ProgressEvent<'_>) {
         let _ = self.app.emit("lode://progress", event);
     }
+}
+
+/// The `lode://` link waiting for the window, if any.
+#[derive(Default)]
+struct PendingLink(Mutex<Option<String>>);
+
+/// Keeps `link` for the window and tells it one is waiting.
+fn hand_over(app: &AppHandle, link: String) {
+    if let Some(pending) = app.try_state::<PendingLink>() {
+        if let Ok(mut slot) = pending.0.lock() {
+            *slot = Some(link);
+        }
+    }
+    let _ = app.emit("lode://open-link", ());
+}
+
+/// Brings the main window to the front.
+fn focus(app: &AppHandle) {
+    if let Some(window) = app.webview_windows().values().next() {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Takes the waiting `lode://` link, as it was given; the window parses it.
+#[tauri::command]
+fn pending_link(pending: State<'_, PendingLink>) -> Option<String> {
+    pending.0.lock().ok().and_then(|mut slot| slot.take())
 }
 
 #[tauri::command]
@@ -438,8 +472,32 @@ async fn status(desk: State<'_, Desk>, workspace: String) -> Result<Value, Error
 /// Starts the app.
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
+        // First, so a second start hands over its link before anything else runs.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            focus(app);
+            if let Some(link) = links::from_args(args) {
+                hand_over(app, link);
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(PendingLink(Mutex::new(links::from_args(std::env::args()))))
         .setup(|app| {
+            use tauri_plugin_deep_link::DeepLinkExt;
+            // macOS delivers links as events, at start and while running.
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                if let Some(url) = event.urls().into_iter().next() {
+                    hand_over(&handle, url.to_string());
+                }
+            });
+            // Installers register the scheme; a build run from source, or an AppImage, does
+            // it here.
+            #[cfg(any(windows, target_os = "linux"))]
+            if cfg!(debug_assertions) || std::env::var_os("APPIMAGE").is_some() {
+                let _ = app.deep_link().register_all();
+            }
+
             let paths = app.path();
             let home = paths.home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let data = paths.app_data_dir()?;
@@ -454,6 +512,7 @@ pub fn run() -> Result<(), tauri::Error> {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            pending_link,
             app_version,
             recent_workspaces,
             forget_workspace,

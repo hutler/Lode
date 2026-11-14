@@ -2451,3 +2451,36 @@ input[aria-invalid="true"] {
 .count.busy {
   background: var(--sidebar-muted);
 }
+
+/* lode:// links */
+.rev-links {
+  display: flex;
+  gap: 12px;
+  margin: -4px 0 8px;
+}
+.link-note {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 8px 16px 0;
+}
+.link-text {
+  word-break: break-all;
+  background: var(--surface-2, var(--surface));
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.link-choices {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.link-choices button {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+}

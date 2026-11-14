@@ -132,7 +132,10 @@ const scenes = {
   },
   async "file-history"(page) {
     await scenes.history(page);
-    await page.getByRole("button", { name: /^History of Source\// }).first().click();
+    await page
+      .getByRole("button", { name: /^History of Source\// })
+      .first()
+      .click();
     await page.getByRole("heading", { name: /^History of / }).waitFor();
     await page.getByRole("list", { name: "Changed files" }).waitFor();
   },
@@ -271,6 +274,27 @@ const scenes = {
     await view.getByRole("button", { name: "Preview change" }).click();
     await view.getByRole("region", { name: "Preview" }).waitFor();
   },
+  async "link-choose"(page) {
+    await page.goto(
+      `${url}?link=${encodeURIComponent("lode://lode.example.com/skyfall/Docs/Release-1.2.md?branch=release-1.2")}`,
+    );
+    await page.getByRole("dialog", { name: "Open the link in which workspace?" }).waitFor();
+  },
+  async "link-none"(page) {
+    await page.goto(`${url}?link=${encodeURIComponent("lode://lode.example.com/art-library/shelf/12")}`);
+    await page.getByRole("dialog", { name: "No workspace for this link" }).waitFor();
+  },
+  async "link-refused"(page) {
+    await page.goto(`${url}?link=${encodeURIComponent("lode://lode.example.com/skyfall/Docs/../secret.txt@3")}`);
+    await page.getByRole("dialog", { name: "This link cannot be opened" }).waitFor();
+  },
+  async "link-revision"(page) {
+    await page.goto(`${url}?link=${encodeURIComponent("lode://lode.example.com/pipeline/r311")}`);
+    await page
+      .getByRole("complementary", { name: "Revision" })
+      .getByRole("button", { name: "Copy link to r311" })
+      .waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();
@@ -284,7 +308,11 @@ await mkdir(out, { recursive: true });
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try {
   for (const scheme of ["light", "dark"]) {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, colorScheme: scheme });
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+    });
     // SCENES=a,b renders only those scenes.
     const only = process.env.SCENES?.split(",").filter(Boolean);
     for (const [name, scene] of Object.entries(scenes).filter(([n]) => !only || only.includes(n))) {

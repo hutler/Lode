@@ -16,6 +16,7 @@ import {
 import { useChecks } from "../checks";
 import { CheckBadge, ChecksList } from "./Checks";
 import { FileDiffBody, savedLayout, saveLayout, type Layout } from "./DiffView";
+import { CopyLink } from "./LinkDialogs";
 import { ErrorBanner } from "./ErrorBanner";
 import { formatDate } from "./HistoryView";
 import { Modal } from "./Modal";
@@ -25,6 +26,8 @@ interface Props {
   info: WorkspaceInfo;
   /** Called after an unshelve changed the workspace. */
   onUnshelved?: () => void;
+  /** The shelf to show first, as a link asked; shown even when the list's filter leaves it out. */
+  initialId?: number;
 }
 
 type Whose = "mine" | "all";
@@ -44,7 +47,8 @@ function ownerText(s: ShelfInfo): string {
 /** A shelf file's patch as the diff view takes it. */
 export function asFileDiff(d: ShelfFileDiff, change: ChangeView | undefined): FileDiff {
   const lines = (d.patch ?? "").split("\n");
-  const count = (sign: string, header: string) => lines.filter((l) => l.startsWith(sign) && !l.startsWith(header)).length;
+  const count = (sign: string, header: string) =>
+    lines.filter((l) => l.startsWith(sign) && !l.startsWith(header)).length;
   const action = change?.action ?? "modify";
   return {
     path: d.path,
@@ -64,7 +68,8 @@ export function asFileDiff(d: ShelfFileDiff, change: ChangeView | undefined): Fi
 /** Why a missing check holds the submit back, in words. */
 export function checkReason(m: MissingCheck): string {
   if (m.reason === "absent") return `not reported yet (expected from ${m.reporter})`;
-  if (m.reason === "wrong_reporter") return `${m.state ?? "reported"}, but by ${m.reported_by ?? "someone else"}, not ${m.reporter}`;
+  if (m.reason === "wrong_reporter")
+    return `${m.state ?? "reported"}, but by ${m.reported_by ?? "someone else"}, not ${m.reporter}`;
   return m.state ?? "not passed";
 }
 
@@ -75,11 +80,11 @@ function missingChecks(e: OpError | null): MissingCheck[] {
 }
 
 /** The depot's shelves: mine or everyone's, open, submitted or deleted, and one shelf's details. */
-export function ShelvesView({ info, onUnshelved }: Props) {
+export function ShelvesView({ info, onUnshelved, initialId }: Props) {
   const [whose, setWhose] = useState<Whose>("all");
   const [state, setState] = useState<State>("open");
   const [shelves, setShelves] = useState<ShelfInfo[] | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(initialId ?? null);
   const [detail, setDetail] = useState<ShelfInfo | null>(null);
   const [me, setMe] = useState<string | null>(null);
   const [error, setError] = useState<OpError | null>(null);
@@ -91,13 +96,15 @@ export function ShelvesView({ info, onUnshelved }: Props) {
       const r = await (await backend()).shelves(info.root, whose === "mine", state);
       setShelves(r.shelves);
       setUnavailable(false);
-      setSelected((s) => (s !== null && r.shelves.some((x) => x.id === s) ? s : (r.shelves[0]?.id ?? null)));
+      setSelected((s) =>
+        s !== null && (s === initialId || r.shelves.some((x) => x.id === s)) ? s : (r.shelves[0]?.id ?? null),
+      );
     } catch (e) {
       const op = asOpError(e);
       if (op.code === "module_disabled") setUnavailable(true);
       else setError(op);
     }
-  }, [info.root, whose, state]);
+  }, [info.root, whose, state, initialId]);
 
   const loadDetail = useCallback(
     async (id: number | null) => {
@@ -181,8 +188,8 @@ export function ShelvesView({ info, onUnshelved }: Props) {
           <ul className="shelf-list" role="listbox" aria-label="Shelf list">
             {shelves && shelves.length === 0 && (
               <li className="empty">
-                {state === "open" ? "No open shelves." : `No ${STATE_TEXT[state].toLowerCase()} shelves.`} Shelve changes from
-                the Changes view.
+                {state === "open" ? "No open shelves." : `No ${STATE_TEXT[state].toLowerCase()} shelves.`} Shelve
+                changes from the Changes view.
               </li>
             )}
             {(shelves ?? []).map((s) => (
@@ -290,6 +297,10 @@ function ShelfDetail({
           </p>
         </div>
         <div className="shelf-actions">
+          <CopyLink
+            link={{ kind: "shelf", server: info.server, depot: info.depot, id: shelf.id }}
+            label={`Copy link to shelf ${shelf.id}`}
+          />
           {shelf.state !== "deleted" && (
             <button onClick={() => void unshelve()} disabled={busy}>
               {busy ? "Unshelving…" : "Unshelve"}
@@ -363,7 +374,12 @@ function ShelfDetail({
         ))}
       </ul>
       {(shelf.diff ?? []).map((d) => (
-        <section key={d.path} className="shelf-file" id={`shelf-file-${encodeURIComponent(d.path)}`} aria-label={`Diff of ${d.path}`}>
+        <section
+          key={d.path}
+          className="shelf-file"
+          id={`shelf-file-${encodeURIComponent(d.path)}`}
+          aria-label={`Diff of ${d.path}`}
+        >
           <h4 className="shelf-file-name mono">{d.path}</h4>
           {d.patch !== undefined ? (
             <FileDiffBody diff={asFileDiff(d, byPath.get(d.path))} layout={layout} />
@@ -387,9 +403,7 @@ function ShelfDetail({
       )}
       {asking === "delete" && (
         <Modal title={`Delete shelf ${shelf.id}?`} onClose={() => setAsking(null)}>
-          <p>
-            Nobody will be able to unshelve or submit it any more. Changes still in your workspace are not touched.
-          </p>
+          <p>Nobody will be able to unshelve or submit it any more. Changes still in your workspace are not touched.</p>
           <div className="form-actions">
             <button onClick={() => setAsking(null)} autoFocus>
               Cancel
@@ -504,7 +518,8 @@ function SubmitDialog({
     <Modal title={`Submit shelf ${shelf.id}, version ${shelf.version}`} onClose={onClose}>
       <form className="form" onSubmit={(e) => void submit(e)} aria-label="Submit shelf">
         <p className="muted small lock-what">
-          Commits the shelf on {shelf.branch} exactly as shown. You are the submitter; {ownerText(shelf)} stays the author.
+          Commits the shelf on {shelf.branch} exactly as shown. You are the submitter; {ownerText(shelf)} stays the
+          author.
         </p>
         <label>
           Message
