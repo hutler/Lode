@@ -88,6 +88,11 @@ windows-service = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "json", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+# Postgres metadata backend (T153): the maintained pure-Rust driver, blocking API used from
+# spawn_blocking threads through a small runtime of its own; TLS through rustls with ring, no OpenSSL.
+tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.13"
+rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

@@ -64,6 +64,17 @@ const MIGRATIONS: &[Migration] = &[Migration {
               PRIMARY KEY (depot_id, branch_id, path)
           ) WITHOUT ROWID;
           CREATE INDEX mod_locks_lock_owner ON mod_locks_lock (owner_id);",
+    postgres: "CREATE TABLE mod_locks_lock (
+              depot_id   BIGINT NOT NULL,
+              branch_id  BIGINT NOT NULL,
+              path       TEXT COLLATE \"C\" NOT NULL,
+              owner_id   BIGINT NOT NULL,
+              workspace  TEXT COLLATE \"C\" NOT NULL,
+              comment    TEXT COLLATE \"C\",
+              created_at BIGINT NOT NULL,
+              PRIMARY KEY (depot_id, branch_id, path)
+          );
+          CREATE INDEX mod_locks_lock_owner ON mod_locks_lock (owner_id);",
 }];
 
 /// The locks module.
@@ -620,9 +631,9 @@ pub async fn list_locks(
                 &format!(
                     "SELECT {COLUMNS} FROM mod_locks_lock
                      WHERE depot_id = ?1
-                       AND (?2 IS NULL OR branch_id = ?2)
-                       AND (?3 IS NULL OR owner_id = ?3)
-                       AND (?4 IS NULL OR substr(path, 1, length(?4)) = ?4)
+                       AND (CAST(?2 AS BIGINT) IS NULL OR branch_id = ?2)
+                       AND (CAST(?3 AS BIGINT) IS NULL OR owner_id = ?3)
+                       AND (CAST(?4 AS TEXT) IS NULL OR substr(path, 1, length(?4)) = ?4)
                      ORDER BY branch_id, path"
                 ),
                 vals![depot_id.0, branch, owner_id, &prefix],

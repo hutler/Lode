@@ -52,6 +52,19 @@ const MIGRATIONS: &[Migration] = &[Migration {
               updated_at     INTEGER NOT NULL,
               PRIMARY KEY (depot_id, target_kind, target_id, target_version, name)
           ) WITHOUT ROWID;",
+    postgres: "CREATE TABLE mod_checks_check (
+              depot_id       BIGINT NOT NULL,
+              target_kind    TEXT COLLATE \"C\" NOT NULL,
+              target_id      BIGINT NOT NULL,
+              target_version BIGINT NOT NULL,
+              name           TEXT COLLATE \"C\" NOT NULL,
+              state          TEXT COLLATE \"C\" NOT NULL,
+              summary        TEXT COLLATE \"C\",
+              url            TEXT COLLATE \"C\",
+              reporter_id    BIGINT NOT NULL,
+              updated_at     BIGINT NOT NULL,
+              PRIMARY KEY (depot_id, target_kind, target_id, target_version, name)
+          );",
 }];
 
 /// The checks module.

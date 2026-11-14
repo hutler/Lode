@@ -220,12 +220,49 @@ and in modules, goes through the object-safe trait `lode_meta::Sql` (T152): `exe
 client's local SQLite in `lode-workspace` and `lode-ops` is separate). Statements are
 written in a portable subset: numbered `?1` parameters (rewritten to `$1` for Postgres),
 `RETURNING id` instead of `last_insert_rowid()`, `ON CONFLICT … DO NOTHING/UPDATE` instead
-of `INSERT OR IGNORE/REPLACE`, and no SQLite-only functions. Where a statement must differ,
+of `INSERT OR IGNORE/REPLACE`, no SQLite-only functions, and a parameter whose type
+Postgres cannot infer from its first use (`?2 IS NULL OR …`) written as `CAST(?2 AS BIGINT)`. Where a statement must differ,
 `Sql::dialect()` tells which one to run.
 
 Migrations are numbered SQL files embedded in the binary; `schema_version` table; the server
 refuses to start on a newer schema than it knows. Modules own tables prefixed `mod_<name>_`
-and ship their own migrations.
+and ship their own migrations. Each step has an SQLite and a Postgres form
+(`Migration::sql`, `Migration::postgres`; core files `NNNN_name.sql` and
+`NNNN_name.postgres.sql`).
+
+**Postgres (T153).** `[database] kind = "postgres"` with `url` or `url_file` puts the same
+schema in Postgres 14+: `BIGINT` for every integer, `BYTEA` for blobs, identity columns for
+ids, `TEXT COLLATE "C"` so text orders by bytes as in SQLite (the path range queries rely on
+it), and an explicit `rowid` column where SQLite's implicit one gave an order (`rev_merge`).
+The driver is `tokio-postgres` with `tokio-postgres-rustls` (ring), the maintained pure-Rust
+client; no OpenSSL. The store keeps its shape: one writer connection behind a mutex (so
+commits serialize exactly as with SQLite), a pool of reader connections whose transactions
+are `REPEATABLE READ READ ONLY` snapshots, and statements prepared once per connection.
+Connections are driven by a two-thread runtime inside `lode-meta`; the blocking threads wait
+on the client's futures with `futures::executor::block_on`, which is safe on any thread.
+Migrations run under a transaction-level advisory lock, so two servers starting together
+take turns.
+
+*One active server.* `loded serve` opens one more connection and takes the session-level
+advisory lock `hashtextextended('lode-server:' || current_database() || '.' ||
+current_schema(), 0)`, with `application_name = "loded <host> pid <n>"`. While another
+session holds it, `serve` refuses and names the holder (from `pg_locks` and
+`pg_stat_activity`); with `--wait-for-lock` it retries every second. Postgres frees the lock
+when the holder's connection ends, so a standby takes over when the active server stops or
+dies. The holder pings its lock connection every 3 seconds (10 second limit); on failure the
+server shuts down, since a standby may already be active. Both must share the object store
+(S3 or a shared filesystem).
+
+*Moving.* `loded migrate-db --to postgres --url-file <f>` opens the SQLite database (bringing
+it up to date), opens the empty Postgres database with the same modules (creating the
+schema), copies every table in foreign-key order inside one Postgres transaction, compares
+row counts, moves the identity sequences past the copied ids, and only then rewrites
+`loded.toml` (keeping `loded.toml.before-postgres`).
+
+*Tests.* With `LODE_TEST_POSTGRES` set to a server where tests may create schemas, `loded
+init` (and so every test server) puts its metadata in a fresh schema and records the URL in
+`<data>/test-postgres-url`, which the server then opens instead of `meta.db`. CI runs the
+server, module, client and CLI suites a second time this way.
 
 ### 4.2 Core schema
 

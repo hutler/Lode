@@ -261,7 +261,11 @@ async fn backup_during_commits_passes_fsck() {
         let dest = dest_parent.path().join(format!("b{n}"));
         let report = backup(&h.state, &dest).await.unwrap();
         assert!(report.objects > 0);
-        backups.push(dest);
+        // With Postgres the backup holds the objects but not the database (pg_dump's job),
+        // so it cannot be opened on its own.
+        if !report.database_external {
+            backups.push(dest);
+        }
     }
     writer.await.unwrap();
     for dest in backups {

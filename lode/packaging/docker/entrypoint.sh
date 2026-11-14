@@ -11,6 +11,10 @@
 #                               with that admin password
 #   neither                     `loded init`, which prints the admin token once to the log
 # Both setups keep daily backups in the data volume (backups/).
+#   LODED_DATABASE_URL_FILE     a file holding a postgres:// URL: on first start the new
+#                               server's metadata moves into that (empty) Postgres database
+#   LODED_WAIT_FOR_LOCK=1       with Postgres, a second container waits as a standby and
+#                               takes over when the active one stops
 set -eu
 data="${LODED_DATA:-/var/lib/lode}"
 config="$data/loded.toml"
@@ -36,6 +40,12 @@ if [ "${1:-serve}" = "serve" ]; then
             # to the host's loopback or put a TLS proxy in front (see the operator guide).
             sed -i 's/^listen = "127.0.0.1:7480"$/listen = "0.0.0.0:7480"/' "$config"
         fi
+        if [ -n "${LODED_DATABASE_URL_FILE:-}" ]; then
+            loded migrate-db --config "$config" --to postgres --url-file "$LODED_DATABASE_URL_FILE"
+        fi
+    fi
+    if [ "${LODED_WAIT_FOR_LOCK:-}" = "1" ]; then
+        exec loded serve --config "$config" --wait-for-lock
     fi
     exec loded serve --config "$config"
 fi

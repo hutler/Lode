@@ -246,7 +246,11 @@ pub async fn run(args: SetupArgs) -> anyhow::Result<()> {
     }
 
     let data_dir = &answers.data_dir;
-    if data_dir.join(lode_server::server::META_DB_FILE).exists() {
+    if data_dir.join(lode_server::server::META_DB_FILE).exists()
+        || data_dir
+            .join(lode_server::server::TEST_POSTGRES_FILE)
+            .exists()
+    {
         bail!(
             "{} is already set up; edit its {CONFIG_FILE_NAME} instead",
             data_dir.display()

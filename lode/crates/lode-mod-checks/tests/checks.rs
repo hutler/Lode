@@ -297,10 +297,9 @@ async fn a_disabled_module_has_no_endpoints_and_the_scope_does_no_harm() {
         .state
         .meta()
         .read(|tx| {
-            tx.db().value(
-                "SELECT count(*) FROM sqlite_master WHERE name LIKE 'mod_checks_%'",
-                lode_meta::vals![],
-            )
+            tx.db()
+                .tables()
+                .map(|t| t.iter().filter(|n| n.starts_with("mod_checks_")).count() as i64)
         })
         .await
         .unwrap();

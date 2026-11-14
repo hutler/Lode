@@ -172,6 +172,19 @@ async fn storage(ctx: &Ctx, now: i64) -> (Html, Html) {
     }
 }
 
+async fn database_fact(ctx: &Ctx) -> Html {
+    if ctx.state().meta().dialect() == lode_meta::Dialect::Postgres {
+        return match ctx.state().meta().info().await {
+            Ok(info) => html!("Postgres {}", info.version),
+            Err(e) => {
+                tracing::warn!(error = %e, "admin overview: cannot read the database version");
+                html!("Postgres <span class=\"muted\">(version unknown)</span>")
+            }
+        };
+    }
+    database_size(ctx)
+}
+
 fn database_size(ctx: &Ctx) -> Html {
     let db = ctx
         .state()
@@ -388,7 +401,7 @@ pub(crate) async fn page(State(ctx): State<Ctx>, admin: Admin) -> Response {
     server.push(fact("Certificate expires", cert));
     server.push(fact("Storage", store));
     server.push(fact("Stored content", store_size));
-    server.push(fact("Database", database_size(&ctx)));
+    server.push(fact("Database", database_fact(&ctx).await));
     server.push(fact("Modules", modules));
     let disabled = if f.disabled_users > 0 {
         html!(

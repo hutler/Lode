@@ -702,10 +702,9 @@ async fn a_disabled_module_has_no_routes_tables_or_deliveries() {
     let tables: i64 = state
         .meta()
         .read(|tx| {
-            tx.db().value(
-                "SELECT count(*) FROM sqlite_master WHERE name LIKE 'mod_webhooks_%'",
-                lode_meta::vals![],
-            )
+            tx.db()
+                .tables()
+                .map(|t| t.iter().filter(|n| n.starts_with("mod_webhooks_")).count() as i64)
         })
         .await
         .unwrap();

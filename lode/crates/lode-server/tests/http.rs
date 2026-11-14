@@ -171,7 +171,10 @@ async fn init_creates_layout_and_refuses_twice() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
     let report = init(&data).await.unwrap();
-    assert!(data.join("meta.db").is_file());
+    assert!(
+        data.join("meta.db").is_file()
+            || data.join(lode_server::server::TEST_POSTGRES_FILE).is_file()
+    );
     assert!(data.join("depots").is_dir());
     let cfg_path = report.config_written.unwrap();
     let cfg = ServerConfig::load(&cfg_path).unwrap();

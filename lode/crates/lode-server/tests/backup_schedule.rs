@@ -51,7 +51,12 @@ async fn backups_follow_the_clock_and_keep_the_newest() {
     else {
         panic!("first backup expected");
     };
-    assert!(path.join("meta.db").is_file());
+    let database = if state.meta().dialect() == lode_meta::Dialect::Postgres {
+        lode_server::maintenance::DATABASE_NOTE_FILE
+    } else {
+        "meta.db"
+    };
+    assert!(path.join(database).is_file());
     assert!(removed.is_empty());
     assert_eq!(names(&backups), ["keep-me", "lode-backup-20261101T030000Z"]);
 

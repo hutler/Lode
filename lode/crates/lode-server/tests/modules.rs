@@ -46,6 +46,7 @@ const MIGRATIONS: &[Migration] = &[Migration {
     version: 1,
     name: "init",
     sql: "CREATE TABLE mod_example_seen (rev INTEGER NOT NULL);",
+    postgres: "CREATE TABLE mod_example_seen (rev BIGINT NOT NULL);",
 }];
 
 const SCOPES: &[ScopeDef] = &[ScopeDef {
@@ -429,10 +430,8 @@ async fn disabled_module_contributes_nothing() {
         .state
         .meta()
         .with_writer(|c| {
-            c.value(
-                "SELECT count(*) FROM sqlite_master WHERE name LIKE 'mod_example_%'",
-                lode_meta::vals![],
-            )
+            c.tables()
+                .map(|t| t.iter().filter(|n| n.starts_with("mod_example_")).count() as i64)
         })
         .unwrap();
     assert_eq!(tables, 0);

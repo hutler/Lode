@@ -9,6 +9,11 @@
 //! With S3 storage (`[storage] kind = "s3"`) the content is not copied: it stays in the
 //! bucket, which the bucket's own versioning or replication protects. The backup then holds
 //! the database and the configuration.
+//!
+//! With the metadata in Postgres (`[database] kind = "postgres"`) the database is not copied
+//! either: the backup holds the configuration, the objects, and `DATABASE-BACKUP.txt`, which
+//! says to back the database up with `pg_dump` (or the provider's snapshots). Take the dump
+//! before copying the objects, for the same reason as above.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,7 +31,23 @@ pub struct BackupReport {
     pub bytes: u64,
     /// The content is in an S3 bucket and was not copied.
     pub content_in_bucket: bool,
+    /// The metadata is in Postgres and was not copied; back it up with `pg_dump`.
+    pub database_external: bool,
 }
+
+/// The note a backup of a Postgres-backed server holds instead of the database.
+pub const DATABASE_NOTE_FILE: &str = "DATABASE-BACKUP.txt";
+
+const DATABASE_NOTE: &str = "\
+This server keeps its metadata (history, users, access rules, module data) in Postgres, so
+this backup does not contain it. Back the database up with Postgres's own tools, before the
+objects are copied, for example:
+
+    pg_dump --format=custom --file=lode-meta.dump \"$(head -n1 database-url.txt)\"
+
+and restore it with pg_restore into an empty database. loded.toml in this directory names the
+database in [database].
+";
 
 /// Why a backup failed.
 #[derive(Debug, thiserror::Error)]
@@ -63,17 +84,26 @@ pub async fn backup(state: &AppState, dest: &Path) -> Result<BackupReport, Backu
         }
     }
     std::fs::create_dir_all(dest).map_err(io_err(format!("cannot create {}", dest.display())))?;
-    state.meta().backup_to(dest.join(META_DB_FILE)).await?;
+    let database_external = state.meta().dialect() == lode_meta::Dialect::Postgres;
+    if database_external {
+        std::fs::write(dest.join(DATABASE_NOTE_FILE), DATABASE_NOTE)
+            .map_err(io_err("cannot write the database note"))?;
+    } else {
+        state.meta().backup_to(dest.join(META_DB_FILE)).await?;
+    }
 
     let src_root = state.config().data_dir.clone();
     let dest_root = dest.to_owned();
     let objects = state.config().storage.s3_in_use().is_none();
-    tokio::task::spawn_blocking(move || copy_store(&src_root, &dest_root, objects))
-        .await
-        .map_err(|e| BackupError::Io {
-            context: "copy task failed".into(),
-            source: io::Error::other(e),
-        })?
+    let mut report =
+        tokio::task::spawn_blocking(move || copy_store(&src_root, &dest_root, objects))
+            .await
+            .map_err(|e| BackupError::Io {
+                context: "copy task failed".into(),
+                source: io::Error::other(e),
+            })??;
+    report.database_external = database_external;
+    Ok(report)
 }
 
 fn copy_store(

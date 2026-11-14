@@ -4,6 +4,9 @@ pub enum MetaError {
     /// SQLite reported an error.
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
+    /// Postgres reported an error.
+    #[error("postgres: {}", crate::pg::describe(.0))]
+    Postgres(#[from] tokio_postgres::Error),
     /// The database was written by a newer build.
     #[error("database schema {namespace} is at version {found}, but this build knows only up to {known}; upgrade Lode")]
     SchemaTooNew {
@@ -65,6 +68,7 @@ impl MetaError {
                 f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
                     || f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
             }
+            MetaError::Postgres(e) => crate::pg::is_unique(e),
             MetaError::Migration { source, .. } => source.is_unique_violation(),
             _ => false,
         }

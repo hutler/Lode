@@ -159,6 +159,11 @@ impl Row {
         T::from_cell(cell).map_err(|why| MetaError::BadValue(format!("column {i}: {why}")))
     }
 
+    /// The raw value of column `i`.
+    pub fn cell(&self, i: usize) -> Option<&Cell> {
+        self.cells.get(i)
+    }
+
     /// Number of columns.
     pub fn len(&self) -> usize {
         self.cells.len()
@@ -305,6 +310,18 @@ impl dyn Sql + '_ {
     ) -> Result<T> {
         self.query_opt(sql, params, f)?
             .ok_or_else(|| MetaError::NotFound("no row".into()))
+    }
+
+    /// Names of the tables in the database (the current schema, for Postgres).
+    pub fn tables(&self) -> Result<Vec<String>> {
+        let sql = match self.dialect() {
+            Dialect::Sqlite => "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+            Dialect::Postgres => {
+                "SELECT table_name::text FROM information_schema.tables \
+                 WHERE table_schema = current_schema() ORDER BY 1"
+            }
+        };
+        self.query(sql, &[], |r| r.get(0))
     }
 
     /// The first column of the first row.

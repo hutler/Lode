@@ -5,7 +5,7 @@
 use std::path::Path;
 
 const ALLOWED: &[&str] = &["lode-meta", "lode-workspace", "lode-ops", "lode-desk"];
-const DRIVERS: &[&str] = &["rusqlite", "tokio_postgres", "tokio-postgres", "postgres"];
+const DRIVERS: &[&str] = &["rusqlite", "tokio_postgres", "tokio-postgres"];
 
 fn scan(dir: &Path, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else {

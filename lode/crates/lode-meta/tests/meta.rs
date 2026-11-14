@@ -68,6 +68,7 @@ const MOD_SET: MigrationSet = MigrationSet {
         version: 1,
         name: "init",
         sql: "CREATE TABLE mod_locks_lock (depot_id INTEGER, path TEXT, PRIMARY KEY (depot_id, path));",
+        postgres: "CREATE TABLE mod_locks_lock (depot_id BIGINT, path TEXT, PRIMARY KEY (depot_id, path));",
     }],
 };
 
@@ -101,6 +102,7 @@ fn failed_migration_leaves_no_trace() {
             version: 1,
             name: "half",
             sql: "CREATE TABLE mod_broken_a (x INTEGER); THIS IS NOT SQL;",
+            postgres: "CREATE TABLE mod_broken_a (x BIGINT); THIS IS NOT SQL;",
         }],
     };
     assert!(matches!(
