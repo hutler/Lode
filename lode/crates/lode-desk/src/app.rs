@@ -35,9 +35,11 @@ mod screens {
 pub use screens::*;
 
 mod read;
+mod team;
 mod work;
 
 use read::ReadState;
+use team::TeamState;
 use work::WorkspaceState;
 
 /// The app's identifier; its data directory is named after it, as the Tauri app's was, so the
@@ -117,6 +119,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     window.set_recent_messages(ModelRc::from(Rc::clone(&messages_model)));
     let messages_file = options.data_dir.join("messages.json");
     let read = ReadState::new(&window, &options.data_dir);
+    let team = TeamState::new(&window);
     let app = Rc::new(App {
         window: window.as_weak(),
         desk,
@@ -135,6 +138,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         shown_root: RefCell::new(None),
         dialog_paths: RefCell::new(Vec::new()),
         read,
+        team,
         this: RefCell::new(RcWeak::new()),
     });
     *app.this.borrow_mut() = Rc::downgrade(&app);
@@ -142,6 +146,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     connect(&window, &app);
     work::connect(&window, &app);
     read::connect(&window, &app);
+    team::connect(&window, &app);
     Ok(window)
 }
 
@@ -220,6 +225,8 @@ struct App {
     dialog_paths: RefCell<Vec<String>>,
     /// History, blame and diffs (T132).
     read: ReadState,
+    /// Locks, shelves and checks (T133).
+    team: TeamState,
     /// This controller, for tasks that outlive a call.
     this: RefCell<RcWeak<App>>,
 }

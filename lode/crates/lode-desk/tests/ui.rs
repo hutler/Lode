@@ -12,12 +12,14 @@ use std::time::Duration;
 
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use lode_desk::app::{
-    self, AppWindow, BlameLine, ChangeRow, Dialog, DiffRow, Options, Pane, Reading, RevRow, Span,
+    self, AppWindow, BlameLine, ChangeRow, CheckRow, Dialog, DiffRow, LockRow, Options, Pane,
+    Reading, RevRow, ShelfRow, Span, Team,
 };
 use lode_desk::changes::{self, FileEntry, Pending};
 use lode_desk::desk::Desk;
 use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
+use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
 use lode_proto::PrincipalKind;
 use lode_server::{OidcConfig, PasswordLogin};
 use lode_testkit::oidc::{browse, TestProvider};
@@ -29,12 +31,15 @@ use tokio::runtime::Handle;
 
 /// The servers every scenario uses.
 struct World {
-    /// A depot `game` and a user `alice` (password `correct horse`) who may write it.
-    _server: TestServer,
+    /// A depot `game` and a user `alice` (password `correct horse`) who may write it. The
+    /// checks module is on.
+    server: TestServer,
     url: String,
     head: u64,
     /// Depot `story`: more than a page of history, a text file and an image changed twice.
     story: Story,
+    /// A token of user `ci`, who reports checks on depot `harbor`.
+    ci: String,
     /// A server that offers single sign-on as "Example Corp", password sign-in for everyone.
     sso: TestServer,
     /// A server that offers single sign-on, password sign-in for administrators only.
@@ -138,7 +143,10 @@ impl Home {
 }
 
 async fn start(rt: Handle) -> World {
-    let server = TestServer::start().await;
+    let server = TestServer::start_with(TestServerOptions {
+        configure: Box::new(|c| c.modules.checks = true),
+    })
+    .await;
     server.create_depot("game").await;
     let head = server
         .commit_files(
@@ -184,6 +192,48 @@ async fn start(rt: Handle) -> World {
             AccessLevel::Write,
         )
         .await;
+    // Depot `harbor`: shelf submits to main need ci/build and ci/test from `ci`.
+    server.create_depot("harbor").await;
+    server
+        .commit_files(
+            "harbor",
+            "main",
+            &[
+                ("a.txt", b"apple\n"),
+                ("door.txt", b"oak\n"),
+                (
+                    ".lodeconfig",
+                    br#"[checks]
+branches = ["main"]
+required = [{ name = "ci/build", reporter = "ci" }, { name = "ci/test", reporter = "ci" }]
+"#,
+                ),
+            ],
+        )
+        .await;
+    for who in ["alice", "bob"] {
+        server
+            .acl(
+                "harbor",
+                who,
+                "*",
+                "**",
+                AclEffect::Allow,
+                AccessLevel::Write,
+            )
+            .await;
+    }
+    let ci = server.create_user("ci", &["read", "checks"]).await;
+    server
+        .acl(
+            "harbor",
+            "ci",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Read,
+        )
+        .await;
     let url = server.url().trim_end_matches('/').to_owned();
 
     let provider = TestProvider::start("lode-test", "s3cret").await;
@@ -211,10 +261,11 @@ async fn start(rt: Handle) -> World {
     })
     .await;
     World {
-        _server: server,
+        server,
         url,
         head,
         story,
+        ci,
         sso,
         sso_admins,
         _provider: provider,
@@ -310,6 +361,11 @@ impl Ui for Quiet {
 
 /// Bob, in his own app and workspace of `game`.
 async fn bob(world: &World) -> (tempfile::TempDir, Desk, String) {
+    bob_on(world, "game").await
+}
+
+/// Bob, in his own app and workspace of `depot`.
+async fn bob_on(world: &World, depot: &str) -> (tempfile::TempDir, Desk, String) {
     let home = tempfile::tempdir().unwrap();
     let desk = Desk::new(
         home.path().to_path_buf(),
@@ -320,9 +376,9 @@ async fn bob(world: &World) -> (tempfile::TempDir, Desk, String) {
     desk.sign_in(world.url.clone(), "bob".into(), "battery staple".into())
         .await
         .unwrap();
-    let dir = home.path().join("game");
+    let dir = home.path().join(depot);
     desk.checkout(
-        format!("{}/game", world.url),
+        format!("{}/{depot}", world.url),
         dir.display().to_string(),
         "main".into(),
     )
@@ -1069,6 +1125,266 @@ async fn history_blame_and_diffs(world: &World) {
     println!("history, blame and diffs ... ok");
 }
 
+fn lock_rows(w: &AppWindow) -> Vec<LockRow> {
+    w.global::<Team>().get_lock_rows().iter().collect()
+}
+
+fn shelf_rows(w: &AppWindow) -> Vec<ShelfRow> {
+    w.global::<Team>().get_shelf_rows().iter().collect()
+}
+
+fn checks_shown(rows: impl Model<Data = CheckRow>) -> Vec<(String, String)> {
+    rows.iter()
+        .map(|c| (c.name.to_string(), c.word.to_string()))
+        .collect()
+}
+
+/// `ci` reports `name` as `state` on `target` of depot `harbor` (on the tokio runtime, which
+/// the client needs).
+async fn report(world: &World, target: CheckTarget, name: &str, state: CheckState) {
+    let client = world.server.client(&world.ci);
+    let req = ReportCheckRequest {
+        target,
+        name: name.into(),
+        state,
+        summary: None,
+        url: Some("https://ci.example.com/1".into()),
+    };
+    world
+        .rt
+        .spawn(async move { client.report_check("harbor", &req).await })
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+async fn locks_shelves_and_checks(world: &World) {
+    let home = Home::new();
+    let folder = home.path().join("harbor");
+    let w = home.window(world, Some(folder.clone()));
+    signed_in(world, &w).await;
+    click(&w, "Check out a depot…");
+    type_into(&w, "Depot", &format!("{}/harbor", world.url));
+    click(&w, "Browse…");
+    click(&w, "Check out");
+    until("the workspace opens", || w.get_dialog() == Dialog::None).await;
+    until("its changes load", || w.get_changes().loaded).await;
+    let root = std::fs::canonicalize(&folder).unwrap();
+    let t = w.global::<Team>();
+    let r = w.global::<Reading>();
+
+    // Bob holds door.txt.
+    let (_bob_home, bob, bob_root) = bob_on(world, "harbor").await;
+    bob.lock(bob_root, vec!["door.txt".into()], Some("door art".into()))
+        .await
+        .unwrap();
+
+    // Alice locks a file she changed, from its details.
+    std::fs::write(root.join("a.txt"), "apricot\n").unwrap();
+    std::fs::write(root.join("door.txt"), "pine\n").unwrap();
+    until("the edits show", || w.get_changes().total == 2).await;
+    click(&w, "a.txt");
+    click(&w, "Lock a.txt");
+    assert_eq!(w.get_dialog(), Dialog::Lock);
+    assert_eq!(t.get_lock_dialog().what, "a.txt");
+    type_into(&w, "Comment", "tuning the orchard");
+    click_in(&w, "Lock", "Lock");
+    until("the lock is taken", || w.get_dialog() == Dialog::None).await;
+    until("it is done", || value_or_empty(&w, "Done") == "Locked.").await;
+
+    // Bob's lock is refused, naming him.
+    click(&w, "door.txt");
+    click(&w, "Lock door.txt");
+    click_in(&w, "Lock", "Lock");
+    until("the lock is refused", || t.get_lock_dialog().error.shown).await;
+    assert_eq!(t.get_lock_dialog().error.code, "locked");
+    until("the holders show", || {
+        !t.get_lock_dialog().holders.is_empty()
+    })
+    .await;
+    let holders = value(&w, "Held by others");
+    assert!(
+        holders.contains("door.txt") && holders.contains("bob") && holders.contains("door art"),
+        "{holders}"
+    );
+    click_in(&w, "Lock", "Cancel");
+    assert_eq!(w.get_dialog(), Dialog::None);
+
+    // The locks view lists both, filters to mine, and releases mine.
+    click(&w, "Locks");
+    assert_eq!(r.get_pane(), Pane::Locks);
+    until("locks load", || {
+        t.get_locks().loaded && lock_rows(&w).len() == 2
+    })
+    .await;
+    let locks = lock_rows(&w);
+    let mine = locks.iter().find(|l| l.path == "a.txt").unwrap();
+    assert!(
+        mine.mine && mine.comment == "tuning the orchard",
+        "{mine:?}"
+    );
+    let door = locks.iter().find(|l| l.path == "door.txt").unwrap();
+    assert!(!door.mine && door.owner == "bob", "{door:?}");
+    assert_eq!((t.get_locks().held, t.get_locks().mine), (2, 1));
+    click(&w, "Only mine");
+    until("only mine show", || lock_rows(&w).len() == 1).await;
+    click(&w, "Only mine");
+    type_into(&w, "Filter by path", "door");
+    t.invoke_filter_locks();
+    assert_eq!(lock_rows(&w).len(), 1);
+    assert_eq!(lock_rows(&w)[0].path, "door.txt");
+    type_into(&w, "Filter by path", "");
+    t.invoke_filter_locks();
+    click(&w, "Unlock a.txt");
+    until("mine is released", || {
+        !t.get_locks().busy && lock_rows(&w).iter().all(|l| l.path != "a.txt")
+    })
+    .await;
+    assert_eq!(lock_rows(&w).len(), 1);
+
+    // Shelve the picked file: it goes to the server and is reverted here.
+    click(&w, "Changes");
+    assert_eq!(r.get_pane(), Pane::Changes);
+    until("changes show", || row(&w, "a.txt", false).is_some()).await;
+    click(&w, "Pick a.txt");
+    click(&w, "Shelve picked files");
+    assert_eq!(w.get_dialog(), Dialog::Shelve);
+    assert_eq!(t.get_shelve().title, "Shelve 1 file");
+    type_into(&w, "Description", "Apricot orchard");
+    click_in(&w, "Shelve", "Shelve");
+    until("it is shelved", || {
+        value_or_empty(&w, "Done").starts_with("Shelved as shelf")
+    })
+    .await;
+    let done = value(&w, "Done");
+    assert!(
+        done.ends_with("(1 file); the files were reverted here."),
+        "{done}"
+    );
+    let id: u64 = done
+        .trim_start_matches("Shelved as shelf ")
+        .split(' ')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "apple\n"
+    );
+    until("a.txt is no longer changed", || {
+        row(&w, "a.txt", false).is_none()
+    })
+    .await;
+
+    // CI passes the build and fails the tests.
+    let target = CheckTarget {
+        kind: CheckTargetKind::Shelf,
+        id,
+        version: Some(1),
+    };
+    report(world, target, "ci/build", CheckState::Success).await;
+    report(world, target, "ci/test", CheckState::Failure).await;
+
+    // The shelves view shows it with a failing badge, and its checks.
+    click(&w, "Shelves");
+    assert_eq!(r.get_pane(), Pane::Shelves);
+    until("shelves load", || !shelf_rows(&w).is_empty()).await;
+    let label = format!("Shelf {id}: Apricot orchard");
+    until("the badge shows", || shelf_rows(&w)[0].checks.shown).await;
+    let badge = shelf_rows(&w)[0].checks.clone();
+    assert_eq!(
+        (badge.state.as_str(), badge.text.as_str()),
+        ("failure", "✕ 1/2")
+    );
+    assert!(shelf_rows(&w)[0].you);
+    click(&w, &label);
+    until("the shelf shows", || t.get_shelf().shown).await;
+    assert_eq!(value(&w, "Shelf"), "Apricot orchard");
+    until("its checks show", || t.get_shelf_checks().row_count() == 2).await;
+    assert_eq!(
+        checks_shown(t.get_shelf_checks()),
+        [
+            ("ci/build".to_owned(), "passed".to_owned()),
+            ("ci/test".to_owned(), "failed".to_owned())
+        ]
+    );
+    until("its files show", || t.get_shelf_files().row_count() == 1).await;
+    assert!(t.get_shelf_diff().row_count() > 0, "the shelf's diff shows");
+
+    // A submit is held back by the failing check.
+    click(&w, "Submit…");
+    assert_eq!(w.get_dialog(), Dialog::SubmitShelf);
+    assert_eq!(t.get_submit_text(), "Apricot orchard");
+    click_in(&w, "Submit shelf", "Submit");
+    until("the submit is refused", || t.get_submit().error.shown).await;
+    assert_eq!(t.get_submit().error.code, "checks_required");
+    assert_eq!(
+        t.get_submit().error.message,
+        "Required checks have not passed for version 1."
+    );
+    assert_eq!(value(&w, "Missing checks"), "ci/test: failure");
+    click_in(&w, "Submit shelf", "Cancel");
+
+    // Unshelve brings the change back.
+    click(&w, "Unshelve");
+    until("it is unshelved", || w.get_dialog() == Dialog::Unshelved).await;
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "apricot\n"
+    );
+    click_in(&w, &format!("Unshelved shelf {id}"), "Done");
+
+    // Delete it; the open list is empty again.
+    click(&w, "Delete shelf");
+    assert_eq!(w.get_dialog(), Dialog::Confirm);
+    click_in(&w, &format!("Delete shelf {id}?"), "Delete shelf");
+    until("it is deleted", || {
+        w.get_dialog() == Dialog::None && shelf_rows(&w).is_empty()
+    })
+    .await;
+    assert_eq!(t.get_shelves().notice, format!("Deleted shelf {id}."));
+
+    // A revision's checks show in the history: a badge on its row, the list in its details.
+    click(&w, "History");
+    until("history loads", || {
+        !r.get_history().loading && !revs(&w).is_empty()
+    })
+    .await;
+    let head = u64::try_from(revs(&w)[0].rev).unwrap();
+    assert!(!revs(&w)[0].checks.shown, "nothing reported yet");
+    let target = CheckTarget {
+        kind: CheckTargetKind::Revision,
+        id: head,
+        version: None,
+    };
+    report(world, target, "ci/build", CheckState::Success).await;
+    report(world, target, "ci/test", CheckState::Success).await;
+    click(&w, "Changes");
+    click(&w, "History");
+    until("the badge shows", || {
+        revs(&w).first().is_some_and(|r| r.checks.shown)
+    })
+    .await;
+    let badge = revs(&w)[0].checks.clone();
+    assert_eq!(
+        (badge.state.as_str(), badge.text.as_str()),
+        ("success", "✓ 2")
+    );
+    until("the selected revision's checks", || {
+        r.get_rev_checks().row_count() == 2
+    })
+    .await;
+    assert_eq!(
+        checks_shown(r.get_rev_checks()),
+        [
+            ("ci/build".to_owned(), "passed".to_owned()),
+            ("ci/test".to_owned(), "passed".to_owned())
+        ]
+    );
+    println!("locks, shelves and checks ... ok");
+}
+
 fn main() -> std::process::ExitCode {
     i_slint_backend_testing::init_integration_test_with_system_time();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1086,6 +1402,7 @@ fn main() -> std::process::ExitCode {
         changes_pick_commit_revert_and_changelists(&world).await;
         twenty_thousand_rows(&world).await;
         history_blame_and_diffs(&world).await;
+        locks_shelves_and_checks(&world).await;
         let _ = slint::quit_event_loop();
     })
     .unwrap();

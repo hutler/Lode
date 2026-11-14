@@ -6,9 +6,12 @@ import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
 import { SignInDialog, SignInState } from "sign_in.slint";
 import { ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget, NewChangelistDialog, RenameChangelistDialog, CommitChangelistDialog, ConfirmDialog, MoveDialog, MessagesDialog } from "changes.slint";
 import { CheckoutDialog, CheckoutState } from "checkout.slint";
+import { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, LocksView, ShelvesView, LockDialog, TeamConfirmDialog, ShelveDialog, SubmitShelfDialog, UnshelvedDialog } from "team.slint";
+import { CheckBadgeInfo, CheckRow } from "checks.slint";
 import { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState, HistoryView, BlameView, DiffView } from "history.slint";
 
 export { ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
+export { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, CheckBadgeInfo, CheckRow }
 export { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState }
 
 /// A workspace opened before.
@@ -28,7 +31,7 @@ export struct WorkspaceTab {
     server: string,
 }
 
-export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages }
+export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved }
 
 component Tab inherits Rectangle {
     in property <string> text;
@@ -252,8 +255,18 @@ component WorkspacePage inherits Rectangle {
                 }
                 NavButton {
                     text: "History";
-                    active: Reading.pane != Pane.changes;
+                    active: Reading.pane == Pane.history || Reading.pane == Pane.blame || Reading.pane == Pane.diff;
                     clicked => { Reading.show-pane(Pane.history); }
+                }
+                NavButton {
+                    text: "Locks";
+                    active: Reading.pane == Pane.locks;
+                    clicked => { Reading.show-pane(Pane.locks); }
+                }
+                NavButton {
+                    text: "Shelves";
+                    active: Reading.pane == Pane.shelves;
+                    clicked => { Reading.show-pane(Pane.shelves); }
                 }
             }
         }
@@ -272,6 +285,8 @@ component WorkspacePage inherits Rectangle {
             if Reading.pane == Pane.history: HistoryView { vertical-stretch: 1; }
             if Reading.pane == Pane.blame: BlameView { vertical-stretch: 1; }
             if Reading.pane == Pane.diff: DiffView { vertical-stretch: 1; }
+            if Reading.pane == Pane.locks: LocksView { vertical-stretch: 1; branch: root.ws.branch; }
+            if Reading.pane == Pane.shelves: ShelvesView { vertical-stretch: 1; }
             if Reading.pane == Pane.changes: ChangesView {
                 vertical-stretch: 1;
                 state: root.changes;
@@ -521,6 +536,36 @@ export component AppWindow inherits Window {
             confirm: "Revert";
             state: root.list-dialog;
             submit => { root.submit-dialog(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.lock: LockDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.confirm: TeamConfirmDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.shelve: ShelveDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.submit-shelf: SubmitShelfDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.unshelved: UnshelvedDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
             close => { root.close-dialog(); }
         }
         if root.dialog == Dialog.move-to: MoveDialog {

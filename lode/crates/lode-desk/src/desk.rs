@@ -259,6 +259,12 @@ impl Desk {
         }
     }
 
+    /// Who the workspace's server knows this app as (`lode whoami` in the workspace).
+    pub async fn whoami(&self, workspace: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { login::whoami(&ctx).await }).await
+    }
+
     /// Signs in with a name and password and stores the token where `lode` keeps it.
     pub async fn sign_in(
         &self,

@@ -10,7 +10,9 @@ use serde_json::Value;
 use slint::{ComponentHandle, Image, Model, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use super::{error_info, human_bytes, spawn, App, AppWindow, ErrorInfo};
-use super::{BlameLine, BlameState, DiffNote, DiffRow, DiffState, HistoryState, ImageState};
+use super::{
+    BlameLine, BlameState, CheckRow, DiffNote, DiffRow, DiffState, HistoryState, ImageState,
+};
 use super::{Pane, Reading, RevDetail, RevFile, RevRow, WorkspaceTab};
 use crate::desk::{ErrorView, Side, IMAGE_LIMIT};
 use crate::diffs::{self, Facts, Hunk, Layout};
@@ -30,6 +32,10 @@ pub(super) enum View {
     Blame { path: String, rev: Option<u64> },
     /// A file as a revision changed it, or the working copy against its base.
     Diff { path: String, rev: Option<u64> },
+    /// The depot's file locks (T133).
+    Locks,
+    /// The depot's shelves (T133).
+    Shelves,
 }
 
 /// The models and loaded state behind `Reading`.
@@ -42,6 +48,9 @@ pub(super) struct ReadState {
     generation: Cell<u64>,
     /// The loaded revisions of the history, newest first.
     revisions: RefCell<Vec<Value>>,
+    /// The checks of the loaded revisions, as `Desk::checks` answers, merged page by page.
+    checks: RefCell<Value>,
+    rev_checks: Rc<VecModel<CheckRow>>,
     branch: RefCell<String>,
     selected: Cell<Option<u64>>,
     /// The diff's hunks, laid out again when the layout changes.
@@ -74,6 +83,8 @@ impl ReadState {
             diff: Rc::new(VecModel::default()),
             generation: Cell::new(0),
             revisions: RefCell::new(Vec::new()),
+            checks: RefCell::new(Value::Null),
+            rev_checks: Rc::new(VecModel::default()),
             branch: RefCell::new(String::new()),
             selected: Cell::new(None),
             hunks: RefCell::new(Vec::new()),
@@ -89,6 +100,7 @@ impl ReadState {
         r.set_files(Rc::clone(&st.files).into());
         r.set_blame_lines(Rc::clone(&st.blame).into());
         r.set_diff_rows(Rc::clone(&st.diff).into());
+        r.set_rev_checks(Rc::clone(&st.rev_checks).into());
         r.set_mono(
             if cfg!(windows) {
                 "Consolas"
@@ -120,6 +132,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
     r.on_show_pane(move |p| {
         let view = match p {
             Pane::Changes => View::Changes,
+            Pane::Locks => View::Locks,
+            Pane::Shelves => View::Shelves,
             _ => View::History {
                 path: None,
                 rev: None,
@@ -270,15 +284,39 @@ impl App {
                 r.set_pane(Pane::Diff);
                 self.load_diff(&w, root, path, rev, generation);
             }
+            View::Locks => {
+                r.set_pane(Pane::Locks);
+                self.load_locks();
+            }
+            View::Shelves => {
+                r.set_pane(Pane::Shelves);
+                self.load_shelves();
+            }
         }
     }
 
     /// The tab of the workspace that shows.
     fn current_tab(&self, _w: &AppWindow) -> Option<WorkspaceTab> {
         let root = self.shown_root.borrow().clone()?;
+        self.workspaces_row(&root)
+    }
+
+    /// The tab of the workspace at `root`.
+    pub(super) fn workspaces_row(&self, root: &str) -> Option<WorkspaceTab> {
         (0..self.workspaces.row_count())
             .filter_map(|i| self.workspaces.row_data(i))
-            .find(|t| t.root == root.as_str())
+            .find(|t| t.root == root)
+    }
+
+    /// The diff layout chosen last.
+    pub(super) fn read_layout(&self) -> Layout {
+        self.read.layout.get()
+    }
+
+    /// Keeps `layout` as the diff layout, for history diffs and shelf diffs alike.
+    pub(super) fn set_read_layout(&self, layout: Layout) {
+        self.read.layout.set(layout);
+        self.read.save_prefs();
     }
 
     fn current(&self, generation: u64) -> bool {
@@ -304,6 +342,8 @@ impl App {
             .map(|t| t.depot.to_string())
             .unwrap_or_default();
         *self.read.revisions.borrow_mut() = Vec::new();
+        *self.read.checks.borrow_mut() = Value::Null;
+        self.read.rev_checks.set_vec(Vec::new());
         *self.read.branch.borrow_mut() = branch.clone();
         self.read.selected.set(rev);
         self.read.revs.set_vec(Vec::new());
@@ -348,6 +388,12 @@ impl App {
                         *me.read.branch.borrow_mut() = b.to_owned();
                     }
                     let first = before.is_none() && me.read.selected.get().is_none();
+                    let targets: Vec<String> = new
+                        .iter()
+                        .filter_map(|v| v["rev"].as_u64())
+                        .map(|n| format!("r{n}"))
+                        .collect();
+                    me.load_rev_checks(root.clone(), targets, generation);
                     me.read.revisions.borrow_mut().extend(new);
                     if first {
                         let newest = me
@@ -385,6 +431,7 @@ impl App {
                         &me.read.branch.borrow(),
                         h.more,
                         me.read.selected.get(),
+                        &me.read.checks.borrow(),
                     );
                     sync(&me.read.revs, rows);
                 }
@@ -392,6 +439,65 @@ impl App {
             }
             r.set_history(h);
         });
+    }
+
+    /// Loads the checks of the revisions `targets` names (`rN`), then shows their badges and
+    /// the selected revision's list. A server without checks shows none.
+    fn load_rev_checks(&self, root: String, targets: Vec<String>, generation: u64) {
+        if targets.is_empty() {
+            return;
+        }
+        let Some(me) = self.me() else { return };
+        spawn(async move {
+            let Ok(got) = me.desk.checks(root, targets).await else {
+                return;
+            };
+            if !me.current(generation) || got["available"] == Value::Bool(false) {
+                return;
+            }
+            {
+                let mut all = me.read.checks.borrow_mut();
+                if !all["checks"].is_object() {
+                    *all = serde_json::json!({ "available": true, "checks": {} });
+                }
+                if let (Some(into), Some(from)) =
+                    (all["checks"].as_object_mut(), got["checks"].as_object())
+                {
+                    for (k, v) in from {
+                        into.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            me.show_rev_checks();
+        });
+    }
+
+    /// Shows the loaded checks: each row's badge and the selected revision's list.
+    fn show_rev_checks(&self) {
+        let Some(w) = self.window.upgrade() else {
+            return;
+        };
+        let h = w.global::<Reading>().get_history();
+        let rows = history::rows(
+            &self.read.revisions.borrow(),
+            &self.read.branch.borrow(),
+            h.more,
+            self.read.selected.get(),
+            &self.read.checks.borrow(),
+        );
+        sync(&self.read.revs, rows);
+        self.show_selected_checks();
+    }
+
+    fn show_selected_checks(&self) {
+        let rows = match self.read.selected.get() {
+            Some(rev) => crate::team::check_rows(crate::team::checks_of(
+                &self.read.checks.borrow(),
+                &format!("r{rev}"),
+            )),
+            None => Vec::new(),
+        };
+        sync(&self.read.rev_checks, rows);
     }
 
     fn more_revs(&self) {
@@ -445,6 +551,7 @@ impl App {
         let mut h = r.get_history();
         h.scroll_to = at;
         r.set_history(h);
+        self.show_selected_checks();
         self.load_detail(root, rev, self.read.generation.get());
     }
 
@@ -781,8 +888,7 @@ impl App {
     }
 
     fn set_layout(&self, layout: Layout) {
-        self.read.layout.set(layout);
-        self.read.save_prefs();
+        self.set_read_layout(layout);
         let Some(w) = self.window.upgrade() else {
             return;
         };

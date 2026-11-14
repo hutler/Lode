@@ -1,6 +1,6 @@
 // Small building blocks shared by the screens.
 
-import { Palette } from "std-widgets.slint";
+import { Button, Palette } from "std-widgets.slint";
 
 /// An operation's error as the window shows it.
 export struct ErrorInfo {
@@ -124,4 +124,17 @@ export component Check inherits Rectangle {
         vertical-alignment: center;
         accessible-role: none;
     }
+}
+
+/// Cancel and the confirming button of a dialog.
+export component DialogButtons inherits HorizontalLayout {
+    in property <string> confirm;
+    in property <bool> enabled: true;
+    in property <bool> busy;
+    callback confirmed();
+    callback cancelled();
+    alignment: end;
+    spacing: 8px;
+    Button { text: "Cancel"; enabled: !root.busy; clicked => { root.cancelled(); } }
+    Button { text: root.confirm; primary: true; enabled: root.enabled && !root.busy; clicked => { root.confirmed(); } }
 }

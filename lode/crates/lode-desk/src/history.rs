@@ -84,8 +84,15 @@ fn imported(r: &Value) -> String {
 }
 
 /// The rows of `revisions` (newest first) of `branch`, with the graph laid out; `more` when
-/// older revisions exist that are not loaded yet.
-pub fn rows(revisions: &[Value], branch: &str, more: bool, selected: Option<u64>) -> Vec<RevRow> {
+/// older revisions exist that are not loaded yet. `checks` is an answer of `Desk::checks`
+/// for `rN` targets (or `Value::Null`), for each row's badge.
+pub fn rows(
+    revisions: &[Value],
+    branch: &str,
+    more: bool,
+    selected: Option<u64>,
+    checks: &Value,
+) -> Vec<RevRow> {
     let mut out = Vec::with_capacity(revisions.len());
     for (i, r) in revisions.iter().enumerate() {
         let on = r["branch"].as_str().unwrap_or_default();
@@ -115,6 +122,7 @@ pub fn rows(revisions: &[Value], branch: &str, more: bool, selected: Option<u64>
             above_inherited: prev_branch.is_some_and(|b| b != branch),
             line_below: !r["parent"].is_null() && (i + 1 < revisions.len() || more),
             selected: selected.is_some_and(|s| r["rev"].as_u64() == Some(s)),
+            checks: crate::team::badge(crate::team::checks_of(checks, &format!("r{}", rev_of(r)))),
         });
     }
     out
@@ -302,7 +310,7 @@ mod tests {
             rev(3, "main", Some(2)),
         ];
         revs[1]["merged_from"] = json!([{"branch": "feature/x", "from_rev": 2, "to_rev": 3}]);
-        let r = rows(&revs, "main", true, Some(4));
+        let r = rows(&revs, "main", true, Some(4), &Value::Null);
         assert_eq!(r[0].branch_tag, "main");
         assert!(!r[0].line_above && r[1].line_above);
         assert!(r[2].line_below, "older revisions are not loaded yet");
@@ -311,7 +319,7 @@ mod tests {
         assert!(r[1].selected && !r[0].selected);
         assert_eq!(r[0].summary, "change 5");
         assert_eq!(r[0].date, "2026-11-14 19:13 UTC");
-        let r = rows(&revs, "main", false, None);
+        let r = rows(&revs, "main", false, None, &Value::Null);
         assert!(
             !r[2].line_below,
             "the last loaded revision has nothing below"
@@ -326,7 +334,7 @@ mod tests {
             rev(5, "main", Some(4)),
             rev(4, "main", None),
         ];
-        let r = rows(&revs, "release", false, None);
+        let r = rows(&revs, "release", false, None, &Value::Null);
         let got: Vec<_> = r
             .iter()
             .map(|r| (r.rev, r.inherited, r.branch_tag.to_string()))

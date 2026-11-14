@@ -15,8 +15,9 @@ use lode_desk::app::{
     SignInState, WorkspaceTab,
 };
 use lode_desk::app::{BlameState, DiffNote, DiffState, HistoryState, ImageState, Pane, Reading};
+use lode_desk::app::{LocksState, ShelvesState, SubmitState, Team};
 use lode_desk::changes::{self, FileEntry, ListInfo, Pending};
-use lode_desk::{diffs, history};
+use lode_desk::{diffs, history, team};
 use serde_json::json;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter, WindowEvent};
@@ -195,11 +196,16 @@ fn main() {
         // T132: history, blame and diffs.
         let r = w.global::<Reading>();
         let revisions = sample_history();
+        let checks = sample_checks();
         r.set_revs(ModelRc::from(Rc::new(VecModel::from(history::rows(
             &revisions,
             "main",
             true,
             Some(1478),
+            &checks,
+        )))));
+        r.set_rev_checks(ModelRc::from(Rc::new(VecModel::from(team::check_rows(
+            team::checks_of(&checks, "r1478"),
         )))));
         let (detail, files) = history::detail(&revisions[4], "main");
         r.set_detail(detail);
@@ -300,6 +306,63 @@ fn main() {
             r.set_image_opacity(55.0);
             shot(&format!("image-{mode}"));
         }
+
+        // T133: locks, shelves and a shelf's checks.
+        let t = w.global::<Team>();
+        let locks = sample_locks();
+        let lock_rows = team::lock_rows(&locks, "", false);
+        t.set_locks(LocksState {
+            loaded: true,
+            held: i32::try_from(lock_rows.len()).unwrap_or(0),
+            mine: 2,
+            ..LocksState::default()
+        });
+        t.set_lock_rows(ModelRc::from(Rc::new(VecModel::from(lock_rows))));
+        r.set_pane(Pane::Locks);
+        shot("locks");
+
+        let shelves = sample_shelves();
+        t.set_shelves(ShelvesState {
+            loaded: true,
+            whose: "all".into(),
+            state: "open".into(),
+            layout: "unified".into(),
+            ..ShelvesState::default()
+        });
+        t.set_shelf_rows(ModelRc::from(Rc::new(VecModel::from(team::shelf_rows(
+            &shelves,
+            "alice",
+            Some(12),
+            &checks,
+        )))));
+        let (detail, files) = team::shelf_detail(&shelves[0], "alice");
+        t.set_shelf(detail);
+        t.set_shelf_files(ModelRc::from(Rc::new(VecModel::from(files))));
+        t.set_shelf_diff(ModelRc::from(Rc::new(VecModel::from(
+            team::shelf_diff_rows(&shelves[0], diffs::Layout::Unified),
+        ))));
+        t.set_shelf_checks(ModelRc::from(Rc::new(VecModel::from(team::check_rows(
+            team::checks_of(&checks, "12@3"),
+        )))));
+        r.set_pane(Pane::Shelves);
+        shot("shelves");
+
+        t.set_submit_text("Boats bob with the tide".into());
+        t.set_submit(SubmitState {
+            title: "Submit shelf 12, version 3".into(),
+            note: "Commits the shelf on main exactly as shown. You are the submitter; alice stays the author.".into(),
+            error: ErrorInfo {
+                shown: true,
+                message: "Required checks have not passed for version 3.".into(),
+                next: "Submit again once they pass.".into(),
+                code: "checks_required".into(),
+            },
+            missing: "ci/test: failure".into(),
+            ..SubmitState::default()
+        });
+        w.set_dialog(Dialog::SubmitShelf);
+        shot("shelf-submit-blocked");
+        w.set_dialog(Dialog::None);
         r.set_pane(Pane::Changes);
         w.set_workspaces(ModelRc::default());
 
@@ -311,6 +374,56 @@ fn main() {
 }
 
 const SAMPLE_PATCH: &str = "--- a/Source/Game/Boat.cpp\n+++ b/Source/Game/Boat.cpp\n@@ -12,9 +12,11 @@ void ABoat::Tick(float DeltaTime)\n {\n     Super::Tick(DeltaTime);\n-    const float Speed = 10.0f;\n-    const float Roll = FMath::Sin(Time * 0.5f) * 3.0f;\n+    const float Speed = 12.0f;\n+    const float Roll = FMath::Sin(Time * 0.35f) * 3.0f;\n+    // Bob with the tide.\n+    const float Bob = Tide->HeightAt(GetActorLocation());\n     AddActorWorldOffset(GetActorForwardVector() * Speed * DeltaTime);\n-    SetActorRotation(FRotator(0.f, Yaw, Roll));\n+    SetActorRotation(FRotator(0.f, Yaw, Roll));\n+    SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, Bob));\n     Time += DeltaTime;\n }\n";
+
+/// Locks as `Desk::locks` lists them.
+fn sample_locks() -> Vec<serde_json::Value> {
+    let lock = |path: &str, who: &str, mine: bool, comment: &str| {
+        json!({"path": path, "owner": {"name": who, "kind": "user"}, "mine": mine,
+               "workspace": if mine { "alice-pc" } else { "" },
+               "created_at": "2026-11-14T08:15:00Z", "comment": comment})
+    };
+    vec![
+        lock("Content/Maps/Harbor.umap", "alice", true, "Lighting pass"),
+        lock("Content/Boats/Skiff.uasset", "alice", true, ""),
+        lock("Content/Props/Door.uasset", "bob", false, "Door art"),
+        lock("Content/Water/Tide.uasset", "refactor-bot", false, ""),
+    ]
+}
+
+/// Shelves as `Desk::shelves` lists them, the first with its changes and diff.
+fn sample_shelves() -> Vec<serde_json::Value> {
+    vec![
+        json!({"id": 12, "version": 3, "state": "open", "branch": "main", "base_rev": 1478,
+               "description": "Boats bob with the tide\n\nThe boats follow the tide height instead of a sine.",
+               "owner": {"name": "alice", "kind": "user"}, "updated_at": "2026-11-14T09:30:00Z",
+               "changes": [{"path": "Source/Game/Boat.cpp", "action": "modify"}],
+               "diff": [{"path": "Source/Game/Boat.cpp", "patch": SAMPLE_PATCH}]}),
+        json!({"id": 14, "version": 1, "state": "open", "branch": "main", "base_rev": 1481,
+               "description": "Night fog for the harbor",
+               "owner": {"name": "bob", "kind": "user"}, "updated_at": "2026-11-14T10:05:00Z"}),
+        json!({"id": 9, "version": 2, "state": "open", "branch": "main", "base_rev": 1470,
+               "description": "Rename tide parameters",
+               "owner": {"name": "refactor-bot", "kind": "agent"}, "agent_owner": "dan",
+               "updated_at": "2026-11-12T16:20:00Z"}),
+    ]
+}
+
+/// Check results as `Desk::checks` answers them, for revisions and one shelf.
+fn sample_checks() -> serde_json::Value {
+    let ci = |name: &str, state: &str, summary: &str| {
+        json!({"name": name, "state": state, "summary": summary,
+               "url": format!("https://ci.example.com/{name}"),
+               "reporter": {"name": "ci", "kind": "user"}, "updated_at": "2026-11-14T09:40:00Z"})
+    };
+    json!({"available": true, "checks": {
+        "r1482": [ci("ci/build", "pending", "")],
+        "r1481": [ci("ci/build", "success", ""), ci("ci/test", "failure", "2 of 418 tests failed")],
+        "r1480": [ci("ci/build", "success", ""), ci("ci/test", "success", "418 passed")],
+        "r1478": [ci("ci/build", "success", "Built in 6m 12s"), ci("ci/test", "success", "418 passed")],
+        "12@3": [ci("ci/build", "success", "Built in 5m 40s"), ci("ci/test", "failure", "Boat roll test failed")],
+        "14@1": [ci("ci/build", "pending", "")],
+    }})
+}
 
 fn sample_history() -> Vec<serde_json::Value> {
     let rev = |n: u64, branch: &str, who: &str, kind: &str, msg: &str| {

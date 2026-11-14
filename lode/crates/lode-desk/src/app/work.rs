@@ -149,7 +149,7 @@ impl App {
     }
 
     /// Loads `root`'s status and changelists again.
-    fn refresh(&self, root: String) {
+    pub(super) fn refresh(&self, root: String) {
         let generation = {
             let mut work = self.work.borrow_mut();
             let st = work.entry(root.clone()).or_default();
@@ -686,7 +686,37 @@ impl App {
     }
 
     /// Picked files that are tracked, in list order.
-    fn picked_tracked(&self) -> Vec<String> {
+    /// The picked files not added yet.
+    pub(super) fn picked_untracked(&self) -> Vec<String> {
+        let root = self.shown_root.borrow().clone();
+        let work = self.work.borrow();
+        let Some(st) = root.as_ref().and_then(|r| work.get(r)) else {
+            return Vec::new();
+        };
+        st.pending
+            .paths()
+            .into_iter()
+            .filter(|p| st.picked.contains(p))
+            .filter(|p| st.pending.file(p).is_some_and(|f| f.status == "untracked"))
+            .collect()
+    }
+
+    /// The file selected in the changes view.
+    pub(super) fn selected_file(&self) -> Option<String> {
+        let root = self.shown_root.borrow().clone()?;
+        self.work.borrow().get(&root)?.selected.clone()
+    }
+
+    /// Shows a line under the commit box, as an operation's result.
+    pub(super) fn changes_done(&self, text: &str) {
+        if let Some(w) = self.window.upgrade() {
+            let mut c = w.get_changes();
+            c.done = text.into();
+            w.set_changes(c);
+        }
+    }
+
+    pub(super) fn picked_tracked(&self) -> Vec<String> {
         let root = self.shown_root.borrow().clone();
         let work = self.work.borrow();
         let Some(st) = root.as_ref().and_then(|r| work.get(r)) else {
@@ -701,7 +731,7 @@ impl App {
     }
 
     /// A changelist's description and files.
-    fn list_contents(&self, name: &str) -> (String, Vec<String>) {
+    pub(super) fn list_contents(&self, name: &str) -> (String, Vec<String>) {
         let root = self.shown_root.borrow().clone();
         let work = self.work.borrow();
         let Some(st) = root.as_ref().and_then(|r| work.get(r)) else {

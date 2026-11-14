@@ -367,6 +367,7 @@ pub fn details(f: &FileEntry) -> FileDetails {
             .unwrap_or("none")
             .into(),
         lock: lock.into(),
+        locked: f.locked,
     }
 }
 

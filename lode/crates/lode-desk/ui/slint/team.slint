@@ -1,0 +1,670 @@
+// Locks, shelves and their checks (T133). The state lives in the global `Team`, which
+// src/app/team.rs fills; the views draw it and call its callbacks.
+
+import { Button, LineEdit, TextEdit, ListView, ComboBox, Palette } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check, DialogButtons } from "parts.slint";
+import { CheckBadgeInfo, CheckRow, CheckBadge, ChecksList } from "checks.slint";
+import { DiffRow, DiffRowView, Reading } from "history.slint";
+
+export struct LockRow {
+    path: string,
+    owner: string,
+    agent: bool,
+    mine: bool,
+    workspace: string,
+    since: string,
+    comment: string,
+}
+
+export struct LocksState {
+    loaded: bool,
+    /// The server has no locks module.
+    unavailable: bool,
+    held: int,
+    mine: int,
+    busy: bool,
+    error: ErrorInfo,
+}
+
+export struct LockDialogState {
+    title: string,
+    what: string,
+    busy: bool,
+    error: ErrorInfo,
+    /// Who holds the files a refusal names, one per line.
+    holders: string,
+}
+
+export struct ShelfRow {
+    id: int,
+    label: string,
+    title: string,
+    owner: string,
+    you: bool,
+    agent: bool,
+    version: string,
+    updated: string,
+    checks: CheckBadgeInfo,
+    selected: bool,
+}
+
+export struct ShelfFileRow {
+    path: string,
+    letter: string,
+    status: string,
+}
+
+export struct ShelfDetail {
+    shown: bool,
+    id: int,
+    version: int,
+    title: string,
+    body: string,
+    subtitle: string,
+    owner: string,
+    branch: string,
+    updated: string,
+    submitted: string,
+    merges: string,
+    open: bool,
+    mine: bool,
+    deleted: bool,
+    /// "Unshelving" while that runs.
+    busy: string,
+}
+
+export struct ShelvesState {
+    loaded: bool,
+    unavailable: bool,
+    /// all or mine.
+    whose: string,
+    /// open, submitted or deleted.
+    state: string,
+    error: ErrorInfo,
+    notice: string,
+    layout: string,
+}
+
+export struct ShelveDialogState {
+    title: string,
+    busy: bool,
+    error: ErrorInfo,
+}
+
+export struct SubmitState {
+    title: string,
+    note: string,
+    busy: bool,
+    error: ErrorInfo,
+    /// Required checks that have not passed, one per line.
+    missing: string,
+    /// The shelf changed since it was shown.
+    stale: bool,
+}
+
+export struct UnshelvedState {
+    title: string,
+    counts: string,
+    files: string,
+    conflicts: bool,
+}
+
+export struct ConfirmState {
+    title: string,
+    body: string,
+    confirm: string,
+    busy: bool,
+    error: ErrorInfo,
+}
+
+export global Team {
+    in-out property <LocksState> locks;
+    in property <[LockRow]> lock-rows;
+    in-out property <string> lock-filter;
+    in-out property <bool> mine-only;
+    in-out property <LockDialogState> lock-dialog;
+    in-out property <string> lock-comment;
+    in-out property <ConfirmState> confirm;
+    in-out property <ShelvesState> shelves;
+    in property <[ShelfRow]> shelf-rows;
+    in-out property <ShelfDetail> shelf;
+    in property <[ShelfFileRow]> shelf-files;
+    in property <[CheckRow]> shelf-checks;
+    in property <[DiffRow]> shelf-diff;
+    in-out property <ShelveDialogState> shelve;
+    in-out property <string> shelve-text;
+    in-out property <bool> shelve-keep;
+    /// "A new shelf", then my open shelves.
+    in property <[string]> shelve-targets;
+    in-out property <int> shelve-target;
+    in-out property <SubmitState> submit;
+    in-out property <string> submit-text;
+    in-out property <UnshelvedState> unshelved;
+    callback refresh-locks();
+    callback filter-locks();
+    callback unlock(string);
+    callback unlock-mine();
+    callback ask-break(string);
+    callback lock-selected();
+    callback unlock-selected();
+    callback submit-lock();
+    callback confirmed();
+    callback refresh-shelves();
+    callback set-whose(string);
+    callback set-state(string);
+    callback select-shelf(int);
+    callback unshelve();
+    callback ask-submit();
+    callback submit-shelf();
+    callback review-new-version();
+    callback ask-delete-shelf();
+    callback shelve-picked();
+    callback shelve-changelist(string);
+    callback submit-shelve();
+    callback target-chosen(int);
+    callback set-layout(string);
+    callback dismiss-error();
+}
+
+component LockRowView inherits Rectangle {
+    in property <LockRow> item;
+    in property <bool> busy;
+    height: 44px;
+    background: root.item.mine ? Palette.accent-background.transparentize(0.9) : transparent;
+    border-radius: 4px;
+    accessible-role: list-item;
+    accessible-label: root.item.path;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 12px;
+        Text {
+            text: root.item.path;
+            horizontal-stretch: 3;
+            preferred-width: 0px;
+            min-width: 0px;
+            font-family: Reading.mono;
+            vertical-alignment: center;
+            overflow: elide;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            width: 160px;
+            alignment: center;
+            Text {
+                text: (root.item.mine ? "you" : root.item.owner) + (root.item.agent ? " (agent)" : "");
+                font-weight: root.item.mine ? 700 : 400;
+                color: Palette.foreground;
+                accessible-role: text;
+                accessible-label: "Held by";
+                accessible-value: self.text;
+            }
+            if root.item.workspace != "": Muted { text: root.item.workspace; font-size: 10px; overflow: elide; font-family: Reading.mono; accessible-role: none; }
+        }
+        Muted { text: root.item.since; width: 150px; vertical-alignment: center; accessible-role: none; }
+        Text {
+            text: root.item.comment;
+            horizontal-stretch: 2;
+            preferred-width: 0px;
+            min-width: 0px;
+            vertical-alignment: center;
+            overflow: elide;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+        if root.item.mine: Button {
+            width: 96px;
+            text: "Unlock";
+            accessible-label: "Unlock " + root.item.path;
+            enabled: !root.busy;
+            clicked => { Team.unlock(root.item.path); }
+        }
+        if !root.item.mine: Button {
+            width: 96px;
+            text: "Break…";
+            accessible-label: "Break lock on " + root.item.path;
+            enabled: !root.busy;
+            clicked => { Team.ask-break(root.item.path); }
+        }
+    }
+}
+
+/// The branch's locks: who holds what, with unlock for mine and break for others'.
+export component LocksView inherits Rectangle {
+    in property <string> branch;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            Title { text: "Locks on " + root.branch; }
+            Muted {
+                text: Team.locks.loaded ? Team.locks.held + " held, " + Team.locks.mine + " by you" : "";
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            LineEdit {
+                width: 200px;
+                placeholder-text: "Filter by path";
+                accessible-label: "Filter by path";
+                text <=> Team.lock-filter;
+                edited => { Team.filter-locks(); }
+            }
+            Check {
+                y: (parent.height - self.height) / 2;
+                checked: Team.mine-only;
+                accessible-label: "Only mine";
+                toggled => {
+                    Team.mine-only = !Team.mine-only;
+                    Team.filter-locks();
+                }
+            }
+            Text { text: "Only mine"; vertical-alignment: center; color: Palette.foreground; accessible-role: none; }
+            if Team.locks.mine > 1: Button {
+                text: "Unlock all mine";
+                enabled: !Team.locks.busy;
+                clicked => { Team.unlock-mine(); }
+            }
+            Button { text: "Refresh"; enabled: !Team.locks.busy; clicked => { Team.refresh-locks(); } }
+        }
+        if Team.locks.error.shown: ErrorBanner {
+            error: Team.locks.error;
+            dismissable: true;
+            dismissed => { Team.dismiss-error(); }
+        }
+        if Team.locks.unavailable: Muted {
+            text: "This server does not have the locks module, so files cannot be locked here.";
+            wrap: word-wrap;
+        }
+        if Team.locks.loaded && !Team.locks.unavailable && Team.lock-rows.length == 0: Muted {
+            text: Team.locks.held == 0 ? "Nobody holds a lock on this branch." : "No lock matches.";
+        }
+        ListView {
+            vertical-stretch: 1;
+            for l in Team.lock-rows: VerticalLayout {
+                padding-bottom: 2px;
+                LockRowView { item: l; busy: Team.locks.busy; }
+            }
+        }
+    }
+}
+
+component ShelfRowView inherits Rectangle {
+    in property <ShelfRow> item;
+    height: 52px;
+    border-radius: 4px;
+    background: root.item.selected ? Palette.accent-background.transparentize(0.75)
+        : touch.has-hover ? Palette.alternate-background : transparent;
+    accessible-role: list-item;
+    accessible-label: "Shelf " + root.item.id + ": " + root.item.title;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.item.selected;
+    accessible-action-default => { Team.select-shelf(root.item.id); }
+    touch := TouchArea { clicked => { Team.select-shelf(root.item.id); } }
+    VerticalLayout {
+        padding: 6px;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 6px;
+            Muted { text: root.item.label; font-family: Reading.mono; accessible-role: none; }
+            Text { text: root.item.title; overflow: elide; horizontal-stretch: 1; color: Palette.foreground; accessible-role: none; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Muted { text: root.item.owner; font-size: 11px; font-weight: root.item.you ? 700 : 400; accessible-role: none; }
+            Muted { text: root.item.version; font-size: 11px; accessible-role: none; }
+            Muted { text: root.item.updated; font-size: 11px; horizontal-stretch: 1; overflow: elide; accessible-role: none; }
+            CheckBadge { info: root.item.checks; }
+        }
+    }
+}
+
+component Segment inherits Button {
+    in property <bool> on;
+    checkable: true;
+    checked: root.on;
+}
+
+component Fact2 inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 8px;
+    Muted { text: root.label; width: 80px; accessible-role: none; }
+    Text {
+        text: root.value;
+        color: Palette.foreground;
+        wrap: word-wrap;
+        horizontal-stretch: 1;
+        accessible-role: text;
+        accessible-label: root.label;
+        accessible-value: root.value;
+    }
+}
+
+/// The depot's shelves, and one shelf's details, checks and diff.
+export component ShelvesView inherits Rectangle {
+    probe := Text {
+        x: 0;
+        y: 0;
+        text: "0123456789";
+        font-family: Reading.mono;
+        font-size: 12px;
+        opacity: 0;
+        accessible-role: none;
+    }
+    property <length> char-width: probe.preferred-width / 10;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 6px;
+            Title { text: "Shelves"; }
+            Rectangle { width: 8px; }
+            Segment { text: "Everyone's"; on: Team.shelves.whose == "all"; clicked => { Team.set-whose("all"); } }
+            Segment { text: "Mine"; on: Team.shelves.whose == "mine"; clicked => { Team.set-whose("mine"); } }
+            Rectangle { width: 8px; }
+            Segment { text: "Open"; on: Team.shelves.state == "open"; clicked => { Team.set-state("open"); } }
+            Segment { text: "Submitted"; on: Team.shelves.state == "submitted"; clicked => { Team.set-state("submitted"); } }
+            Segment { text: "Deleted"; on: Team.shelves.state == "deleted"; clicked => { Team.set-state("deleted"); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Refresh"; clicked => { Team.refresh-shelves(); } }
+        }
+        if Team.shelves.error.shown: ErrorBanner {
+            error: Team.shelves.error;
+            dismissable: true;
+            dismissed => { Team.dismiss-error(); }
+        }
+        if Team.shelves.notice != "": Text {
+            text: Team.shelves.notice;
+            color: #16a34a;
+            wrap: word-wrap;
+            accessible-role: text;
+            accessible-label: "Done";
+            accessible-value: self.text;
+        }
+        if Team.shelves.unavailable: Muted {
+            text: "This server does not have the shelves module, so changes cannot be shelved here.";
+            wrap: word-wrap;
+        }
+        if !Team.shelves.unavailable: HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: 300px;
+                spacing: 4px;
+                if Team.shelves.loaded && Team.shelf-rows.length == 0: Muted {
+                    text: (Team.shelves.state == "open" ? "No open shelves." : Team.shelves.state == "submitted" ? "No submitted shelves." : "No deleted shelves.")
+                        + " Shelve changes from the Changes view.";
+                    wrap: word-wrap;
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for s in Team.shelf-rows: VerticalLayout {
+                        padding-bottom: 2px;
+                        ShelfRowView { item: s; }
+                    }
+                }
+            }
+            if !Team.shelf.shown: Muted {
+                horizontal-stretch: 1;
+                text: "Select a shelf to review it.";
+            }
+            if Team.shelf.shown: VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        Text {
+                            text: Team.shelf.title;
+                            font-size: 16px;
+                            font-weight: 700;
+                            color: Palette.foreground;
+                            wrap: word-wrap;
+                            accessible-role: text;
+                            accessible-label: "Shelf";
+                            accessible-value: self.text;
+                        }
+                        Muted { text: Team.shelf.subtitle; }
+                    }
+                    if !Team.shelf.deleted: Button {
+                        text: Team.shelf.busy == "Unshelving" ? "Unshelving…" : "Unshelve";
+                        enabled: Team.shelf.busy == "";
+                        clicked => { Team.unshelve(); }
+                    }
+                    if Team.shelf.open: Button {
+                        text: "Submit…";
+                        primary: true;
+                        enabled: Team.shelf.busy == "";
+                        clicked => { Team.ask-submit(); }
+                    }
+                    if Team.shelf.open && Team.shelf.mine: Button {
+                        text: "Delete…";
+                        accessible-label: "Delete shelf";
+                        enabled: Team.shelf.busy == "";
+                        clicked => { Team.ask-delete-shelf(); }
+                    }
+                }
+                if Team.shelf.body != "": Muted { text: Team.shelf.body; wrap: word-wrap; }
+                Fact2 { label: "Owner"; value: Team.shelf.owner; }
+                Fact2 { label: "Branch"; value: Team.shelf.branch; }
+                Fact2 { label: "Updated"; value: Team.shelf.updated; }
+                if Team.shelf.submitted != "": Fact2 { label: "Submitted"; value: Team.shelf.submitted; }
+                if Team.shelf.merges != "": Fact2 { label: "Merges"; value: Team.shelf.merges; }
+                ChecksList { checks: Team.shelf-checks; open(url) => { Reading.open-link(url); } }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: "Changed files  " + Team.shelf-files.length;
+                        font-weight: 600;
+                        color: Palette.foreground;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Segment { text: "Unified"; on: Team.shelves.layout != "split"; clicked => { Team.set-layout("unified"); } }
+                    Segment { text: "Side by side"; on: Team.shelves.layout == "split"; clicked => { Team.set-layout("split"); } }
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    accessible-role: list;
+                    accessible-label: "Shelf diff";
+                    for r in Team.shelf-diff: DiffRowView { item: r; char-width: root.char-width; }
+                }
+            }
+        }
+    }
+}
+
+/// Locks files with an optional comment. A refusal names who holds each file.
+export component LockDialog inherits Card {
+    callback close();
+    width: 480px;
+    accessible-role: groupbox;
+    accessible-label: "Lock";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: Team.lock-dialog.title; }
+        Muted {
+            text: Team.lock-dialog.what + ". Others can read the file but cannot commit it until you unlock it or commit.";
+            wrap: word-wrap;
+        }
+        FormLabel { text: "Comment (optional)"; }
+        LineEdit {
+            accessible-label: "Comment";
+            placeholder-text: "Why you need it, for the others";
+            text <=> Team.lock-comment;
+            accepted => { Team.submit-lock(); }
+        }
+        if Team.lock-dialog.error.shown: ErrorBanner { error: Team.lock-dialog.error; }
+        if Team.lock-dialog.holders != "": Text {
+            text: Team.lock-dialog.holders;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "Held by others";
+            accessible-value: self.text;
+        }
+        DialogButtons {
+            confirm: Team.lock-dialog.busy ? "Locking…" : "Lock";
+            busy: Team.lock-dialog.busy;
+            confirmed => { Team.submit-lock(); }
+            cancelled => { root.close(); }
+        }
+    }
+}
+
+/// A question with one confirming button (break a lock, delete a shelf).
+export component TeamConfirmDialog inherits Card {
+    callback close();
+    width: 460px;
+    accessible-role: groupbox;
+    accessible-label: Team.confirm.title;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 12px;
+        Title { text: Team.confirm.title; wrap: word-wrap; }
+        Text {
+            text: Team.confirm.body;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "Question";
+            accessible-value: self.text;
+        }
+        if Team.confirm.error.shown: ErrorBanner { error: Team.confirm.error; }
+        DialogButtons {
+            confirm: Team.confirm.confirm;
+            busy: Team.confirm.busy;
+            confirmed => { Team.confirmed(); }
+            cancelled => { root.close(); }
+        }
+    }
+}
+
+/// Puts changes on a new shelf, or on an open shelf of mine as its next version.
+export component ShelveDialog inherits Card {
+    callback close();
+    width: 500px;
+    accessible-role: groupbox;
+    accessible-label: "Shelve";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: Team.shelve.title; }
+        Muted {
+            text: "A shelf keeps changes on the server without committing them, so others can review or unshelve them.";
+            wrap: word-wrap;
+        }
+        if Team.shelve-targets.length > 1: VerticalLayout {
+            spacing: 4px;
+            FormLabel { text: "Put on"; }
+            ComboBox {
+                model: Team.shelve-targets;
+                current-index: Team.shelve-target;
+                accessible-label: "Put on";
+                selected => { Team.target-chosen(self.current-index); }
+            }
+            if Team.shelve-target > 0: Muted { text: "Its content is replaced and its version goes up."; font-size: 11px; }
+        }
+        FormLabel { text: "Description"; }
+        TextEdit {
+            height: 80px;
+            accessible-label: "Description";
+            text <=> Team.shelve-text;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Check {
+                checked: Team.shelve-keep;
+                accessible-label: "Keep my changes in the workspace";
+                toggled => { Team.shelve-keep = !Team.shelve-keep; }
+            }
+            Text { text: "Keep my changes in the workspace"; color: Palette.foreground; accessible-role: none; }
+        }
+        if !Team.shelve-keep: Muted { text: "Otherwise the shelved files are reverted here."; font-size: 11px; }
+        if Team.shelve.error.shown: ErrorBanner { error: Team.shelve.error; }
+        DialogButtons {
+            confirm: Team.shelve.busy ? "Shelving…" : Team.shelve-target > 0 ? "Update shelf" : "Shelve";
+            busy: Team.shelve.busy;
+            enabled: Team.shelve-text != "" || Team.shelve-target > 0;
+            confirmed => { Team.submit-shelve(); }
+            cancelled => { root.close(); }
+        }
+    }
+}
+
+/// Submits the version of the shelf that was reviewed.
+export component SubmitShelfDialog inherits Card {
+    callback close();
+    width: 500px;
+    accessible-role: groupbox;
+    accessible-label: "Submit shelf";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: Team.submit.title; }
+        Muted { text: Team.submit.note; wrap: word-wrap; }
+        FormLabel { text: "Message"; }
+        TextEdit {
+            height: 90px;
+            accessible-label: "Message";
+            text <=> Team.submit-text;
+        }
+        if Team.submit.error.shown: ErrorBanner { error: Team.submit.error; }
+        if Team.submit.missing != "": Text {
+            text: Team.submit.missing;
+            wrap: word-wrap;
+            font-family: Reading.mono;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "Missing checks";
+            accessible-value: self.text;
+        }
+        if Team.submit.stale: DialogButtons {
+            confirm: "Review the new version";
+            confirmed => { Team.review-new-version(); }
+            cancelled => { root.close(); }
+        }
+        if !Team.submit.stale: DialogButtons {
+            confirm: Team.submit.busy ? "Submitting…" : "Submit";
+            busy: Team.submit.busy;
+            enabled: Team.submit-text != "";
+            confirmed => { Team.submit-shelf(); }
+            cancelled => { root.close(); }
+        }
+    }
+}
+
+/// What an unshelve did to each file.
+export component UnshelvedDialog inherits Card {
+    callback close();
+    width: 460px;
+    accessible-role: groupbox;
+    accessible-label: Team.unshelved.title;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: Team.unshelved.title; }
+        Text { text: Team.unshelved.counts; color: Palette.foreground; }
+        Text {
+            text: Team.unshelved.files;
+            font-family: Reading.mono;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "Unshelved files";
+            accessible-value: self.text;
+        }
+        if Team.unshelved.conflicts: Muted {
+            text: "Files in conflict show in Changes. Until the app can resolve them, run lode resolve <path> --mine|--theirs|--merged.";
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: end;
+            Button { text: "Done"; primary: true; clicked => { root.close(); } }
+        }
+    }
+}

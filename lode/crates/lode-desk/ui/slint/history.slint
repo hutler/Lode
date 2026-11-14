@@ -3,9 +3,10 @@
 
 import { Button, ListView, Slider, Palette } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Muted, Title } from "parts.slint";
+import { CheckBadgeInfo, CheckRow, CheckBadge, ChecksList } from "checks.slint";
 
 /// Which view of a workspace shows.
-export enum Pane { changes, history, blame, diff }
+export enum Pane { changes, history, blame, diff, locks, shelves }
 
 /// One revision of the list, with its part of the graph.
 export struct RevRow {
@@ -27,6 +28,7 @@ export struct RevRow {
     above-inherited: bool,
     line-below: bool,
     selected: bool,
+    checks: CheckBadgeInfo,
 }
 
 /// The selected revision.
@@ -176,6 +178,7 @@ export global Reading {
     in property <[RevRow]> revs;
     in-out property <RevDetail> detail;
     in property <[RevFile]> files;
+    in property <[CheckRow]> rev-checks;
     in-out property <BlameState> blame;
     in property <[BlameLine]> blame-lines;
     in-out property <DiffState> diff;
@@ -200,6 +203,7 @@ export global Reading {
     callback set-image-mode(string);
     callback back();
     callback dismiss-error();
+    callback open-link(string);
 }
 
 /// A text that acts as a button.
@@ -369,6 +373,7 @@ component RevRowView inherits Rectangle {
         if root.item.agent: Tag { y: (parent.height - self.height) / 2; text: "agent"; tint: #8b5cf6; }
         if root.item.imported != "": Tag { y: (parent.height - self.height) / 2; text: root.item.imported; }
         if root.item.merge: Tag { y: (parent.height - self.height) / 2; text: root.item.merges; tint: Lanes.merged; }
+        CheckBadge { y: (parent.height - self.height) / 2; info: root.item.checks; }
         Muted { text: root.item.author; width: 110px; overflow: elide; vertical-alignment: center; accessible-role: none; }
         Muted { text: root.item.date; width: 150px; overflow: elide; vertical-alignment: center; accessible-role: none; }
     }
@@ -540,6 +545,7 @@ export component HistoryView inherits Rectangle {
                 if Reading.detail.agent != "": Fact { label: "Agent"; value: Reading.detail.agent; mono: true; }
                 if Reading.detail.imported != "": Fact { label: "Imported"; value: Reading.detail.imported; mono: true; }
                 if Reading.detail.client != "": Fact { label: "Client"; value: Reading.detail.client; mono: true; }
+                ChecksList { checks: Reading.rev-checks; open(url) => { Reading.open-link(url); } }
                 Text {
                     text: "Changed files  " + Reading.detail.files;
                     font-weight: 600;
@@ -697,14 +703,29 @@ component Num inherits Text {
     accessible-role: none;
 }
 
-component DiffRowView inherits Rectangle {
+export component DiffRowView inherits Rectangle {
     in property <DiffRow> item;
     in property <length> char-width;
     height: 20px;
-    background: root.item.kind == "hunk" ? Palette.accent-background.transparentize(0.9)
+    background: root.item.kind == "file" ? Palette.alternate-background
+        : root.item.kind == "hunk" ? Palette.accent-background.transparentize(0.9)
         : root.item.kind == "add" ? Tint.add
         : root.item.kind == "delete" ? Tint.delete
         : transparent;
+    if root.item.kind == "file": Text {
+        x: 8px;
+        width: root.width - 16px;
+        text: root.item.header;
+        font-family: Reading.mono;
+        font-size: 12px;
+        font-weight: 700;
+        vertical-alignment: center;
+        overflow: elide;
+        color: Palette.foreground;
+        accessible-role: text;
+        accessible-label: "File";
+        accessible-value: self.text;
+    }
     if root.item.kind == "hunk" || root.item.kind == "plain": Text {
         x: 8px;
         width: root.width - 16px;

@@ -1,0 +1,95 @@
+// Check results that outside systems report on revisions and shelves (T133).
+
+import { Palette } from "std-widgets.slint";
+import { Muted } from "parts.slint";
+
+/// One badge for the checks of a revision or shelf version: the worst state, with a count.
+export struct CheckBadgeInfo {
+    shown: bool,
+    state: string,
+    text: string,
+    label: string,
+}
+
+/// One check.
+export struct CheckRow {
+    name: string,
+    state: string,
+    word: string,
+    mark: string,
+    summary: string,
+    url: string,
+    /// Who reported it, and when.
+    by: string,
+}
+
+export global CheckColors {
+    public pure function of(state: string) -> color {
+        return state == "success" ? #16a34a
+            : state == "failure" || state == "error" ? #dc2626
+            : state == "cancelled" ? #64748b
+            : #d97706;
+    }
+}
+
+export component CheckBadge inherits Rectangle {
+    in property <CheckBadgeInfo> info;
+    visible: root.info.shown;
+    width: root.info.shown ? t.preferred-width + 12px : 0;
+    height: 18px;
+    border-radius: 9px;
+    background: CheckColors.of(root.info.state).transparentize(0.8);
+    accessible-role: text;
+    accessible-label: root.info.shown ? "Checks" : "";
+    accessible-value: root.info.label;
+    t := Text {
+        text: root.info.text;
+        font-size: 10px;
+        color: CheckColors.of(root.info.state);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
+/// Each check, with its link opened in the browser.
+export component ChecksList inherits VerticalLayout {
+    in property <[CheckRow]> checks;
+    callback open(string);
+    spacing: 6px;
+    if root.checks.length > 0: Text {
+        text: "Checks  " + root.checks.length;
+        font-weight: 600;
+        color: Palette.foreground;
+    }
+    for c in root.checks: HorizontalLayout {
+        spacing: 8px;
+        accessible-role: list-item;
+        accessible-label: "Check " + c.name;
+        accessible-value: c.word;
+        Text {
+            text: c.mark + " " + c.word;
+            width: 80px;
+            color: CheckColors.of(c.state);
+            font-weight: 600;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            if c.url != "": Text {
+                text: c.name;
+                color: Palette.accent-background;
+                accessible-role: button;
+                accessible-label: "Open " + c.name;
+                accessible-action-default => { root.open(c.url); }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open(c.url); }
+                }
+            }
+            if c.url == "": Text { text: c.name; color: Palette.foreground; accessible-role: none; }
+            if c.summary != "": Text { text: c.summary; color: Palette.foreground; wrap: word-wrap; accessible-role: none; }
+            Muted { text: c.by; font-size: 11px; accessible-role: none; }
+        }
+    }
+}
