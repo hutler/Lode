@@ -226,6 +226,19 @@ Skipped 6 commits that change nothing a depot holds (empty or submodule-only).</
   <li>Submodules are not imported; they are listed at the end. No <code>.lodeignore</code> is applied: everything Git tracks comes over. Add <code>.lodeignore</code> and <code>.lodeconfig</code> afterwards (<code>lode init --dry-run</code> in a checkout shows what a template would ignore).</li>
   <li>If the import stops, run the same command again. It continues after the last imported commit. Later commits on the Git branch can be brought over the same way, as long as nobody has committed to the depot in between.</li>
 </ul>
+<h3>Moving a Subversion project with its history</h3>
+<p><code>lode import svn</code> does the same for a Subversion directory, usually the trunk. The <code>svn</code> command-line client must be installed, and it uses the credentials <code>svn</code> already has (sign in once with any <code>svn</code> command first):</p>
+<pre><code>lode import svn https://svn.example.com/mygame/trunk https://lode.example.com/mygame
+Created depot mygame.
+Imported 3,410 revisions of https://svn.example.com/mygame/trunk into https://lode.example.com/mygame; the head is r3411.
+Skipped 12 revisions that change nothing a depot holds (empty folders or properties only).</code></pre>
+<ul>
+  <li>Each SVN revision that changes the directory becomes one revision on <code>main</code>, with the same message. The SVN revision number, author and date are kept with it and shown by <code>lode log</code>.</li>
+  <li>Moves and copies inside the directory are imported as Lode renames and copies. Files marked <code>svn:executable</code> are executable; symbolic links stay links.</li>
+  <li>Only the directory's own history is imported, from the revision that created it. Branches and tags are not imported, and neither is the content of <code>svn:externals</code>; folders that have externals are listed at the end.</li>
+  <li>Every changed file is read with <code>svn cat</code>, so a large history over a slow network takes a while. Running the import on the SVN server against a <code>file://</code> URL is much faster.</li>
+  <li>If the import stops, run the same command again; later SVN revisions can be brought over the same way.</li>
+</ul>
 
 <h1>4. The daily cycle</h1>
 <p>Most work is four commands: update, edit, review, commit.</p>

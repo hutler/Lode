@@ -15,6 +15,9 @@
 
 mod git;
 mod lfs;
+mod svn;
+mod svn_import;
+mod xml;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,6 +28,8 @@ use lode_core::{Change, ChangeAction, CopyFrom, DepotPath, EntryKind, ObjectId};
 use lode_proto::commit::{CommitRequest, ImportedFrom, Provenance};
 
 pub use git::{GitChange, GitCommit, GitRepo, Mode};
+pub use svn::{SvnAction, SvnKind, SvnPath, SvnProps, SvnRepo, SvnRevision};
+pub use svn_import::{import_svn, SvnImport, SvnProgress, SvnReport};
 
 /// Parallel blob uploads.
 const PARALLEL_UPLOADS: usize = 4;
@@ -54,13 +59,44 @@ pub enum ImportError {
     Protocol(String),
     /// The Lode branch has revisions that did not come from this import.
     #[error(
-        "branch {branch} of depot {depot} already has revisions that were not imported from Git"
+        "branch {branch} of depot {depot} already has revisions that were not imported from {system}"
     )]
     DepotNotEmpty {
         /// Depot.
         depot: String,
         /// Lode branch.
         branch: String,
+        /// `Git` or `Subversion`.
+        system: &'static str,
+    },
+    /// The `svn` command cannot be run.
+    #[error("cannot run `svn`; install Subversion's command-line client and make sure it is on the PATH")]
+    SvnMissing,
+    /// The URL is not a directory of a Subversion repository, or cannot be reached.
+    #[error("{url} is not a Subversion directory: {message}")]
+    NotSvn {
+        /// The URL given.
+        url: String,
+        /// What svn said.
+        message: String,
+    },
+    /// An `svn` command failed.
+    #[error("`{command}` failed: {message}")]
+    Svn {
+        /// The command.
+        command: String,
+        /// Its error output.
+        message: String,
+    },
+    /// The depot was imported from a later Subversion revision than the repository has.
+    #[error(
+        "the depot was imported up to r{rev} of Subversion, but the repository ends at r{youngest}"
+    )]
+    SvnBehind {
+        /// The last imported revision.
+        rev: u64,
+        /// The newest revision of the repository.
+        youngest: u64,
     },
     /// The last imported commit is not in the Git branch's history.
     #[error("the depot was imported up to Git commit {commit}, which is not in the first-parent history of `{branch}`")]
@@ -180,6 +216,7 @@ pub async fn import_git(
             .ok_or_else(|| ImportError::DepotNotEmpty {
                 depot: opts.depot.to_owned(),
                 branch: opts.branch.to_owned(),
+                system: "Git",
             })?;
         let at = commits
             .iter()
@@ -471,29 +508,7 @@ impl Run<'_> {
 
     /// Uploads the blobs the server lacks.
     async fn upload(&self, blobs: &[Blob]) -> Result<(), ImportError> {
-        let mut by_id: HashMap<ObjectId, &Path> = HashMap::new();
-        for b in blobs {
-            if let Some(source) = &b.source {
-                by_id.entry(b.id).or_insert(source);
-            }
-        }
-        let ids: Vec<ObjectId> = by_id.keys().copied().collect();
-        if ids.is_empty() {
-            return Ok(());
-        }
-        let lacking = self.client.missing_objects(self.depot, &ids).await?;
-        let uploads = futures::stream::iter(lacking.into_iter().filter_map(|id| {
-            let source = by_id.get(&id)?.to_path_buf();
-            let client = self.client.clone();
-            let depot = self.depot.to_owned();
-            Some(async move { client.put_blob_file(&depot, &id, &source).await })
-        }))
-        .buffer_unordered(PARALLEL_UPLOADS);
-        futures::pin_mut!(uploads);
-        while let Some(r) = uploads.next().await {
-            r?;
-        }
-        Ok(())
+        upload_blobs(self.client, self.depot, blobs).await
     }
 
     /// After a commit: the server has these blobs, so their extracted copies can go.
@@ -508,6 +523,33 @@ impl Run<'_> {
             b.source = None;
         }
     }
+}
+
+/// Uploads the blobs among `blobs` that the server lacks.
+async fn upload_blobs(client: &Client, depot: &str, blobs: &[Blob]) -> Result<(), ImportError> {
+    let mut by_id: HashMap<ObjectId, &Path> = HashMap::new();
+    for b in blobs {
+        if let Some(source) = &b.source {
+            by_id.entry(b.id).or_insert(source);
+        }
+    }
+    let ids: Vec<ObjectId> = by_id.keys().copied().collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let lacking = client.missing_objects(depot, &ids).await?;
+    let uploads = futures::stream::iter(lacking.into_iter().filter_map(|id| {
+        let source = by_id.get(&id)?.to_path_buf();
+        let client = client.clone();
+        let depot = depot.to_owned();
+        Some(async move { client.put_blob_file(&depot, &id, &source).await })
+    }))
+    .buffer_unordered(PARALLEL_UPLOADS);
+    futures::pin_mut!(uploads);
+    while let Some(r) = uploads.next().await {
+        r?;
+    }
+    Ok(())
 }
 
 fn delete(path: DepotPath, base: ObjectId) -> Change {

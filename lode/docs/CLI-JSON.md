@@ -108,6 +108,19 @@ submodule-only), `rev` the branch head and `last_commit` the last Git commit now
 revisions that were not imported), `import_diverged` (the last imported commit is not in the
 branch's history), `invalid_path`, `import_mismatch`.
 
+### `lode import svn <url> <url>/<depot>`
+
+`{"depot","server","url","total","already","imported","skipped","rev","last_revision",
+"externals":[...]}`: `total` is the number of SVN revisions that change the directory,
+`already` how many an earlier run covered, `imported` the revisions this run made, `skipped`
+the SVN revisions that change nothing a depot holds (empty folders, properties only), `rev` the
+branch head and `last_revision` the last SVN revision now in the depot. `externals` lists
+folders with `svn:externals` (relative to the directory, `.` for itself), which are not
+imported. Each revision's `provenance` has `imported: {"system":"svn","id":"<revision>",
+"author","date"}`. Codes: `svn_not_found`, `not_an_svn_directory`, `svn_failed`,
+`depot_not_empty`, `import_diverged` (the depot was imported from a later revision than the
+repository has), `invalid_path`.
+
 ### `lode self-update [--check]`
 
 `{"current","latest","update_available","updated","path"}`: `path` is this executable,

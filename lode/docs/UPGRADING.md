@@ -88,3 +88,4 @@ First release.
   server's message; a 0.1 client fails a checkout or update that meets an obliterated file
   instead of leaving it out, so upgrade clients before obliterating content that people may
   still check out at old revisions.
+- `lode import svn <url> <server>/<depot>` imports a Subversion directory's history.

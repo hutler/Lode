@@ -276,7 +276,13 @@ fn print_revision(ctx: &Ctx, r: &RevisionView, verbose: bool) {
         ));
     }
     if let Some(i) = r.provenance.as_ref().and_then(|p| p.imported.as_ref()) {
-        let mut from = format!("    imported from {} {}", i.system, short_id(&i.id));
+        // SVN revisions are numbers; Git commits are shown shortened.
+        let id = if i.system == "svn" {
+            format!("r{}", i.id)
+        } else {
+            short_id(&i.id).to_owned()
+        };
+        let mut from = format!("    imported from {} {id}", i.system);
         for part in [&i.author, &i.date].into_iter().flatten() {
             from.push_str(&format!(", {part}"));
         }
