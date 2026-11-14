@@ -137,6 +137,21 @@ async fn blame(
 }
 
 #[tauri::command]
+async fn diff(desk: State<'_, Desk>, workspace: String, path: String) -> Result<Value, ErrorView> {
+    desk.diff(workspace, path).await
+}
+
+#[tauri::command]
+async fn diff_revision(
+    desk: State<'_, Desk>,
+    workspace: String,
+    rev: u64,
+    path: String,
+) -> Result<Value, ErrorView> {
+    desk.diff_revision(workspace, rev, path).await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -184,6 +199,8 @@ pub fn run() -> Result<(), tauri::Error> {
             log,
             revision,
             blame,
+            diff,
+            diff_revision,
             watch,
             unwatch,
         ])

@@ -21,6 +21,8 @@ interface Props {
   onHistory?: (path: string) => void;
   /** Opens a file's blame. */
   onBlame?: (path: string) => void;
+  /** Opens a file's diff against its base. */
+  onDiff?: (path: string) => void;
 }
 
 /** One group of the list: the default changes, a named changelist, or new files. */
@@ -83,7 +85,7 @@ interface Menu {
 }
 
 /** The pending changes of a workspace, with picking, committing, adding and reverting. */
-export function ChangesView({ info, onStatus, onError, onHistory, onBlame }: Props) {
+export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDiff }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
@@ -260,6 +262,7 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame }: Pro
                         key={f.path}
                         className={`file ${selected === f.path ? "selected" : ""}`}
                         onClick={() => setSelected(f.path)}
+                        onDoubleClick={() => f.status !== "untracked" && onDiff?.(f.path)}
                         onContextMenu={(e) => openMenu(e, f)}
                       >
                         <input
@@ -374,6 +377,11 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame }: Pro
               </dd>
             </dl>
             <div className="details-actions">
+              {onDiff && sel.status !== "untracked" && (
+                <button className="primary" onClick={() => onDiff(sel.path)}>
+                  Show diff
+                </button>
+              )}
               {sel.status === "untracked" ? (
                 <button onClick={() => void add([sel.path])} disabled={!!busy}>
                   Add

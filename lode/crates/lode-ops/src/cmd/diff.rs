@@ -8,14 +8,15 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
-use lode_core::{EntryKind, LodeConfig, ObjectId};
+use lode_core::{DepotPath, EntryKind, LodeConfig, ObjectId};
 use lode_workspace::classify::{class_by_config, class_by_content};
 use lode_workspace::{FileClass, FileRow, FileState, ScanEntry, Status};
 use serde_json::{json, Value};
 
+use crate::cmd::history::{self, Source};
 use crate::cmd::status::status_name;
 use crate::context::Ctx;
-use crate::error::OpResult;
+use crate::error::{OpError, OpResult};
 use crate::local::{self, Bases};
 
 /// Files larger than this are reported like binary files, with sizes only.
@@ -303,26 +304,117 @@ pub async fn diff(ctx: &Ctx, args: DiffArgs) -> OpResult<Value> {
         }
         ctx.out.raw(&stdout)?;
     }
-    let files: Vec<Value> = diffs
-        .iter()
-        .map(|d| {
-            let mut v = json!({
-                "path": d.path,
-                "status": status_name(d.status),
-                "old_path": d.old.as_ref().map(|s| &s.path),
-                "binary": d.binary,
-                "old_size": d.old.as_ref().map(|s| s.size),
-                "new_size": d.new.as_ref().map(|s| s.size),
-                "old_mode": d.old.as_ref().map(Side::mode),
-                "new_mode": d.new.as_ref().map(Side::mode),
-                "insertions": d.insertions,
-                "deletions": d.deletions,
-            });
-            if !args.stat {
-                v["patch"] = json!(String::from_utf8_lossy(&d.patch));
-            }
-            v
-        })
-        .collect();
+    let files: Vec<Value> = diffs.iter().map(|d| entry(d, !args.stat)).collect();
     Ok(json!({ "files": files, "insertions": ins, "deletions": del }))
+}
+
+/// One file of `lode diff --json`.
+fn entry(d: &FileDiff, patch: bool) -> Value {
+    let mut v = json!({
+        "path": d.path,
+        "status": status_name(d.status),
+        "old_path": d.old.as_ref().map(|s| &s.path),
+        "binary": d.binary,
+        "old_size": d.old.as_ref().map(|s| s.size),
+        "new_size": d.new.as_ref().map(|s| s.size),
+        "old_mode": d.old.as_ref().map(Side::mode),
+        "new_mode": d.new.as_ref().map(Side::mode),
+        "insertions": d.insertions,
+        "deletions": d.deletions,
+    });
+    if patch {
+        v["patch"] = json!(String::from_utf8_lossy(&d.patch));
+    }
+    v
+}
+
+/// Two stored versions of a file to compare. Each is `path@rev` (`@12` or `@r12`; without a
+/// revision, the workspace's), and either may be absent: no old version is an added file, no
+/// new version a deleted one.
+#[derive(Debug, Default)]
+pub struct VersionsArgs {
+    pub old: Option<String>,
+    pub new: Option<String>,
+    pub source: Source,
+}
+
+/// The diff of two stored versions of a file, as one file of `lode diff --json` (with the
+/// patch). Lode Desk shows a revision's changes with it; no command uses it yet.
+pub async fn diff_versions(ctx: &Ctx, args: VersionsArgs) -> OpResult<Value> {
+    let t = history::target(ctx, &args.source)?;
+    let mut old = None;
+    let mut new = None;
+    let mut depot_path = None;
+    if let Some(spec) = &args.old {
+        let (side, p) = stored(ctx, &t, spec).await?;
+        old = Some(side);
+        depot_path = Some(p);
+    }
+    if let Some(spec) = &args.new {
+        let (side, p) = stored(ctx, &t, spec).await?;
+        new = Some(side);
+        depot_path = Some(p);
+    }
+    let Some(depot_path) = depot_path else {
+        return Err(OpError::usage("name the old or the new version of a file"));
+    };
+    let config = t.root.as_deref().and_then(local_config);
+    let binary = match class_by_config(&depot_path, config.as_ref()) {
+        Some(c) => c == FileClass::Binary,
+        None => [old.as_ref(), new.as_ref()].iter().flatten().any(|s| {
+            s.bytes
+                .as_ref()
+                .is_none_or(|b| class_by_content(b) == FileClass::Binary)
+        }),
+    };
+    let status = match (&old, &new) {
+        (None, _) => Status::Added,
+        (_, None) => Status::Deleted,
+        _ => Status::Modified,
+    };
+    let mut d = FileDiff {
+        path: depot_path.as_str().to_owned(),
+        status,
+        old,
+        new,
+        copied: None,
+        binary,
+        insertions: 0,
+        deletions: 0,
+        patch: Vec::new(),
+    };
+    render(&mut d, binary);
+    Ok(entry(&d, true))
+}
+
+/// A file as stored at a revision; files over [`TEXT_LIMIT`] are left unread.
+async fn stored(ctx: &Ctx, t: &history::Target, spec: &str) -> OpResult<(Side, DepotPath)> {
+    let (p, given) = history::split_rev(spec)?;
+    let path = t
+        .path(ctx, p)?
+        .ok_or_else(|| OpError::usage("name a file to compare"))?;
+    let rev = t.rev(given).await?;
+    let file = t.client.file(&t.depot, rev, &path).await?;
+    let (kind, executable, known) = (file.kind, file.executable, file.size);
+    let bytes = if known.is_some_and(|n| n > TEXT_LIMIT) {
+        None
+    } else {
+        let mut buf = Vec::new();
+        file.write_to(&mut buf).await?;
+        Some(buf)
+    };
+    let size = bytes
+        .as_ref()
+        .map_or(known.unwrap_or(0), |b| b.len() as u64);
+    let bytes = bytes.filter(|b| b.len() as u64 <= TEXT_LIMIT);
+    Ok((
+        Side {
+            path: path.as_str().to_owned(),
+            kind,
+            executable,
+            bytes,
+            size,
+        },
+        path,
+    ))
 }

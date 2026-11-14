@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { OpError, StatusResult, WorkspaceInfo } from "../api";
 import { BlameView } from "./BlameView";
 import { ChangesView } from "./ChangesView";
+import { DiffView } from "./DiffView";
 import { HistoryView } from "./HistoryView";
 
 interface Props {
@@ -25,10 +26,11 @@ type Section = (typeof SECTIONS)[number];
 type View =
   | { kind: "changes" }
   | { kind: "history"; path: string | null; rev: number | null }
-  | { kind: "blame"; path: string; rev: number | null };
+  | { kind: "blame"; path: string; rev: number | null }
+  | { kind: "diff"; path: string; rev: number | null };
 
 function sectionOf(v: View): Section {
-  return v.kind === "changes" ? "Changes" : "History";
+  return v.kind === "changes" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
 }
 
 /** One open workspace: the sidebar and the section it shows. */
@@ -41,6 +43,7 @@ export function WorkspaceView({ info, onError }: Props) {
   const active = sectionOf(view);
   const history = (path: string | null, rev: number | null = null) => setView({ kind: "history", path, rev });
   const blame = (path: string, rev: number | null) => setView({ kind: "blame", path, rev });
+  const diff = (path: string, rev: number | null) => setView({ kind: "diff", path, rev });
 
   return (
     <div className="workspace">
@@ -80,6 +83,7 @@ export function WorkspaceView({ info, onError }: Props) {
           onError={onError}
           onHistory={(path) => history(path)}
           onBlame={(path) => blame(path, null)}
+          onDiff={(path) => diff(path, null)}
         />
       </div>
       {view.kind === "history" && (
@@ -91,6 +95,17 @@ export function WorkspaceView({ info, onError }: Props) {
             initialRev={view.rev}
             onPath={(path) => history(path)}
             onBlame={blame}
+            onDiff={diff}
+          />
+        </div>
+      )}
+      {view.kind === "diff" && (
+        <div className="section">
+          <DiffView
+            info={info}
+            source={view.rev === null ? { kind: "working", path: view.path } : { kind: "revision", rev: view.rev, path: view.path }}
+            backLabel={view.rev === null ? "Changes" : `r${view.rev}`}
+            onBack={() => (view.rev === null ? setView({ kind: "changes" }) : history(null, view.rev))}
           />
         </div>
       )}

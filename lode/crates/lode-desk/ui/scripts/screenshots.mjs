@@ -115,6 +115,29 @@ const scenes = {
     await page.getByRole("complementary", { name: "Details" }).getByRole("button", { name: "Blame" }).click();
     await page.getByText(/ABoat::Tick/).waitFor();
   },
+  async diff(page) {
+    await scenes.workspace(page);
+    await page.getByRole("region", { name: "Pending changes" }).getByText("Boat.cpp").click();
+    await page.getByRole("button", { name: "Show diff" }).click();
+    await page.getByRole("table", { name: "Unified diff" }).waitFor();
+  },
+  async "diff-split"(page) {
+    await scenes.diff(page);
+    await page.getByRole("button", { name: "Side by side" }).click();
+    await page.getByRole("table", { name: "Side-by-side diff" }).waitFor();
+    // The choice is remembered; leave the next scenes on the default.
+    await page.evaluate(() => localStorage.clear());
+  },
+  async "diff-binary"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("region", { name: "Pending changes" }).getByText("Harbor.umap").dblclick();
+    await page.getByRole("note").waitFor();
+  },
+  async "diff-revision"(page) {
+    await scenes.history(page);
+    await page.getByRole("button", { name: "Diff of Source/Skyfall/Boat.h" }).click();
+    await page.getByRole("table", { name: "Unified diff" }).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

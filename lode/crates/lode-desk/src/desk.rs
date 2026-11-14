@@ -7,7 +7,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lode_ops::cmd::{checkout, commit, files, history, info, login, revert, status};
+use lode_ops::cmd::{checkout, commit, diff, files, history, info, login, revert, status};
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
 use lode_ops::output::Ui;
@@ -369,6 +369,74 @@ impl Desk {
                 &ctx,
                 history::BlameArgs {
                     path: spec,
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode diff` of one working file (a depot path) against its base: the file's entry of
+    /// `lode diff --json`, or null when the file has no change.
+    pub async fn diff(&self, workspace: String, path: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        let v = run_op(move || async move {
+            diff::diff(
+                &ctx,
+                diff::DiffArgs {
+                    paths: vec![PathBuf::from(path)],
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await?;
+        Ok(v["files"].get(0).cloned().unwrap_or(Value::Null))
+    }
+
+    /// The diff of `path` as revision `rev` changed it: against the parent revision, or
+    /// against the source of a copy or move, as an entry of `lode diff --json`.
+    pub async fn diff_revision(
+        &self,
+        workspace: String,
+        rev: u64,
+        path: String,
+    ) -> Result<Value, ErrorView> {
+        let r = self.revision(workspace.clone(), rev).await?;
+        let not_found = || ErrorView {
+            code: "not_found".into(),
+            message: format!("r{rev} did not change {path}"),
+            details: Value::Null,
+        };
+        let change = r["changes"]
+            .as_array()
+            .and_then(|cs| {
+                cs.iter()
+                    .find(|c| c["path"].as_str() == Some(path.as_str()))
+            })
+            .ok_or_else(not_found)?;
+        let parent = r["parent"].as_u64();
+        let copy = change["copy_from"].as_object().and_then(|c| {
+            Some(format!(
+                "{}@{}",
+                c.get("path")?.as_str()?,
+                c.get("rev")?.as_u64()?
+            ))
+        });
+        let at = |rev: u64| format!("{path}@{rev}");
+        let (old, new) = match change["action"].as_str() {
+            Some("add") => (copy, Some(at(rev))),
+            Some("delete") => (parent.map(at), None),
+            _ => (copy.or(parent.map(at)), Some(at(rev))),
+        };
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            diff::diff_versions(
+                &ctx,
+                diff::VersionsArgs {
+                    old,
+                    new,
                     ..Default::default()
                 },
             )

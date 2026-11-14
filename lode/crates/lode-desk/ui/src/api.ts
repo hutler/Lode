@@ -128,6 +128,21 @@ export interface BlameResult {
   truncated?: boolean;
 }
 
+/** One file of `lode diff --json`. */
+export interface FileDiff {
+  path: string;
+  status: string;
+  old_path: string | null;
+  binary: boolean;
+  old_size: number | null;
+  new_size: number | null;
+  old_mode: string | null;
+  new_mode: string | null;
+  insertions: number;
+  deletions: number;
+  patch?: string;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -160,6 +175,10 @@ export interface Backend {
   revision(workspace: string, rev: number): Promise<Revision>;
   /** Who last changed each line of `path`, as of `rev` (default: the workspace's). */
   blame(workspace: string, path: string, rev: number | null): Promise<BlameResult>;
+  /** A working file (depot path) against its base; null when it has no change. */
+  diff(workspace: string, path: string): Promise<FileDiff | null>;
+  /** A file as revision `rev` changed it. */
+  diffRevision(workspace: string, rev: number, path: string): Promise<FileDiff>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
   watch(workspace: string): Promise<void>;
   unwatch(workspace: string): Promise<void>;
@@ -209,6 +228,8 @@ async function tauriBackend(): Promise<Backend> {
     log: (workspace, path, before, max) => invoke("log", { workspace, path, before, max }),
     revision: (workspace, rev) => invoke("revision", { workspace, rev }),
     blame: (workspace, path, rev) => invoke("blame", { workspace, path, rev }),
+    diff: (workspace, path) => invoke("diff", { workspace, path }),
+    diffRevision: (workspace, rev, path) => invoke("diff_revision", { workspace, rev, path }),
     watch: (workspace) => invoke("watch", { workspace }),
     unwatch: (workspace) => invoke("unwatch", { workspace }),
     onChanged: (listener) => subscribe<string>("lode://changed", listener),

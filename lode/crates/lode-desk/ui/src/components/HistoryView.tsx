@@ -12,6 +12,7 @@ interface Props {
   initialRev: number | null;
   onPath: (path: string | null) => void;
   onBlame: (path: string, rev: number) => void;
+  onDiff: (path: string, rev: number) => void;
 }
 
 /** Revisions loaded per page. */
@@ -103,7 +104,7 @@ function GraphCell({ row, lanes }: { row: GraphRow; lanes: number }) {
 
 /** A branch's or a file's history: a virtual list of revisions with a graph, loaded in pages,
  * and the selected revision's details. */
-export function HistoryView({ info, path, initialRev, onPath, onBlame }: Props) {
+export function HistoryView({ info, path, initialRev, onPath, onBlame, onDiff }: Props) {
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -287,7 +288,7 @@ export function HistoryView({ info, path, initialRev, onPath, onBlame }: Props) 
 
       <aside className="details" aria-label="Revision">
         {detail ? (
-          <RevisionDetails r={detail} branch={info.branch} onPath={onPath} onBlame={onBlame} />
+          <RevisionDetails r={detail} branch={info.branch} onPath={onPath} onBlame={onBlame} onDiff={onDiff} />
         ) : (
           <p className="muted small">Select a revision to see what it changed.</p>
         )}
@@ -303,11 +304,13 @@ function RevisionDetails({
   branch,
   onPath,
   onBlame,
+  onDiff,
 }: {
   r: Revision;
   branch: string;
   onPath: (path: string) => void;
   onBlame: (path: string, rev: number) => void;
+  onDiff: (path: string, rev: number) => void;
 }) {
   const [, ...rest] = r.message.split("\n");
   const body = rest.join("\n").trim();
@@ -380,9 +383,14 @@ function RevisionDetails({
             <span className={`st st-${c.action === "add" ? "added" : c.action === "delete" ? "deleted" : "modified"}`}>
               {ACTION[c.action] ?? "?"}
             </span>
-            <span className="file-path mono" title={c.path}>
+            <button
+              className="link file-path mono"
+              title={c.path}
+              onClick={() => onDiff(c.path, r.rev)}
+              aria-label={`Diff of ${c.path}`}
+            >
               {fileName(c.path)}
-            </span>
+            </button>
             <span className="rev-file-actions">
               <button className="link" onClick={() => onPath(c.path)} aria-label={`History of ${c.path}`}>
                 History

@@ -14,6 +14,7 @@ import type {
   WhoAmI,
   WorkspaceInfo,
 } from "./api";
+import { demoRevisionDiff, demoWorkingDiff } from "./mockDiff";
 import { demoBlame, demoHead, demoLog, demoRevision } from "./mockHistory";
 
 export interface MockOptions {
@@ -275,6 +276,17 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const info = workspaces.get(workspace);
       if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
       return demoBlame(info.branch, path, rev);
+    },
+    diff: async (workspace, path) => {
+      const f = statusFor(workspace).files.find((x) => x.path === path);
+      return f ? demoWorkingDiff(path, f.status) : null;
+    },
+    diffRevision: async (workspace, rev, path) => {
+      const info = workspaces.get(workspace);
+      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+      const change = demoRevision(info.branch, rev)?.changes?.find((c) => c.path === path);
+      if (!change) fail("not_found", `r${rev} did not change ${path}`);
+      return demoRevisionDiff(rev, path, change.action);
     },
     watch: async () => {},
     unwatch: async () => {},

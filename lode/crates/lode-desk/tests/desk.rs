@@ -405,3 +405,81 @@ async fn history_pages_revisions_files_and_blame() {
         .unwrap();
     assert_eq!(old["lines"][1]["text"], "line 2");
 }
+
+#[tokio::test]
+async fn diffs_of_working_files_and_revisions() {
+    let s = setup().await;
+    s.server
+        .commit_files("game", "main", &[("a.txt", b"apple\npear\n")])
+        .await;
+    s.server
+        .commit_files("game", "main", &[("img.bin", b"\x89PNG\0\0\x01\x02")])
+        .await;
+    let root = checked_out(&s).await;
+    let log = s.desk.log(root.clone(), None, None, 10).await.unwrap();
+    let revs: Vec<u64> = log["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["rev"].as_u64().unwrap())
+        .collect();
+    let (img_rev, pear_rev) = (revs[0], revs[1]);
+    let b_log = s
+        .desk
+        .log(root.clone(), Some("b.txt".into()), None, 10)
+        .await
+        .unwrap();
+    let first_rev = b_log["revisions"][0]["rev"].as_u64().unwrap();
+
+    // A working file against its base.
+    std::fs::write(std::path::Path::new(&root).join("a.txt"), "apple\nplum\n").unwrap();
+    let d = s.desk.diff(root.clone(), "a.txt".into()).await.unwrap();
+    assert_eq!(d["status"], "modified");
+    assert_eq!(d["binary"], false);
+    assert_eq!(
+        (d["insertions"].as_u64(), d["deletions"].as_u64()),
+        (Some(1), Some(1))
+    );
+    let patch = d["patch"].as_str().unwrap();
+    assert!(patch.contains("-pear\n+plum\n"), "{patch}");
+    let unchanged = s.desk.diff(root.clone(), "b.txt".into()).await.unwrap();
+    assert!(unchanged.is_null(), "{unchanged}");
+
+    // A file as a revision changed it, against the parent revision.
+    let d = s
+        .desk
+        .diff_revision(root.clone(), pear_rev, "a.txt".into())
+        .await
+        .unwrap();
+    assert_eq!(d["status"], "modified");
+    assert!(
+        d["patch"].as_str().unwrap().contains(" apple\n+pear\n"),
+        "{d}"
+    );
+
+    // An added file has no old side; binary content is reported by size.
+    let d = s
+        .desk
+        .diff_revision(root.clone(), first_rev, "b.txt".into())
+        .await
+        .unwrap();
+    assert_eq!(d["status"], "added");
+    assert!(d["old_size"].is_null());
+    assert!(d["patch"].as_str().unwrap().contains("+banana\n"), "{d}");
+    let d = s
+        .desk
+        .diff_revision(root.clone(), img_rev, "img.bin".into())
+        .await
+        .unwrap();
+    assert_eq!(d["binary"], true);
+    assert_eq!(d["new_size"], 8);
+    assert!(!d["patch"].as_str().unwrap().contains("@@"), "{d}");
+
+    // A path the revision did not change.
+    let err = s
+        .desk
+        .diff_revision(root, img_rev, "a.txt".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "not_found", "{err:?}");
+}

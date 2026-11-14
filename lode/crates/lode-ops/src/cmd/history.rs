@@ -115,17 +115,17 @@ pub struct LsArgs {
 }
 
 /// A resolved source: client, depot, branch, and how to read paths.
-struct Target {
-    client: Client,
-    depot: String,
+pub(crate) struct Target {
+    pub(crate) client: Client,
+    pub(crate) depot: String,
     branch: String,
     /// The workspace's synced revision, when reading the workspace's own branch.
     synced: Option<u64>,
     /// Workspace root, when paths are local.
-    root: Option<std::path::PathBuf>,
+    pub(crate) root: Option<std::path::PathBuf>,
 }
 
-fn target(ctx: &Ctx, src: &Source) -> OpResult<Target> {
+pub(crate) fn target(ctx: &Ctx, src: &Source) -> OpResult<Target> {
     let ws = if src.depot.is_some() {
         None
     } else {
@@ -172,7 +172,7 @@ fn target(ctx: &Ctx, src: &Source) -> OpResult<Target> {
 }
 
 /// Splits `path@rev`. A trailing `@` part that is not a revision stays in the path.
-fn split_rev(arg: &str) -> OpResult<(&str, Option<u64>)> {
+pub(crate) fn split_rev(arg: &str) -> OpResult<(&str, Option<u64>)> {
     if let Some((p, r)) = arg.rsplit_once('@') {
         let digits = r.strip_prefix('r').unwrap_or(r);
         if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -188,7 +188,7 @@ fn split_rev(arg: &str) -> OpResult<(&str, Option<u64>)> {
 impl Target {
     /// A path argument: local (relative to the working directory) in a workspace, a depot
     /// path otherwise. `None` for the root.
-    fn path(&self, ctx: &Ctx, arg: &str) -> OpResult<Option<DepotPath>> {
+    pub(crate) fn path(&self, ctx: &Ctx, arg: &str) -> OpResult<Option<DepotPath>> {
         if arg.is_empty() {
             return Ok(None);
         }
@@ -212,7 +212,7 @@ impl Target {
 
     /// The revision to read: the one given, else the workspace's synced revision on its own
     /// branch, else the branch head.
-    async fn rev(&self, given: Option<u64>) -> OpResult<u64> {
+    pub(crate) async fn rev(&self, given: Option<u64>) -> OpResult<u64> {
         if let Some(r) = given.or(self.synced) {
             return Ok(r);
         }
