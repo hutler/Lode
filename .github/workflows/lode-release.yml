@@ -389,8 +389,12 @@ jobs:
           # the long one.
           $exe = ($cmd -split '"')[1]
           if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { throw "the lode scheme names no program: $cmd" }
-          $found = [System.IO.Directory]::GetFiles((Split-Path $exe), (Split-Path -Leaf $exe))
-          if ($found.Count -ne 1 -or (Split-Path -Leaf $found[0]) -ne 'lode-desk.exe') { throw "the lode scheme does not open lode-desk.exe: $cmd" }
+          Add-Type -Namespace Win32 -Name Paths -MemberDefinition '[DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetLongPathName(string shortPath, System.Text.StringBuilder longPath, uint size);'
+          $sb = New-Object System.Text.StringBuilder 1024
+          if ([Win32.Paths]::GetLongPathName($exe, $sb, 1024) -eq 0) { throw "cannot read the long form of $exe" }
+          $long = $sb.ToString()
+          Write-Output "that is: $long"
+          if ((Split-Path -Leaf $long) -ne 'lode-desk.exe') { throw "the lode scheme does not open lode-desk.exe: $cmd" }
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall exited with $($p.ExitCode)" }
       - uses: actions/upload-artifact@v4
