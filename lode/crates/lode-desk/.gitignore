@@ -1,0 +1,6 @@
+/target/
+/gen/schemas/
+/ui/node_modules/
+/ui/dist/
+/ui/dist-mock/
+/ui/screenshots/

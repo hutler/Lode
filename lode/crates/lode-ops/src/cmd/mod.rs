@@ -12,6 +12,7 @@ pub mod diff;
 pub mod files;
 pub mod history;
 pub mod import;
+pub mod info;
 pub mod init;
 pub mod locks;
 pub mod login;

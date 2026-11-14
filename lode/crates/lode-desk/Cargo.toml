@@ -1,0 +1,46 @@
+[package]
+name = "lode-desk"
+description = "Lode Desk, the Lode desktop client"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+# Tauri 2.12 needs 1.90; the rest of Lode stays on 1.88.
+rust-version = "1.90"
+repository = "https://github.com/hutler/simpledevops"
+publish = false
+
+# Its own workspace: building the CLI and server never needs the system web view libraries.
+[workspace]
+
+[lib]
+name = "lode_desk"
+
+[[bin]]
+name = "lode-desk"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+lode-client = { path = "../lode-client" }
+lode-ops = { path = "../lode-ops" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.12", features = [] }
+tauri-plugin-dialog = "2.8"
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[dev-dependencies]
+lode-proto = { path = "../lode-proto" }
+lode-testkit = { path = "../lode-testkit" }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "sync", "macros"] }

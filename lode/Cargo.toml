@@ -19,6 +19,9 @@ members = [
     "crates/loded",
     "crates/lode-testkit",
 ]
+# Lode Desk is its own workspace, so building the CLI and server never needs the system
+# web view libraries.
+exclude = ["crates/lode-desk"]
 
 [workspace.package]
 version = "0.1.0"

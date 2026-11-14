@@ -21,6 +21,9 @@ pub struct LoginArgs {
     /// Read the password from stdin instead of prompting.
     #[arg(long)]
     pub password_stdin: bool,
+    /// The password, for programs that already asked for it (not a command-line option).
+    #[arg(skip)]
+    pub password: Option<String>,
 }
 
 fn read_stdin_line(ui: &dyn Ui, what: &str) -> OpResult<String> {
@@ -52,7 +55,8 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
     let token = if args.token_stdin {
         read_stdin_line(ui, "token")?
     } else {
-        if ctx.g.json && (args.name.is_none() || !args.password_stdin) {
+        if ctx.g.json && (args.name.is_none() || !(args.password_stdin || args.password.is_some()))
+        {
             return Err(OpError::usage(
                 "with --json, give --name and --password-stdin (or --token-stdin)",
             ));
@@ -61,7 +65,9 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
             Some(n) => n,
             None => prompt(ui, "Name: ")?,
         };
-        let password = if args.password_stdin {
+        let password = if let Some(p) = args.password {
+            p
+        } else if args.password_stdin {
             read_stdin_line(ui, "password")?
         } else {
             if !ui.interactive() {
