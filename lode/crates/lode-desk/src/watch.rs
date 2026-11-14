@@ -48,9 +48,11 @@ impl Watcher {
             }
         })?;
         inner.watch(root, RecursiveMode::Recursive)?;
-        // Paths arrive as the OS reports them; compare against the canonical root.
+        // Paths arrive as the OS reports them: on Windows the plain form of the root given,
+        // elsewhere sometimes the canonical one (a symlinked temp dir on macOS). Compare against
+        // both; canonicalizing first would turn both into `\\?\C:\…` on Windows.
+        let raw_root = root.to_path_buf();
         let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        let raw_root = root.clone();
         std::thread::Builder::new()
             .name("lode-watch".into())
             .spawn(move || {
