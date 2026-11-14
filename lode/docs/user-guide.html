@@ -63,7 +63,7 @@
   <h1>Contents</h1>
   <ol>
     <li><a href="#intro">Introduction</a>
-      <ol><li>What Lode is</li><li>Concepts</li></ol></li>
+      <ol><li>What Lode is</li><li>Concepts</li><li>Quick start</li></ol></li>
     <li><a href="#client">Part I — Client</a>
       <ol>
         <li>Installing the client</li><li>Signing in</li><li>Getting a workspace</li>
@@ -111,6 +111,31 @@
   <tr><td>Token</td><td>The secret a client uses to prove who it is. Each token has scopes that limit what it may do.</td></tr>
 </table>
 <p>Only files and symbolic links are versioned. A directory exists while it contains files; empty directories are not stored.</p>
+
+<h2 id="quick-start">Quick start</h2>
+<p>From nothing to a team working in one depot, in about 15 minutes. Pick where the server runs, then bring in your project.</p>
+<h3>1. The server</h3>
+<p><strong>Linux server (a VDS or your own machine).</strong> Point a domain name at it and open port 443. Then, over SSH:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/hutler/simpledevops/main/lode/packaging/install.sh | sh
+sudo -u lode loded setup            # domain, email, backups, admin password
+sudo systemctl enable --now loded</code></pre>
+<p><strong>Windows.</strong> Run <code>lode-server-0.1.0-x64.msi</code> from the releases page and keep "Set up the Lode server now" ticked on the last page. Answer the questions in the window that opens; it installs and starts the service. Allow port 443 (or the port you chose) through Windows Firewall.</p>
+<p><strong>Docker.</strong> Copy <code>packaging/compose.yaml</code> from the release archive, set <code>LODED_DOMAIN</code> and <code>LODED_EMAIL</code> in it, put the admin password in <code>admin-password.txt</code> beside it, and run <code>docker compose up -d</code>.</p>
+<p>Without a domain, choose "this machine only" in the setup: the server then answers plain HTTP on 127.0.0.1:7480, for trying Lode out or for running behind your own proxy. Part II, chapter 2 has every option.</p>
+<h3>2. Your project</h3>
+<p>Install the client on your machine (Part I, chapter 1; on Linux, <code>install.sh</code> above installs it too), sign in as <code>admin</code>, and either start from a folder or bring a Git project with its history:</p>
+<pre><code>lode login https://lode.example.com
+cd MyGame
+lode init https://lode.example.com/mygame --template unreal      # the folder as it is
+lode import git ~/src/mygame https://lode.example.com/mygame --branch main   # or a Git history</code></pre>
+<p>Templates exist for <code>unreal</code>, <code>unity</code>, <code>godot</code>, <code>rust</code>, <code>node</code> and <code>generic</code> (Part I, chapter 3).</p>
+<h3>3. Your team</h3>
+<pre><code>lode admin user create alice                       # prompts for her first password
+lode admin acl add allow write user:alice --depot mygame</code></pre>
+<p>Alice installs the client and runs:</p>
+<pre><code>lode login https://lode.example.com                # name: alice
+lode checkout https://lode.example.com/mygame MyGame</code></pre>
+<p>From here, Part I chapter 4 describes the daily work.</p>
 
 <!-- ======================================================= CLIENT -->
 <section class="part" id="client">

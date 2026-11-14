@@ -1728,6 +1728,7 @@ dependencies = [
  "lode-mod-shelves",
  "lode-mod-webhooks",
  "lode-server",
+ "lode-testkit",
  "rpassword",
  "serde_json",
  "tempfile",

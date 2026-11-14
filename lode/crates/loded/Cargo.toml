@@ -36,5 +36,6 @@ windows-service.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2"
+lode-testkit.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
