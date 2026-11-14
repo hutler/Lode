@@ -23,6 +23,8 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M10.md](M10.md) | GUI team work | T100–T104 |
 | [M11.md](M11.md) | GUI branches, merges, setup and release | T110–T115 |
 | [M12.md](M12.md) | Lode 0.2: obliterate, SVN import, single sign-on, S3 storage | T120–T124 |
+| [M13.md](M13.md) | Lode Desk on Slint | T130–T135 |
+| [M14.md](M14.md) | Server admin web UI | T140–T143 |
 
 ## Dependency graph
 
@@ -93,6 +95,16 @@ M11  T110  T112                       (after T093, T091)
 
 M12  T120  T121  T122  T123           (T120 after T019 T053; T121 after T086; T122 after T040; T123 after T012)
      T124                             (after T120-T123 and T072)
+
+M13  T130                             (after T116)
+     T131  T132                       (after T130)
+     T133                             (after T131)
+     T134                             (after T132 T133)
+     T135                             (after T134)
+
+M14  T140                             (after T122; independent of M13)
+     T141  T142                       (after T140)
+     T143                             (after T141 T142)
 ```
 
 ## Status
