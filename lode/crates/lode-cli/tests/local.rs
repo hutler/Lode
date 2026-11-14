@@ -487,7 +487,8 @@ async fn diff_output_applies_with_patch() {
 
     let other = checkout(&server);
     let applied = std::process::Command::new("patch")
-        .args(["-p1", "--batch", "--silent"])
+        // `-E`: BSD patch (macOS) keeps a deleted file as an empty one without it.
+        .args(["-p1", "-E", "--batch", "--silent"])
         .current_dir(other.root())
         .stdin(std::process::Stdio::piped())
         .spawn()
