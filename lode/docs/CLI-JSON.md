@@ -86,10 +86,12 @@ is not allowed or a disabled user.
 
 ### `lode checkout <url>/<depot> [dir]`
 
-`{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "obliterated", "resumed": bool }`
+`{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "bytes_downloaded", "bytes_reused", "obliterated", "resumed": bool }`
 
 `files` counts the files in the view, `fetched` those placed by this run, `downloaded` the
-distinct blobs fetched from the server.
+distinct blobs fetched from the server. `bytes_downloaded` is the content received from the
+server and `bytes_reused` the content found locally instead: the shared cache, and for
+large files the chunks already in the workspace or left by an interrupted run (0.3).
 
 ### `lode init <url>/<depot> [--template T] [--dry-run] [-m MSG]`
 
@@ -218,7 +220,11 @@ them); `--all` reverts everything and forgets the merge as well.
 
 ### `lode commit`
 
-`{ "rev", "branch", "files", "uploaded", "replayed": bool, "resumed": bool }`
+`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool }`
+
+`uploaded` counts the blobs the server lacked; `bytes_uploaded` is the content sent and
+`bytes_reused` what the server already had, which for a large file is every chunk that did
+not change (0.3).
 
 `resumed` is true when the command finished an earlier commit whose answer was lost
 (`replayed` then tells whether the server had already made the revision).
@@ -259,7 +265,7 @@ neither `-m` nor `-F` is given.
 
 ### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
 
-`{ "shelf": id, "version": n, "files": n, "uploaded": n, "kept": bool, "updated": bool,
+`{ "shelf": id, "version": n, "files": n, "uploaded": n, "bytes_uploaded": n, "bytes_reused": n, "kept": bool, "updated": bool,
 "merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
 
 A pending merge goes into the shelf's `merged_from` (and leaves the workspace unless `--keep`);
@@ -325,7 +331,7 @@ side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
   "rev": 12, "from": 9, "full": false,
   "files": [ { "path": "a.txt", "outcome": "merged" } ],
   "counts": { "merged": 1 },
-  "downloaded": 0,
+  "downloaded": 0, "bytes_downloaded": 0, "bytes_reused": 0,
   "obliterated": []
 }
 ```

@@ -33,7 +33,7 @@ use crate::materialize::remove_and_prune;
 \nThe content is uploaded and the changes are checked against the branch head, like a commit,
 but no revision is made. The shelved files are then reverted in the workspace unless --keep.
 --update ID replaces the content of one of your open shelves and raises its version.
-\nWith --json: {\"shelf\":id,\"version\":n,\"files\":n,\"uploaded\":n,\"kept\":bool,\"updated\":bool}.")]
+\nWith --json: {\"shelf\":id,\"version\":n,\"files\":n,\"uploaded\":n,\"bytes_uploaded\":n,\"bytes_reused\":n,\"kept\":bool,\"updated\":bool}.")]
 pub struct ShelveArgs {
     /// Only changes to these files and directories.
     pub paths: Vec<PathBuf>,
@@ -308,7 +308,9 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> OpResult<Value> {
         "shelf": view.id,
         "version": view.version,
         "files": n,
-        "uploaded": uploaded,
+        "uploaded": uploaded.blobs,
+        "bytes_uploaded": uploaded.transfer.network,
+        "bytes_reused": uploaded.transfer.reused,
         "kept": args.keep,
         "updated": args.update.is_some(),
         "merged_from": merges,

@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 mod blobs;
+mod chunked;
 mod credentials;
 mod error;
 mod io;
@@ -54,6 +55,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 pub use blobs::FileContent;
+pub use chunked::{ChunkCache, DownloadOpts, Transfer};
 pub use credentials::{read_token_file, CredentialStore};
 pub use error::{ApiError, Error, Result};
 pub use manifest::ManifestStream;
@@ -195,6 +197,7 @@ impl ClientBuilder {
             token: self.token.map(Arc::from),
             retry: self.retry,
             upload_level: self.upload_level,
+            chunking: Arc::default(),
         })
     }
 }
@@ -255,6 +258,8 @@ pub struct Client {
     token: Option<Arc<str>>,
     retry: RetryPolicy,
     upload_level: Option<i32>,
+    /// The server's chunking parameters once asked (`None` inside: the server sends whole).
+    chunking: Arc<std::sync::OnceLock<Option<lode_proto::auth::ChunkingInfo>>>,
 }
 
 impl std::fmt::Debug for Client {

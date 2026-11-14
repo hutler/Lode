@@ -124,6 +124,17 @@ fn auth_types() {
             api_version: lode_proto::consts::API_VERSION.into(),
             modules: vec!["locks".into(), "shelves".into(), "mcp".into()],
             sso: None,
+            chunking: None,
+        }
+    );
+    snap!(
+        "info_chunking",
+        Info {
+            server_version: "0.3.0".into(),
+            api_version: lode_proto::consts::API_VERSION.into(),
+            modules: vec![],
+            sso: None,
+            chunking: Some(lode_proto::auth::ChunkingInfo::current()),
         }
     );
     snap!(
@@ -136,6 +147,7 @@ fn auth_types() {
                 label: "Example Corp".into(),
                 password_login: false,
             }),
+            chunking: None,
         }
     );
     snap!(

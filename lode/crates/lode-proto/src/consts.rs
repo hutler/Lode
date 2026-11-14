@@ -80,6 +80,8 @@ pub mod paths {
     pub const OBJECTS_MISSING: &str = "/api/v1/depots/{d}/objects/missing";
     /// `PUT` and `GET` a blob.
     pub const BLOB: &str = "/api/v1/depots/{d}/blobs/{id}";
+    /// `PUT` and `GET` a large file's chunk list (ARCHITECTURE §3.5).
+    pub const BLOB_CHUNKS: &str = "/api/v1/depots/{d}/blobs/{id}/chunks";
     /// `POST` a commit.
     pub const COMMITS: &str = "/api/v1/depots/{d}/branches/{b}/commits";
     /// `GET` revision list.

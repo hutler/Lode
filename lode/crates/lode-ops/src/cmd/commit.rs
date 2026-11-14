@@ -292,6 +292,8 @@ async fn finish_pending(
                 "branch": resp.branch,
                 "files": pending.request.changes.len(),
                 "uploaded": 0,
+                "bytes_uploaded": 0,
+                "bytes_reused": 0,
                 "replayed": resp.replayed,
                 "resumed": true,
             }))
@@ -398,14 +400,23 @@ pub(crate) fn gather(
     Ok((out, lists))
 }
 
-/// Uploads the content the server lacks and checks that no file changed meanwhile. Returns
-/// the number of blobs uploaded.
+/// What [`upload`] sent.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Uploaded {
+    /// Blobs the server lacked.
+    pub blobs: usize,
+    /// Content bytes sent and bytes the server already had (chunks of large files).
+    pub transfer: lode_client::Transfer,
+}
+
+/// Uploads the content the server lacks and checks that no file changed meanwhile. Large
+/// files go in chunks, so only the chunks the server lacks are sent (ARCHITECTURE §3.5).
 pub(crate) async fn upload(
     ctx: &Ctx,
     client: &Client,
     depot: &str,
     out: &[Outgoing],
-) -> OpResult<usize> {
+) -> OpResult<Uploaded> {
     let mut by_id: HashMap<ObjectId, &Outgoing> = HashMap::new();
     for o in out {
         if let Some(id) = o.change.new_id {
@@ -428,14 +439,22 @@ pub(crate) async fn upload(
             let r = if kind == Some(EntryKind::Symlink) {
                 let target = fs::read_link(&local_path)?;
                 let text = target.to_string_lossy().replace('\\', "/").into_bytes();
+                let n = text.len() as u64;
                 client
                     .put_blob(&depot, &id, std::io::Cursor::new(text))
                     .await
+                    .map(|_| lode_client::Transfer {
+                        network: n,
+                        reused: 0,
+                    })
             } else {
-                client.put_blob_file(&depot, &id, &local_path).await
+                client.upload_file(&depot, &id, &local_path, size).await
             };
             match r {
-                Ok(_) => Ok(size),
+                Ok(t) => Ok((size, t)),
+                Err(lode_client::Error::HashMismatch { .. }) => {
+                    Err(changed_while_committing(&path))
+                }
                 Err(lode_client::Error::Api(a))
                     if a.known_code() == Some(lode_core::ErrorCode::HashMismatch) =>
                 {
@@ -459,8 +478,14 @@ pub(crate) async fn upload(
     }))
     .buffer_unordered(PARALLEL_DOWNLOADS);
     futures::pin_mut!(uploads);
+    let mut done = Uploaded {
+        blobs: lacking.len(),
+        ..Uploaded::default()
+    };
     while let Some(r) = uploads.next().await {
-        progress.step(r?);
+        let (size, t) = r?;
+        done.transfer += t;
+        progress.step(size);
     }
     progress.finish();
 
@@ -475,7 +500,7 @@ pub(crate) async fn upload(
             }
         }
     }
-    Ok(lacking.len())
+    Ok(done)
 }
 
 /// Runs `lode commit`.
@@ -622,7 +647,9 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
         "rev": resp.rev,
         "branch": resp.branch,
         "files": n,
-        "uploaded": uploaded,
+        "uploaded": uploaded.blobs,
+        "bytes_uploaded": uploaded.transfer.network,
+        "bytes_reused": uploaded.transfer.reused,
         "replayed": resp.replayed,
         "resumed": false,
     }))

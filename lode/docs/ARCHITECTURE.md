@@ -95,7 +95,7 @@ Each object is one file: a 16-byte header followed by the payload.
 | --- | --- | --- |
 | 0 | 4 | magic `LODE` |
 | 4 | 1 | format version = 1 |
-| 5 | 1 | kind: 1 blob, 2 tree, 3 chunk list (reserved, not implemented) |
+| 5 | 1 | kind: 1 blob, 2 tree, 3 chunk list (§3.5) |
 | 6 | 1 | codec: 0 none, 1 zstd |
 | 7 | 1 | reserved = 0 |
 | 8 | 8 | raw length, little-endian |
@@ -151,6 +151,56 @@ has every local object, and then sets `kind = "s3"` in `loded.toml` (keeping
 server. `lode-store`'s feature `test-util` adds an in-process fake S3 that checks signatures,
 and the store suite runs against the filesystem store, the fake and, with `LODE_TEST_S3`, a
 real service (MinIO in CI).
+
+### 3.5 Chunked files (T150)
+
+A file of at least 16 MiB (`CHUNK_THRESHOLD`, the same cut-off as text versus binary) may be
+stored as a **chunk list** instead of whole. The file keeps its id, `BLAKE3(content)`, so
+trees, revisions, locks, shelves, caches and older clients do not see a difference. Each
+chunk is an ordinary blob (kind 1) under its own id; the list is a kind-3 object stored
+under the **file's** id. Its payload:
+
+```
+u8      version = 1
+varint  count            at least 2
+chunk*  in file order
+  [32]    id            blob id of the chunk
+  varint  size          256 KiB ..= 4 MiB; only the last chunk may be smaller
+```
+
+Decoding is strict, like trees: a wrong version, a count under 2, a size out of range, a
+non-canonical varint or trailing bytes are rejected.
+
+**Chunker.** Cut points come from FastCDC (Xia et al., "The Design of Fast Content-Defined
+Chunking", 2020) with normalized chunking at level 2: minimum 256 KiB, average 1 MiB, maximum
+4 MiB. For each byte after the first 256 KiB of a chunk, `hash = (hash << 1) + GEAR[byte]`
+(wrapping, 64 bits, starting at 0 for each chunk); the chunk ends after that byte when
+`hash & mask == 0`, with the 22 highest bits as the mask up to 1 MiB into the chunk and the
+18 highest bits after it, or when it reaches 4 MiB. `GEAR[i]` is the first 8 bytes,
+little-endian, of `BLAKE3("lode gear v1" || u8 i)`. The scheme is named
+`fastcdc-2020-lode-v1` and `GET /info` reports it with its sizes (`chunking`), so every client
+cuts the same content at the same places and their uploads share chunks. Test vector: the
+24 MiB xorshift stream of `lode-core`'s `chunk::tests::noise(0x10de, …)` ends its first four
+chunks at 1,394,431, 2,789,073, 3,920,034 and 5,066,432 and has 20 chunks.
+
+**Upload.** The client uploads the chunks the server lacks (`objects/missing` with the chunk
+ids), then `PUT /depots/{d}/blobs/{id}/chunks` with the list. The server checks every chunk
+is stored with the size given (`missing_objects` names the others), streams them in order
+through BLAKE3 and compares with `id` (`hash_mismatch`), and only then stores the list with
+the same no-replace rule as any object. A file under the threshold is refused; a file already
+stored, whole or chunked, is `AlreadyPresent`. The check holds the GC fence shared, like a
+commit's object checks.
+
+**Reading.** The server wraps its store in `ChunkedStore`: `get` of a chunk list streams the
+chunks one after the other, so download, `files`, blame, MCP, shelves and fsck's re-hash see
+the whole file without knowing. `get_stored` still shows the list. `get_from(offset)` opens
+only the chunks from an offset on, which serves `Range`. `GET …/blobs/{id}/chunks` returns the
+list of a chunked file and `not_found` with `details.reason = "not_chunked"` for one stored
+whole. Chunks need not be stored as chunks only: a 1 MiB file whose content equals a chunk is
+the same object.
+
+Chunked files also lift the S3 store's 5 GiB single-`PUT` limit, since no object is bigger
+than a chunk or its list.
 
 ## 4. Metadata
 
@@ -302,7 +352,8 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/branches/{b}/merge-info?source=<branch>` | Merging `source` into `b`: `{target, source, branch_point, merged: [{rev, from_rev, to_rev}], base, source_head, pending}`. `branch_point` is the newest revision both histories share; `merged` the ranges from `source` recorded in `b`'s history (§4.3); `base` the merge base of SPEC §5.4; `pending` how many source revisions come after it. Needs read on both branches |
 | `POST /depots/{d}/objects/missing` | `{ids}` → `{missing}`; at most 10,000 ids per call. Needs scope `write` or `shelve`, like upload, because the answer reveals whether content exists |
 | `PUT /depots/{d}/blobs/{id}` | Upload. Body is the raw content, optionally `Content-Encoding: zstd` |
-| `GET /depots/{d}/blobs/{id}` | Download; honours `Accept-Encoding: zstd`; supports `Range` on raw bytes only when stored uncompressed, otherwise full body |
+| `GET /depots/{d}/blobs/{id}` | Download, whole or chunked (§3.5); honours `Accept-Encoding: zstd` for an object stored compressed and whole; one `Range: bytes=` range on the raw content answers `206` (`416` when it cannot be met) |
+| `PUT /depots/{d}/blobs/{id}/chunks` · `GET …` | Store a large file as the chunk list in the body (needs scope `write` or `shelve`); read a chunked file's list (§3.5) |
 | `POST /depots/{d}/branches/{b}/commits` | Commit (section 5) |
 | `GET /depots/{d}/revisions?branch=&path=&before=&after=&own=&changes=&author=&author_kind=&limit=` | Revision list, paged. `author=<name>` and `author_kind=user|agent` filter by author. Default order is newest first, paging with `before`. With `after=N` the order is ascending from `N+1`, for polling. Without `branch` the list covers the whole depot; every item names its branch. With `branch`, inherited history (§4.3) is included unless `own=true`. `changes=true` adds each revision's changed paths, capped per revision (`[limits] max_changes_listed`, default 1,000) with a `changes_truncated` flag. With `path`, `follow=true` continues through `copy_from` into the source path's history |
 | `GET /depots/{d}/revisions/{n}` | One revision with its changes |
@@ -979,6 +1030,29 @@ records `N..N`. Only ranges whose source is the merged branch count toward the b
 that reached the source through other merges is merged again, which three-way merging mostly
 absorbs.
 
+### 10.6 Large files (T151)
+
+When the server reports `chunking` in `/info` with the parameters this build uses, a file of
+at least 16 MiB travels in chunks (§3.5); otherwise, and against older servers, it travels
+whole. `LODE_TEST_NO_CHUNKING` forces whole transfers for tests.
+
+- **Upload** (commit, shelve, import): the file is cut and hashed in one read; a file that no
+  longer hashes to the id being committed stops the commit as changed. `objects/missing` is
+  asked for the chunk ids, the missing chunks are sent as blobs (four at a time, each read
+  from its offset in the file), then the list. If a GC removed a chunk in between, the list is
+  refused with `missing_objects` and the round runs once more. A rerun after a crash needs no
+  state: the server keeps what was sent.
+- **Download** (checkout, update, switch, view changes): the client asks for the list
+  (`not_chunked` means the file is stored whole and is downloaded whole). Chunks come, in
+  order of preference, from `.lode/tmp/chunks/` (left by an interrupted run), from the files
+  now at the paths being replaced (cut with the same chunker; whatever matches a chunk id is
+  copied, whether or not the file was modified), from the shared cache, and only then from the
+  server. The file is put together in `.lode/tmp`, checked against its id and renamed into
+  place; its chunks are then removed from `.lode/tmp/chunks/`.
+- **Shared cache:** for large files it holds chunks, not whole files, so several versions of
+  a big asset share most of their space.
+- Results report `bytes_uploaded`/`bytes_downloaded` and `bytes_reused` (CLI-JSON).
+
 ## 11. Maintenance
 
 - **GC** (`lode admin gc`): mark from every revision's root tree (walking tree objects, memoized
@@ -988,6 +1062,12 @@ absorbs.
   shared from its blob checks to its transaction, and each batch first marks the revisions
   committed since the previous mark, so a finished commit never loses an object.
   `POST /admin/depots/{d}/gc[?dry_run=true]` returns objects checked, objects and bytes removed.
+- **Chunked files** (T150): the mark adds the chunks of every reachable chunk list (a file
+  entry of at least 16 MiB is looked up once), and of a module root that is one. fsck checks
+  that each chunk of a referenced list is stored with its size; `--full` re-hashes the
+  assembled file. Obliterating a chunked file also obliterates (records and deletes) the
+  chunks no other reachable file uses, found with a mark that skips the selected files, so
+  the content cannot be put together again; chunks shared with other files stay.
 - **fsck** (`lode admin fsck`): every revision's tree is reachable and decodes; every referenced
   object exists; optional `--full` re-hashes every object; branch heads and `next_rev` are
   consistent. `POST /admin/depots/{d}/fsck[?full=true]` returns every problem with its

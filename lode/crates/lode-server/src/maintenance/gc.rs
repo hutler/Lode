@@ -24,7 +24,7 @@ use std::collections::HashSet;
 use std::time::{Duration, UNIX_EPOCH};
 
 use futures::StreamExt;
-use lode_core::{DepotId, EntryKind, ObjectId, ObjectKind};
+use lode_core::{DepotId, EntryKind, ObjectId, ObjectKind, CHUNK_THRESHOLD};
 use lode_meta::{Reads, RevisionFilter};
 use lode_proto::admin::MaintenanceReport;
 use lode_store::StoreError;
@@ -51,6 +51,9 @@ struct Mark {
     live: HashSet<ObjectId>,
     trees_seen: HashSet<ObjectId>,
     last_rev: u64,
+    /// Files treated as already gone: neither they nor their chunks are marked through
+    /// them (obliterate uses this to find chunks no other file needs).
+    skip: HashSet<ObjectId>,
 }
 
 fn internal(what: &str, e: impl std::fmt::Display) -> ApiError {
@@ -71,10 +74,22 @@ impl Mark {
             for e in tree.entries() {
                 if e.kind == EntryKind::Dir {
                     stack.push(e.id);
-                } else {
-                    self.live.insert(e.id);
+                } else if self.skip.contains(&e.id) {
+                    continue;
+                } else if self.live.insert(e.id) && e.size >= CHUNK_THRESHOLD {
+                    self.chunks(state, &e.id).await?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Marks the chunks of a large file, if it is stored chunked.
+    async fn chunks(&mut self, state: &AppState, id: &ObjectId) -> Result<(), TreeLoadError> {
+        match state.chunked().chunk_list(self.depot, id).await {
+            Ok(Some(list)) => self.live.extend(list.chunks.iter().map(|c| c.id)),
+            Ok(None) | Err(StoreError::NotFound(_)) => {}
+            Err(e) => return Err(e.into()),
         }
         Ok(())
     }
@@ -125,7 +140,7 @@ impl Mark {
             })
             .await?;
         for id in roots {
-            if self.live.contains(&id) {
+            if self.live.contains(&id) || self.skip.contains(&id) {
                 continue;
             }
             match state.blobs().get_stored(d, &id).await {
@@ -135,6 +150,13 @@ impl Mark {
                         .await
                         .map_err(|e| internal("cannot read a module root tree", e))?;
                 }
+                Ok(s) if s.kind == ObjectKind::ChunkList => {
+                    drop(s);
+                    self.live.insert(id);
+                    self.chunks(state, &id)
+                        .await
+                        .map_err(|e| internal("cannot read a module root's chunk list", e))?;
+                }
                 Ok(_) | Err(StoreError::NotFound(_)) => {
                     self.live.insert(id);
                 }
@@ -143,6 +165,25 @@ impl Mark {
         }
         Ok(())
     }
+}
+
+/// Everything reachable in `depot` when the files in `skip` are taken as gone. The caller
+/// holds the GC fence exclusively, so no commit adds references meanwhile.
+pub(crate) async fn live_without(
+    state: &AppState,
+    depot: DepotId,
+    skip: HashSet<ObjectId>,
+) -> ApiResult<HashSet<ObjectId>> {
+    let mut mark = Mark {
+        depot,
+        live: HashSet::new(),
+        trees_seen: HashSet::new(),
+        last_rev: 0,
+        skip,
+    };
+    mark.revisions(state).await?;
+    mark.module_roots(state).await?;
+    Ok(mark.live)
 }
 
 /// Collects garbage in `depot`. One collection runs at a time per server. A collection that
@@ -175,6 +216,7 @@ async fn collect(
         live: HashSet::new(),
         trees_seen: HashSet::new(),
         last_rev: 0,
+        skip: HashSet::new(),
     };
     mark.revisions(state).await?;
     mark.module_roots(state).await?;

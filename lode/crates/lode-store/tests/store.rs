@@ -27,7 +27,7 @@ const REGION: &str = "us-east-1";
 
 /// A store under test with raw access to what it stored.
 trait Fixture: Sized {
-    type S: BlobStore;
+    type S: BlobStore + Clone + 'static;
     /// A fresh, empty store; `None` when this backend is not available here.
     async fn new(cap: Option<u64>) -> Option<Self>;
     fn store(&self) -> &Self::S;
@@ -223,6 +223,7 @@ suite!(
     rejects_truncated_and_damaged_objects,
     list_skips_stray_files_and_delete_works,
     one_gib_stream,
+    chunked_files,
 );
 
 async fn put<S: BlobStore>(s: &S, data: &[u8]) -> Result<PutOutcome, StoreError> {
@@ -669,4 +670,41 @@ async fn one_gib_stream<F: Fixture>() {
     }
     assert_eq!(total, LEN);
     assert_eq!(back.finalize().as_bytes(), id.as_bytes());
+}
+
+/// T150: a chunked file over this store reads back whole and from any offset, and a chunk
+/// list is refused until its chunks are stored.
+async fn chunked_files<F: Fixture>() {
+    use lode_store::{ChunkListOutcome, ChunkedStore};
+    let Some(f) = F::new(None).await else { return };
+    let store = ChunkedStore::new(std::sync::Arc::new(f.store().clone()), u64::MAX);
+    let data = noise(17 * 1024 * 1024 + 5, 99);
+    let mut h = lode_core::ChunkingHasher::new();
+    h.update(&data);
+    let r = h.finish();
+    let list = r.chunks.unwrap();
+    assert!(matches!(
+        store.put_chunk_list(D, &r.id, &list).await.unwrap(),
+        ChunkListOutcome::Missing(_)
+    ));
+    let mut off = 0;
+    for c in &list.chunks {
+        let part = &data[off..off + c.size as usize];
+        off += c.size as usize;
+        put(&store, part).await.unwrap();
+    }
+    assert_eq!(
+        store.put_chunk_list(D, &r.id, &list).await.unwrap(),
+        ChunkListOutcome::Stored(PutOutcome::Created)
+    );
+    assert_eq!(read_all(&store, &r.id).await.unwrap(), data);
+    let start = list.chunks[0].size as u64 + 10;
+    let mut rd = store.get_from(D, &r.id, start).await.unwrap().reader;
+    let mut tail = Vec::new();
+    rd.read_to_end(&mut tail).await.unwrap();
+    assert_eq!(tail, data[start as usize..]);
+    assert_eq!(
+        f.store().get(D, &r.id).await.unwrap().kind,
+        ObjectKind::ChunkList
+    );
 }

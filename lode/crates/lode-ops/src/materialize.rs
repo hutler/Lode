@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use futures::StreamExt;
@@ -184,8 +185,25 @@ pub struct Fetched {
     pub bytes: u64,
     /// Distinct blobs downloaded from the server (not counting the shared cache).
     pub downloaded: u64,
+    /// Content bytes received from the server.
+    pub bytes_downloaded: u64,
+    /// Content bytes of large files found locally instead (chunks already on disk or in
+    /// the shared cache).
+    pub bytes_reused: u64,
     /// Files left out because their content was obliterated on the server (T120), by path.
     pub obliterated: Vec<DepotPath>,
+}
+
+/// The shared download cache as a store of chunks: chunks are content like any blob.
+struct SharedChunks(BlobCache);
+
+impl lode_client::ChunkCache for SharedChunks {
+    fn copy_out(&self, id: &ObjectId, dest: &Path) -> std::io::Result<bool> {
+        self.0.copy_out(id, dest)
+    }
+    fn store(&self, id: &ObjectId, src: &Path) -> std::io::Result<()> {
+        self.0.store_file(id, src).map(|_| ())
+    }
 }
 
 fn is_obliterated(e: &lode_client::Error) -> bool {
@@ -328,14 +346,39 @@ pub async fn fetch_entries(
         progress.step(e.size);
     }
 
+    let chunk_dir = tmp_dir.join("chunks");
+    let chunk_cache: Option<Arc<dyn lode_client::ChunkCache>> = cache
+        .clone()
+        .map(|c| Arc::new(SharedChunks(c)) as Arc<dyn lode_client::ChunkCache>);
     let downloads = futures::stream::iter(todo.into_iter().map(|(id, group)| {
         let client = client.clone();
         let tmp_dir = tmp_dir.clone();
         let cache = cache.clone();
         let depot = depot.to_owned();
         let out = out.clone();
+        let chunk_dir = chunk_dir.clone();
+        let chunk_cache = chunk_cache.clone();
+        // What the workspace holds at these paths now may share chunks with the new content.
+        let sources: Vec<PathBuf> = group.iter().map(|e| root.join(e.path.as_str())).collect();
         async move {
             let tmp = tmp_dir.join(format!("{}-{}", id.to_hex(), std::process::id()));
+            // The manifest's size bounds what the server may send.
+            let size = group.first().map_or(0, |e| e.size);
+            if client.chunks_file(size).await {
+                // Large files: chunks, from local copies and the shared cache first.
+                let warn_out = out.clone();
+                let opts = lode_client::DownloadOpts {
+                    chunk_dir: Some(chunk_dir),
+                    sources,
+                    cache: chunk_cache,
+                    warn: Some(Arc::new(move |m: String| warn_out.warn(m))),
+                };
+                return match client.download_file(&depot, &id, &tmp, size, &opts).await {
+                    Ok(t) => Ok((Some(tmp), group, t)),
+                    Err(e) if is_obliterated(&e) => Ok((None, group, Default::default())),
+                    Err(e) => Err(e.into()),
+                };
+            }
             // A cache problem never fails the sync: the blob is downloaded instead.
             let hit = match &cache {
                 Some(c) => c.copy_out(&id, &tmp).unwrap_or_else(|e| {
@@ -344,12 +387,13 @@ pub async fn fetch_entries(
                 }),
                 None => false,
             };
-            if !hit {
-                // The manifest's size bounds what the server may send.
-                let size = group.first().map_or(0, |e| e.size);
+            let mut t = lode_client::Transfer::default();
+            if hit {
+                t.reused = size;
+            } else {
                 match client.download_blob_max(&depot, &id, &tmp, size).await {
-                    Ok(_) => {}
-                    Err(e) if is_obliterated(&e) => return Ok((None, group, false)),
+                    Ok(n) => t.network = n,
+                    Err(e) if is_obliterated(&e) => return Ok((None, group, t)),
                     Err(e) => return Err(e.into()),
                 }
                 if let Some(c) = &cache {
@@ -358,13 +402,16 @@ pub async fn fetch_entries(
                     }
                 }
             }
-            Ok::<_, OpError>((Some(tmp), group, !hit))
+            Ok::<_, OpError>((Some(tmp), group, t))
         }
     }))
     .buffer_unordered(PARALLEL_DOWNLOADS);
     futures::pin_mut!(downloads);
     while let Some(done) = downloads.next().await {
-        let (tmp, group, from_server) = done?;
+        let (tmp, group, transfer) = done?;
+        let from_server = transfer.network > 0;
+        stats.bytes_downloaded += transfer.network;
+        stats.bytes_reused += transfer.reused;
         let Some(tmp) = tmp else {
             for e in &group {
                 leave_out(ws, &root, e, &mut stats)?;
