@@ -394,6 +394,33 @@ async fn resolve_with(
 }
 
 #[tauri::command]
+async fn view(desk: State<'_, Desk>, workspace: String) -> Result<Value, ErrorView> {
+    desk.view(workspace).await
+}
+
+#[tauri::command]
+async fn view_tree(
+    desk: State<'_, Desk>,
+    workspace: String,
+    path: Option<String>,
+) -> Result<Value, ErrorView> {
+    desk.view_tree(workspace, path).await
+}
+
+#[tauri::command]
+async fn view_apply(
+    desk: State<'_, Desk>,
+    workspace: String,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    force: bool,
+    dry_run: bool,
+) -> Result<Value, ErrorView> {
+    desk.view_apply(workspace, include, exclude, force, dry_run)
+        .await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -471,6 +498,9 @@ pub fn run() -> Result<(), tauri::Error> {
             conflict,
             resolve,
             resolve_with,
+            view,
+            view_tree,
+            view_apply,
             watch,
             unwatch,
         ])

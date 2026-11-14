@@ -339,6 +339,55 @@ export interface ConflictInfo {
   theirs_file: string | null;
 }
 
+/** Which part of the depot a workspace has on disk: include patterns (empty means all) and
+ * exclude patterns. */
+export interface ViewSpec {
+  include: string[];
+  exclude: string[];
+}
+
+/** The view, what it holds on the server at the workspace's revision, and what is on disk. */
+export interface ViewSummary {
+  view: ViewSpec;
+  rev: number;
+  server: { files: number; bytes: number };
+  disk: { files: number; bytes: number };
+}
+
+/** One entry of a depot folder (`lode ls --json`). */
+export interface TreeEntry {
+  name: string;
+  kind: "file" | "dir" | "symlink";
+  size: number;
+}
+
+/** One folder of the depot at the workspace's revision. */
+export interface TreeListing {
+  rev: number;
+  /** Null for the root. */
+  path: string | null;
+  entries: TreeEntry[];
+}
+
+/** What a view change would do (a dry run). */
+export interface ViewPreview {
+  view: ViewSpec;
+  dry_run: true;
+  fetch: { files: number; bytes: number; paths: string[] };
+  remove: { files: number; paths: string[] };
+  /** Files with local changes that would leave the view, which stop it without force. */
+  blocked: string[];
+  /** Untracked files where incoming ones would go. */
+  untracked: string[];
+}
+
+/** A view change that was made. */
+export interface ViewApplied {
+  view: ViewSpec;
+  added: number;
+  removed: number;
+}
+
 /** `lode branch create --json`, with the switch's result when it switched. */
 export type CreatedBranch = BranchInfo & { switch?: UpdateResult };
 
@@ -432,6 +481,26 @@ export interface Backend {
   resolve(workspace: string, paths: string[], using: "mine" | "theirs" | "merged"): Promise<{ resolved: string[] }>;
   /** Saves an edited result as the file and marks it resolved. */
   resolveWith(workspace: string, path: string, content: string): Promise<{ resolved: string[] }>;
+  /** The workspace view and what it holds. */
+  view(workspace: string): Promise<ViewSummary>;
+  /** One folder of the depot (a depot path; the root when null), in the view or not. */
+  viewTree(workspace: string, path: string | null): Promise<TreeListing>;
+  /** Replaces the view's patterns and syncs the files on disk; with `dryRun`, only says what
+   * would change. Files with local changes leaving the view stop it unless `force`. */
+  viewApply(
+    workspace: string,
+    include: string[],
+    exclude: string[],
+    force: boolean,
+    dryRun: true,
+  ): Promise<ViewPreview>;
+  viewApply(
+    workspace: string,
+    include: string[],
+    exclude: string[],
+    force: boolean,
+    dryRun: false,
+  ): Promise<ViewApplied>;
   /** Opens a web link in the system browser. */
   openLink(url: string): Promise<void>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
@@ -537,7 +606,8 @@ async function tauriBackend(): Promise<Backend> {
     unshelve: (workspace, id) => invoke("unshelve", { workspace, id }),
     checks: (workspace, targets) => invoke("checks", { workspace, targets }),
     branches: (workspace, all) => invoke("branches", { workspace, all }),
-    branchCreate: (workspace, name, from, switchTo) => invoke("branch_create", { workspace, name, from, switch: switchTo }),
+    branchCreate: (workspace, name, from, switchTo) =>
+      invoke("branch_create", { workspace, name, from, switch: switchTo }),
     branchArchive: (workspace, name) => invoke("branch_archive", { workspace, name }),
     switchBranch: (workspace, branch, rev) => invoke("switch", { workspace, branch, rev }),
     update: (workspace, rev) => invoke("update", { workspace, rev }),
@@ -549,6 +619,10 @@ async function tauriBackend(): Promise<Backend> {
     conflict: (workspace, path) => invoke("conflict", { workspace, path }),
     resolve: (workspace, paths, using) => invoke("resolve", { workspace, paths, using }),
     resolveWith: (workspace, path, content) => invoke("resolve_with", { workspace, path, content }),
+    view: (workspace) => invoke("view", { workspace }),
+    viewTree: (workspace, path) => invoke("view_tree", { workspace, path }),
+    viewApply: ((workspace: string, include: string[], exclude: string[], force: boolean, dryRun: boolean) =>
+      invoke("view_apply", { workspace, include, exclude, force, dryRun })) as Backend["viewApply"],
     imageSide: async (workspace, path, rev, side) => {
       const raw = await invoke<ArrayBuffer>("image_side", { workspace, path, rev, side });
       return decodeImageSide(raw, path);
@@ -585,9 +659,7 @@ let current: Promise<Backend> | null = null;
 /** The backend: Tauri in the app, the mock elsewhere. */
 export function backend(): Promise<Backend> {
   if (!current) {
-    current = inTauri()
-      ? tauriBackend()
-      : import("./mock").then((m) => m.createMockBackend());
+    current = inTauri() ? tauriBackend() : import("./mock").then((m) => m.createMockBackend());
   }
   return current;
 }

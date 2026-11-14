@@ -12,6 +12,9 @@ use crate::context::Ctx;
 use crate::error::{OpError, OpResult};
 use crate::materialize::{fetch_entries, remove_and_prune};
 
+/// How many paths a dry run lists of what it would fetch or remove.
+const PREVIEW_PATHS: usize = 200;
+
 /// `lode view` subcommands.
 #[derive(Debug, clap::Subcommand)]
 pub enum ViewCmd {
@@ -81,11 +84,71 @@ pub async fn view(ctx: &Ctx, cmd: ViewCmd) -> OpResult<Value> {
         &args,
     );
     next.compile()?;
-    sync_view(ctx, &mut ws, &next, args.force).await
+    sync_view(ctx, &mut ws, &next, args.force, false).await
+}
+
+/// Replaces the view with `next` and syncs the files on disk, as `lode view include` and
+/// `exclude` do; with `dry_run`, only says what would be fetched and removed, and which files
+/// with local changes (`blocked`) or untracked files in the way would stop it without `force`.
+pub async fn set_view(
+    ctx: &Ctx,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    force: bool,
+    dry_run: bool,
+) -> OpResult<Value> {
+    let mut ws = ctx.workspace()?;
+    let next = ViewSpec { include, exclude };
+    next.compile()?;
+    sync_view(ctx, &mut ws, &next, force, dry_run).await
+}
+
+/// The view's patterns, what it holds on the server at the workspace's revision, and what of
+/// the depot is on disk.
+pub async fn view_summary(ctx: &Ctx) -> OpResult<Value> {
+    let ws = ctx.workspace()?;
+    let spec = ws.view_spec()?;
+    let rev = ws.db().config_u64(keys::SYNCED_REV)?.ok_or_else(|| {
+        OpError::failed(
+            "checkout_incomplete",
+            "this workspace has no synced revision",
+        )
+    })?;
+    let depot = ws
+        .db()
+        .config(keys::DEPOT)?
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
+    let server = ctx.server_url(Some(&ws))?;
+    let client = ctx.client(&server)?;
+    let (entries, _) = full_manifest(&client, &depot, rev, &spec).await?;
+    let rows: Vec<_> = ws
+        .db()
+        .files()?
+        .into_iter()
+        .filter(|r| r.base_id.is_some())
+        .collect();
+    Ok(json!({
+        "view": view_json(&spec),
+        "rev": rev,
+        "server": {
+            "files": entries.len(),
+            "bytes": entries.iter().map(|e| e.size).sum::<u64>(),
+        },
+        "disk": {
+            "files": rows.len(),
+            "bytes": rows.iter().map(|r| r.size).sum::<u64>(),
+        },
+    }))
 }
 
 /// Brings the files on disk to `next` and stores it.
-async fn sync_view(ctx: &Ctx, ws: &mut Workspace, next: &ViewSpec, force: bool) -> OpResult<Value> {
+async fn sync_view(
+    ctx: &Ctx,
+    ws: &mut Workspace,
+    next: &ViewSpec,
+    force: bool,
+    dry_run: bool,
+) -> OpResult<Value> {
     let _lock = ws.lock()?;
     if ws.db().config(CHECKOUT_REV)?.is_some() {
         return Err(OpError::failed(
@@ -139,6 +202,27 @@ async fn sync_view(ctx: &Ctx, ws: &mut Workspace, next: &ViewSpec, force: bool) 
                 in_the_way.push(e.path.as_str().to_owned());
             }
         }
+    }
+    if dry_run {
+        let fetch: Vec<_> = entries
+            .iter()
+            .filter(|e| report.get(&e.path).is_none_or(|s| s.row.is_none()))
+            .collect();
+        return Ok(json!({
+            "view": view_json(next),
+            "dry_run": true,
+            "fetch": {
+                "files": fetch.len(),
+                "bytes": fetch.iter().map(|e| e.size).sum::<u64>(),
+                "paths": fetch.iter().take(PREVIEW_PATHS).map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            },
+            "remove": {
+                "files": drop_paths.len(),
+                "paths": drop_paths.iter().take(PREVIEW_PATHS).map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
+            },
+            "blocked": blocked,
+            "untracked": in_the_way,
+        }));
     }
     if !force && (!blocked.is_empty() || !in_the_way.is_empty()) {
         let mut msg = String::from("the view change would ");

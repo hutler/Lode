@@ -2315,3 +2315,139 @@ input[aria-invalid="true"] {
   border-radius: 8px;
   background: var(--surface);
 }
+
+/* Workspace view (T112) */
+
+.view-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.view-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.view-body h2 {
+  font-size: 14px;
+  margin: 0 0 4px;
+}
+
+.view-facts {
+  margin: 0;
+  max-width: 560px;
+}
+
+.view-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.view-tree,
+.view-patterns,
+.view-preview {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.view-patterns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.view-patterns label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-weight: 500;
+}
+
+.view-patterns textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.folder-tree,
+.folder-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.folder-tree {
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 6px;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.folder-row:hover {
+  background: var(--surface-2);
+}
+
+.folder-toggle {
+  border: none;
+  background: none;
+  padding: 0 4px;
+  width: 22px;
+  color: var(--muted);
+}
+
+.folder-name {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.folder-name.out {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.folder-files {
+  padding: 2px 0;
+}
+
+.view-preview p {
+  margin: 0 0 8px;
+}
+
+.preview-paths {
+  max-height: 160px;
+  overflow: auto;
+  margin: 6px 0;
+  padding-left: 12px;
+  list-style: none;
+}
+
+.view-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.view-actions .spacer {
+  flex: 1;
+}
+
+.count.busy {
+  background: var(--sidebar-muted);
+}

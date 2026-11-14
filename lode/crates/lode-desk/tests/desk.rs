@@ -1309,3 +1309,112 @@ async fn merge_conflicts_and_resolve() {
     assert!(st["merges"].as_array().unwrap().is_empty(), "{st}");
     assert_eq!(std::fs::read_to_string(dir.join("f.txt")).unwrap(), "fig\n");
 }
+
+/// T112: the view's summary, the depot's folders, a preview, excluding and including, and the
+/// refusal to drop a changed file without force.
+#[tokio::test]
+async fn view_show_preview_exclude_include_and_refuse() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    let v = |x: &[&str]| x.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+
+    let shown = s.desk.view(root.clone()).await.unwrap();
+    assert_eq!(shown["view"]["include"], serde_json::json!([]), "{shown}");
+    assert_eq!(shown["server"]["files"], 3);
+    assert_eq!(shown["server"]["bytes"], 6 + 7 + 7);
+    assert_eq!(shown["disk"]["files"], 3);
+
+    let tree = s.desk.view_tree(root.clone(), None).await.unwrap();
+    let names: Vec<_> = tree["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["name"].as_str().unwrap(), e["kind"].as_str().unwrap()))
+        .collect();
+    assert!(names.contains(&("d", "dir")), "{tree}");
+
+    // A preview changes nothing.
+    let preview = s
+        .desk
+        .view_apply(root.clone(), v(&[]), v(&["d/**"]), false, true)
+        .await
+        .unwrap();
+    assert_eq!(preview["remove"]["files"], 1, "{preview}");
+    assert_eq!(preview["remove"]["paths"], serde_json::json!(["d/c.txt"]));
+    assert_eq!(preview["fetch"]["files"], 0);
+    assert!(dir.join("d/c.txt").exists());
+
+    let out = s
+        .desk
+        .view_apply(root.clone(), v(&[" "]), v(&["d/**", ""]), false, false)
+        .await
+        .unwrap();
+    assert_eq!(out["removed"], 1, "{out}");
+    assert!(!dir.join("d/c.txt").exists());
+    let shown = s.desk.view(root.clone()).await.unwrap();
+    assert_eq!(
+        shown["view"]["exclude"],
+        serde_json::json!(["d/**"]),
+        "{shown}"
+    );
+    assert_eq!(shown["server"]["files"], 2);
+    assert_eq!(shown["disk"]["files"], 2);
+    // The folder is still listed, so it can be ticked back in.
+    let tree = s
+        .desk
+        .view_tree(root.clone(), Some("d".into()))
+        .await
+        .unwrap();
+    assert_eq!(tree["entries"][0]["name"], "c.txt", "{tree}");
+
+    // Back in: the preview says what comes.
+    let preview = s
+        .desk
+        .view_apply(root.clone(), v(&[]), v(&[]), false, true)
+        .await
+        .unwrap();
+    assert_eq!(preview["fetch"]["files"], 1, "{preview}");
+    assert_eq!(preview["fetch"]["bytes"], 7);
+    s.desk
+        .view_apply(root.clone(), v(&[]), v(&[]), false, false)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(dir.join("d/c.txt")).unwrap(), b"cherry\n");
+
+    // A changed file leaving the view stops it, named; force drops it.
+    std::fs::write(dir.join("a.txt"), "apricot\n").unwrap();
+    let preview = s
+        .desk
+        .view_apply(root.clone(), v(&["d/**"]), v(&[]), false, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        preview["blocked"],
+        serde_json::json!(["a.txt"]),
+        "{preview}"
+    );
+    let err = s
+        .desk
+        .view_apply(root.clone(), v(&["d/**"]), v(&[]), false, false)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "local_changes", "{err:?}");
+    assert_eq!(err.details["paths"], serde_json::json!(["a.txt"]));
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"apricot\n");
+    let out = s
+        .desk
+        .view_apply(root.clone(), v(&["d/**"]), v(&[]), true, false)
+        .await
+        .unwrap();
+    assert_eq!(out["removed"], 2, "{out}");
+    assert!(!dir.join("a.txt").exists());
+
+    // Patterns that do not compile are refused before anything moves.
+    let err = s
+        .desk
+        .view_apply(root, v(&["[oops"]), v(&[]), false, true)
+        .await
+        .unwrap_err();
+    assert_ne!(err.code, "internal", "{err:?}");
+}

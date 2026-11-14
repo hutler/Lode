@@ -17,7 +17,9 @@ import type {
   RecentWorkspace,
   StatusFile,
   StatusResult,
+  TreeEntry,
   UpdateResult,
+  ViewSpec,
   WhoAmI,
   WorkspaceInfo,
 } from "./api";
@@ -28,6 +30,8 @@ import { demoChecks } from "./mockChecks";
 import { demoImage } from "./mockImages";
 import { demoConflict } from "./mockMerge";
 import { demoShelves, type MockShelf } from "./mockShelves";
+import { demoFiles, demoFolders } from "./mockView";
+import { inView } from "./viewPatterns";
 
 export interface MockOptions {
   /** Workspaces listed on the welcome page. */
@@ -407,6 +411,36 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     const f = st.files.find((x) => x.path === path);
     if (f) f.status = "conflicted";
     conflictTable(workspace).set(path, demoConflict(path, rev));
+  };
+  // Views per workspace; the main skyfall workspace leaves the cinematics out.
+  const views = new Map<string, ViewSpec>();
+  const viewOf = (workspace: string): ViewSpec => {
+    let v = views.get(workspace);
+    if (!v) {
+      v =
+        workspace === "D:\\Work\\Skyfall"
+          ? { include: [], exclude: ["Content/Cinematics/**"] }
+          : { include: [], exclude: [] };
+      views.set(workspace, v);
+    }
+    return v;
+  };
+  /** The leaf folders a view takes (by a file standing for each folder's content). */
+  const foldersIn = (depot: string, spec: ViewSpec) =>
+    Object.entries(demoFolders(depot)).filter(([dir]) => inView(spec, `${dir}/x.bin`));
+  const sum = (list: [string, { files: number; bytes: number }][]) => ({
+    files: list.reduce((n, [, f]) => n + f.files, 0),
+    bytes: list.reduce((n, [, f]) => n + f.bytes, 0),
+  });
+  const checkPatterns = (patterns: string[]) => {
+    for (const p of patterns) {
+      if (
+        (p.match(/\[/g)?.length ?? 0) !== (p.match(/\]/g)?.length ?? 0) ||
+        (p.match(/{/g)?.length ?? 0) !== (p.match(/}/g)?.length ?? 0)
+      ) {
+        fail("usage", `invalid pattern \`${p}\`: unclosed bracket or brace`);
+      }
+    }
   };
   let unfinished = opts.unfinishedUpdate ? (recent[0]?.path ?? null) : null;
   const refuseUnfinished = (workspace: string) => {
@@ -1041,6 +1075,84 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       changed.forEach((l) => l(workspace));
       return { resolved: [path] };
     },
+    view: async (workspace) => {
+      const info = infoOf(workspace);
+      const spec = viewOf(workspace);
+      await pause();
+      const s = sum(foldersIn(info.depot, spec));
+      return {
+        view: { include: [...spec.include], exclude: [...spec.exclude] },
+        rev: info.rev,
+        server: s,
+        disk: { ...s },
+      };
+    },
+    viewTree: async (workspace, path) => {
+      const info = infoOf(workspace);
+      const folders = demoFolders(info.depot);
+      const prefix = path ? `${path}/` : "";
+      const dirs = new Set<string>();
+      for (const dir of Object.keys(folders)) {
+        if (dir.startsWith(prefix) && dir !== path) dirs.add(dir.slice(prefix.length).split("/")[0]!);
+      }
+      const entries: TreeEntry[] = [...dirs].sort().map((name) => ({ name, kind: "dir", size: 0 }));
+      if (path && folders[path]) {
+        for (const f of demoFiles(path))
+          entries.push({ name: f.slice(f.lastIndexOf("/") + 1), kind: "file", size: 120_000 });
+      }
+      if (path && entries.length === 0) fail("not_found", `no such path: ${path}`);
+      return { rev: info.rev, path, entries };
+    },
+    viewApply: (async (workspace: string, include: string[], exclude: string[], force: boolean, dryRun: boolean) => {
+      const info = infoOf(workspace);
+      const clean = (l: string[]) => l.map((p) => p.trim()).filter(Boolean);
+      const next: ViewSpec = { include: clean(include), exclude: clean(exclude) };
+      checkPatterns([...next.include, ...next.exclude]);
+      const before = new Set(foldersIn(info.depot, viewOf(workspace)).map(([d]) => d));
+      const after = new Set(foldersIn(info.depot, next).map(([d]) => d));
+      const folders = demoFolders(info.depot);
+      const coming = [...after].filter((d) => !before.has(d));
+      const going = [...before].filter((d) => !after.has(d));
+      const st = statusFor(workspace);
+      const leaving = (p: string) => !inView(next, p) && going.some((d) => p.startsWith(`${d}/`));
+      const blocked = st.files.filter((f) => f.status !== "untracked" && leaving(f.path)).map((f) => f.path);
+      const fetch = sum(coming.map((d) => [d, folders[d]!]));
+      const remove = sum(going.map((d) => [d, folders[d]!]));
+      if (dryRun) {
+        return {
+          view: next,
+          dry_run: true,
+          fetch: { ...fetch, paths: coming.flatMap((d) => demoFiles(d)) },
+          remove: { files: remove.files, paths: going.flatMap((d) => demoFiles(d)) },
+          blocked,
+          untracked: [],
+        };
+      }
+      if (blocked.length && !force) {
+        const e: OpError = {
+          code: "local_changes",
+          message: `the view change would drop files with local changes (${blocked.join(", ")}); commit or revert them, or pass --force`,
+          details: { paths: blocked, untracked: [] },
+        };
+        throw e;
+      }
+      const steps = 6;
+      for (let i = 1; i <= steps; i++) {
+        await pause();
+        emit({
+          label: "Fetching",
+          done: Math.round((fetch.files * i) / steps),
+          total: fetch.files,
+          bytes: Math.round((fetch.bytes * i) / steps),
+          finished: false,
+        });
+      }
+      emit({ label: "Fetching", done: fetch.files, total: fetch.files, bytes: fetch.bytes, finished: true });
+      st.files = st.files.filter((f) => !blocked.includes(f.path));
+      views.set(workspace, next);
+      changed.forEach((l) => l(workspace));
+      return { view: next, added: fetch.files, removed: remove.files };
+    }) as MockBackend["viewApply"],
     openLink: async () => {},
     bumpShelf: (workspace, id) => {
       const s = shelfOf(workspace, id);

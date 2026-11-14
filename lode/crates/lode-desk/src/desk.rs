@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use lode_ops::cmd::{
     branch, changelist, checkout, checks, commit, conflict, diff, files, history, info, locks,
-    login, merge, revert, shelve, status, update,
+    login, merge, revert, shelve, status, update, view,
 };
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
@@ -992,6 +992,57 @@ impl Desk {
     ) -> Result<Value, ErrorView> {
         let ctx = self.ctx(Path::new(&workspace), None)?;
         run_op(move || async move { conflict::resolve_with(&ctx, &path, content.as_bytes()).await })
+            .await
+    }
+
+    /// The workspace view: its patterns, what it holds on the server, and what is on disk.
+    pub async fn view(&self, workspace: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { view::view_summary(&ctx).await }).await
+    }
+
+    /// One folder of the depot (`path` a depot path; the root when None) at the workspace's
+    /// revision, whether or not it is in the view.
+    pub async fn view_tree(
+        &self,
+        workspace: String,
+        path: Option<String>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        // Depot paths are relative to the workspace root, where the context starts.
+        let path = Some(path.filter(|p| !p.is_empty()).unwrap_or_else(|| ".".into()));
+        run_op(move || async move {
+            history::ls(
+                &ctx,
+                history::LsArgs {
+                    path,
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// Replaces the view's patterns and syncs the files on disk; with `dry_run`, only says what
+    /// would be fetched and removed. Files with local changes stop it unless `force`.
+    pub async fn view_apply(
+        &self,
+        workspace: String,
+        include: Vec<String>,
+        exclude: Vec<String>,
+        force: bool,
+        dry_run: bool,
+    ) -> Result<Value, ErrorView> {
+        let clean = |v: Vec<String>| -> Vec<String> {
+            v.into_iter()
+                .map(|p| p.trim().to_owned())
+                .filter(|p| !p.is_empty())
+                .collect()
+        };
+        let (include, exclude) = (clean(include), clean(exclude));
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { view::set_view(&ctx, include, exclude, force, dry_run).await })
             .await
     }
 

@@ -261,6 +261,16 @@ const scenes = {
     await view.getByRole("group", { name: "Conflict 1 of 2" }).getByRole("button", { name: "Use mine" }).click();
     await view.getByRole("group", { name: "Conflict 1 of 1" }).waitFor();
   },
+  async "view-editor"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: "Workspace", exact: true }).click();
+    const view = page.getByRole("region", { name: "Workspace view" });
+    await view.getByRole("button", { name: "Open Content" }).click();
+    await view.getByRole("checkbox", { name: "Include Content/Cinematics" }).check();
+    await view.getByRole("checkbox", { name: "Include Tools" }).uncheck();
+    await view.getByRole("button", { name: "Preview change" }).click();
+    await view.getByRole("region", { name: "Preview" }).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

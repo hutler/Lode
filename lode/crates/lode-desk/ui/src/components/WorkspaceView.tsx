@@ -22,6 +22,7 @@ import { DiffView } from "./DiffView";
 import { HistoryView } from "./HistoryView";
 import { LocksView } from "./LocksView";
 import { ShelvesView } from "./ShelvesView";
+import { ViewEditor } from "./ViewEditor";
 
 interface Props {
   info: WorkspaceInfo;
@@ -57,7 +58,7 @@ function hostOf(server: string): string {
   }
 }
 
-const SECTIONS = ["Changes", "History", "Locks", "Shelves"] as const;
+const SECTIONS = ["Changes", "History", "Locks", "Shelves", "Workspace"] as const;
 type Section = (typeof SECTIONS)[number];
 
 /** What the main area shows. */
@@ -65,6 +66,7 @@ type View =
   | { kind: "changes" }
   | { kind: "locks" }
   | { kind: "shelves" }
+  | { kind: "workspace" }
   | { kind: "history"; path: string | null; rev: number | null }
   | { kind: "blame"; path: string; rev: number | null }
   | { kind: "diff"; path: string; rev: number | null }
@@ -72,6 +74,7 @@ type View =
 
 function sectionOf(v: View): Section {
   if (v.kind === "locks") return "Locks";
+  if (v.kind === "workspace") return "Workspace";
   if (v.kind === "shelves") return "Shelves";
   return v.kind === "changes" || v.kind === "conflict" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
 }
@@ -85,6 +88,10 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
   const [generation, setGeneration] = useState(0);
   // Said in Changes after a conflict is resolved.
   const [notice, setNotice] = useState<string | null>(null);
+  // The view editor stays mounted once opened, so a change keeps running in the background.
+  const [viewOpened, setViewOpened] = useState(false);
+  const [viewBusy, setViewBusy] = useState(false);
+  if (view.kind === "workspace" && !viewOpened) setViewOpened(true);
 
   const synced = useCallback(
     async (result: UpdateResult) => {
@@ -160,17 +167,29 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
                         ? { kind: "locks" }
                         : s === "Shelves"
                           ? { kind: "shelves" }
-                          : { kind: "history", path: null, rev: null },
+                          : s === "Workspace"
+                            ? { kind: "workspace" }
+                            : { kind: "history", path: null, rev: null },
                   )
                 }
               >
                 {s}
                 {s === "Changes" && changed > 0 && <span className="count">{changed}</span>}
                 {s === "Locks" && locked > 0 && <span className="count">{locked}</span>}
+                {s === "Workspace" && viewBusy && (
+                  <span className="count busy" title="Updating the files on disk">
+                    …
+                  </span>
+                )}
               </button>
             ))}
           </nav>
         </aside>
+        {viewOpened && (
+          <div className="section" hidden={view.kind !== "workspace"}>
+            <ViewEditor key={generation} info={info} onBusy={setViewBusy} onApplied={() => setStatus(null)} />
+          </div>
+        )}
         {/* Kept mounted while hidden, so the picked files and the message stay. */}
         <div className="section" hidden={view.kind !== "changes"}>
           <ChangesView
