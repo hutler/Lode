@@ -16,9 +16,12 @@ libsoup-3.0-dev`). Windows uses the WebView2 runtime that ships with Windows 10 
 
 ```
 cd ui && npm ci && cd ..
-npx --prefix ui tauri dev        # the app with live reload
-npx --prefix ui tauri build --no-bundle   # an optimized binary in target/release
+./ui/node_modules/.bin/tauri dev                 # the app with live reload
+./ui/node_modules/.bin/tauri build --no-bundle   # an optimized binary in target/release
+./ui/node_modules/.bin/tauri build --bundles deb # an installer (see below)
 ```
+
+On Windows, use `ui\node_modules\.bin\tauri` in the same way.
 
 `cargo build` alone also works once `npm run build` has filled `ui/dist`; add
 `--features tauri/custom-protocol` to serve that folder instead of the dev server.
@@ -49,9 +52,25 @@ Linux (a `.desktop` file), and so does an AppImage; on macOS only a bundled app 
 
 ## Tests
 
-- `cargo test`: every command the window calls, against a test server, and the link rules.
+- `cargo test`: every command the window calls, against a test server, the link rules, and
+  update checks (an update signed with another key is refused).
+- `node --test packaging/feed.test.mjs`: the update feed.
 - `npm test` in `ui/`: the screens, against the mocked backend (`ui/src/mock.ts`).
 - `npm run screenshots` in `ui/`: renders each screen in light and dark into
   `ui/screenshots/` with Playwright (`SCENES=branches,switched` renders only those). `npm run mock` opens the same mocked app in a browser.
 
-Installers and auto-update come with M11 (T114).
+## Installers and updates
+
+`tauri build` makes the installers of the system it runs on: an MSI and an NSIS setup on Windows
+(the MSI needs WiX, which the build downloads), a `.app` and `.dmg` on macOS
+(`--target universal-apple-darwin` for both chips), and `.deb`, `.rpm` and AppImage on Linux.
+Each registers `lode://` links. The release workflow builds them all; see
+[docs/release.md](../../docs/release.md).
+
+The app looks for a new version at start and once a day, in `latest.json` of the release
+`lode-desk-feed` on GitHub, and offers it with its release notes, "Install and restart" and
+"Later". Home has the setting to turn the daily check off and a "Check for updates now" button.
+Setting `LODE_DESK_NO_UPDATE` (to anything) turns every check off, for machines whose software
+is managed. A package is installed only when its signature matches the public key built into
+the app; a build without that key, such as one from source, never offers updates. The feed is
+written by `packaging/feed.mjs` and checked against `packaging/feed.schema.json`.

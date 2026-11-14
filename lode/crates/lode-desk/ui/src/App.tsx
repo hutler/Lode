@@ -6,6 +6,7 @@ import { ErrorBanner } from "./components/ErrorBanner";
 import { type Candidate, ChooseWorkspaceDialog, NoWorkspaceDialog, RefusedLinkDialog } from "./components/LinkDialogs";
 import { type Link, sameServer, tryParse } from "./links";
 import { SignInDialog } from "./components/SignInDialog";
+import { UpdateBanner, useUpdates } from "./components/Updates";
 import { Welcome } from "./components/Welcome";
 import { WorkspaceView } from "./components/WorkspaceView";
 
@@ -33,6 +34,7 @@ export function App() {
   const [version, setVersion] = useState("");
   const [goto, setGoto] = useState<Goto | null>(null);
   const [linkNote, setLinkNote] = useState<{ root: string; text: string } | null>(null);
+  const updates = useUpdates();
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
@@ -199,6 +201,7 @@ export function App() {
         ))}
       </nav>
 
+      {updates.offer && <UpdateBanner offer={updates.offer} onLater={updates.later} />}
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
       {linkNote && linkNote.root === current?.root && (
         <p className="notice link-note" role="status">
@@ -228,6 +231,7 @@ export function App() {
             onForget={forget}
             onCheckout={() => setDialog({ kind: "checkout" })}
             onSignIn={() => setDialog({ kind: "signin" })}
+            onUpdateFound={updates.found}
           />
         )}
       </main>

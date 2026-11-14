@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "ui/dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm --prefix ui run dev",
-    "beforeBuildCommand": "npm --prefix ui run build"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
@@ -26,18 +26,75 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["lode"]
+        "schemes": [
+          "lode"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/hutler/simpledevops/releases/download/lode-desk-feed/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": [
+      "msi",
+      "nsis",
+      "app",
+      "dmg",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
+    "createUpdaterArtifacts": false,
+    "publisher": "SimpleDevOps",
+    "homepage": "https://github.com/hutler/simpledevops",
+    "copyright": "Copyright the SimpleDevOps contributors",
+    "license": "Apache-2.0",
+    "category": "DeveloperTool",
+    "shortDescription": "The Lode version control desktop client",
+    "longDescription": "Lode Desk shows a Lode workspace's changes, history, locks, shelves, branches and view, and runs the same operations as the lode command.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.png",
+      "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "wix": {
+        "language": "en-US"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": null
+    },
+    "linux": {
+      "deb": {
+        "section": "vcs",
+        "desktopTemplate": "packaging/lode-desk.desktop"
+      },
+      "rpm": {
+        "release": "1",
+        "desktopTemplate": "packaging/lode-desk.desktop"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
   }
 }

@@ -295,6 +295,12 @@ const scenes = {
       .getByRole("button", { name: "Copy link to r311" })
       .waitFor();
   },
+  async update(page) {
+    await page.goto(`${url}?update=0.2.0`);
+    const banner = page.getByRole("region", { name: "Update" });
+    await banner.getByText("What's new").click();
+    await page.getByRole("button", { name: "Check for updates now" }).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

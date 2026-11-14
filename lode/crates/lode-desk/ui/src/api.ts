@@ -400,8 +400,27 @@ export interface CheckoutResult {
   files: number;
 }
 
+/** The app's own settings. */
+export interface Settings {
+  /** Look for a new version at start and once a day. */
+  check_updates: boolean;
+}
+
+/** What an update check found. */
+export type UpdateCheck =
+  | { state: "off"; reason: string }
+  | { state: "unconfigured" }
+  | { state: "current"; current: string }
+  | { state: "available"; current: string; version: string; notes: string; date: string | null };
+
 export interface Backend {
   appVersion(): Promise<string>;
+  settings(): Promise<Settings>;
+  setSettings(settings: Settings): Promise<void>;
+  /** Looks for a newer version of the app; `asked` when the user asked, so the setting does not stop it. */
+  updateCheck(asked: boolean): Promise<UpdateCheck>;
+  /** Downloads the newer version, checks its signature, installs it and restarts the app. */
+  updateInstall(): Promise<void>;
   recentWorkspaces(): Promise<RecentWorkspace[]>;
   forgetWorkspace(path: string): Promise<void>;
   /** Who is signed in to `server`, or null. */
@@ -567,6 +586,14 @@ async function tauriBackend(): Promise<Backend> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   return {
     appVersion: () => invoke("app_version"),
+    settings: () => invoke("settings"),
+    setSettings: async (settings) => {
+      await invoke("set_settings", { settings });
+    },
+    updateCheck: (asked) => invoke("update_check", { asked }),
+    updateInstall: async () => {
+      await invoke("update_install");
+    },
     recentWorkspaces: () => invoke("recent_workspaces"),
     forgetWorkspace: (path) => invoke("forget_workspace", { path }),
     signedIn: (server) => invoke("signed_in", { server }),
@@ -665,11 +692,23 @@ let current: Promise<Backend> | null = null;
 /** The backend: Tauri in the app, the mock elsewhere. */
 export function backend(): Promise<Backend> {
   if (!current) {
-    // The mock takes a launch link from `?link=`, as the app takes one from its arguments.
-    const link = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("link");
+    // The mock takes a launch link from `?link=`, as the app takes one from its arguments, and
+    // offers an update to the version in `?update=`.
+    const query = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
+    const link = query.get("link") ?? undefined;
+    const version = query.get("update");
+    const update: UpdateCheck | undefined = version
+      ? {
+          state: "available",
+          current: "0.1.0",
+          version,
+          notes: "Branches, merges and the three-way conflict view.\nThe workspace view editor.\nlode:// links.",
+          date: null,
+        }
+      : undefined;
     current = inTauri()
       ? tauriBackend()
-      : import("./mock").then((m) => m.createMockBackend({ launchLink: link ?? undefined }));
+      : import("./mock").then((m) => m.createMockBackend({ launchLink: link, update }));
   }
   return current;
 }

@@ -1,4 +1,5 @@
-import type { RecentWorkspace } from "../api";
+import type { RecentWorkspace, UpdateCheck } from "../api";
+import { UpdateSettings } from "./Updates";
 
 interface Props {
   recent: RecentWorkspace[];
@@ -8,6 +9,8 @@ interface Props {
   onForget: (path: string) => void;
   onCheckout: () => void;
   onSignIn: () => void;
+  /** An update check the user asked for found something. */
+  onUpdateFound?: (check: UpdateCheck) => void;
 }
 
 function hostOf(server: string): string {
@@ -19,15 +22,22 @@ function hostOf(server: string): string {
 }
 
 /** The Home tab: recent workspaces and the ways to get a new one. */
-export function Welcome({ recent, version, onOpen, onOpenFolder, onForget, onCheckout, onSignIn }: Props) {
+export function Welcome({
+  recent,
+  version,
+  onOpen,
+  onOpenFolder,
+  onForget,
+  onCheckout,
+  onSignIn,
+  onUpdateFound,
+}: Props) {
   return (
     <div className="welcome">
       <section className="welcome-recent" aria-labelledby="recent-title">
         <h1 id="recent-title">Recent workspaces</h1>
         {recent.length === 0 ? (
-          <p className="muted">
-            Nothing here yet. Check out a depot or open a folder that already holds a workspace.
-          </p>
+          <p className="muted">Nothing here yet. Check out a depot or open a folder that already holds a workspace.</p>
         ) : (
           <ul className="recent-list">
             {recent.map((r) => (
@@ -40,7 +50,12 @@ export function Welcome({ recent, version, onOpen, onOpenFolder, onForget, onChe
                   <span className="recent-path">{r.path}</span>
                   <span className="recent-server">{hostOf(r.server)}</span>
                 </button>
-                <button className="icon-button" aria-label={`Forget ${r.path}`} title="Remove from this list" onClick={() => onForget(r.path)}>
+                <button
+                  className="icon-button"
+                  aria-label={`Forget ${r.path}`}
+                  title="Remove from this list"
+                  onClick={() => onForget(r.path)}
+                >
                   ×
                 </button>
               </li>
@@ -61,6 +76,7 @@ export function Welcome({ recent, version, onOpen, onOpenFolder, onForget, onChe
         </button>
         <button onClick={onOpenFolder}>Open a workspace folder…</button>
         <button onClick={onSignIn}>Sign in to a server…</button>
+        <UpdateSettings onFound={(c) => onUpdateFound?.(c)} />
       </aside>
     </div>
   );

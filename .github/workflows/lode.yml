@@ -100,6 +100,7 @@ jobs:
         working-directory: lode/crates/lode-desk/ui
       - run: npm test
         working-directory: lode/crates/lode-desk/ui
+      - run: node --test packaging/feed.test.mjs
       - run: npm run build
         working-directory: lode/crates/lode-desk/ui
       - run: cargo fmt --check

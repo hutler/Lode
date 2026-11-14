@@ -2,7 +2,8 @@ name: lode-release
 
 # Builds `lode` and `loded` for every supported platform, with checksums, plus the server
 # packages (.deb and .rpm for Linux, an MSI for Windows; each is installed, started and removed
-# here first), and publishes them as a GitHub release when a tag `lode-v<version>` is pushed. A manual run builds the same
+# here first) and the Lode Desk bundles with their update feed, and publishes them as a GitHub
+# release when a tag `lode-v<version>` is pushed. A manual run builds the same
 # archives and keeps them as workflow artifacts without releasing anything.
 
 on:
@@ -190,6 +191,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          # The CLI and server builds only; Lode Desk's are attached by desk-feed.
+          pattern: lode-{x86_64,aarch64}-*
           path: dist
           merge-multiple: true
       - name: Checksums
@@ -225,6 +228,209 @@ jobs:
             --title "Lode ${GITHUB_REF_NAME#lode-v}" --generate-notes \
             ./*.tar.gz ./*.zip ./*.deb ./*.rpm ./*.msi \
             ./lode-*-unknown-linux-musl ./lode-*-apple-darwin ./lode-*-pc-windows-msvc.exe SHA256SUMS
+
+  # Lode Desk: every bundle built on its own system, the Linux ones installed here, the update
+  # feed written and checked, and (for a tag) all of it attached to the release.
+  desk:
+    name: Lode Desk on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: lode/crates/lode-desk
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, bundles: "deb,rpm,appimage", platform: linux-x86_64 }
+          - { os: windows-latest, bundles: "msi,nsis", platform: windows-x86_64 }
+          - { os: macos-latest, bundles: "app,dmg", platform: macos-universal, args: "--target universal-apple-darwin" }
+    env:
+      # The update key: the private half is a secret, the public half a repository variable.
+      # Without them the bundles are built unsigned and the app never offers updates.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.LODE_DESK_UPDATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.LODE_DESK_UPDATE_KEY_PASSWORD }}
+      UPDATE_PUBKEY: ${{ vars.LODE_DESK_UPDATE_PUBKEY }}
+      HAS_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: lode/crates/lode-desk/ui/package-lock.json
+      - name: Install the system web view (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libsoup-3.0-dev rpm
+      - run: npm ci
+        working-directory: lode/crates/lode-desk/ui
+      - name: Feed script tests
+        if: runner.os == 'Linux'
+        run: node --test packaging/feed.test.mjs
+      # Code signing is wired but off until the project has certificates: each part runs only
+      # when its secrets are set.
+      - name: Windows code signing certificate
+        if: runner.os == 'Windows' && env.HAS_WINDOWS_CERTIFICATE == 'true'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP cert.pfx
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          "WINDOWS_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: macOS code signing and notarization
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERTIFICATE == 'true'
+        run: |
+          {
+            echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
+            echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}"
+            echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
+          } >> "$GITHUB_ENV"
+      - name: Build the bundles
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+          else
+            version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          config=$(jq -nc --arg v "$version" '{version: $v}')
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            if [ -z "$UPDATE_PUBKEY" ]; then
+              echo "::error::LODE_DESK_UPDATE_KEY is set but the LODE_DESK_UPDATE_PUBKEY variable is not"
+              exit 1
+            fi
+            config=$(jq -c --arg k "$UPDATE_PUBKEY" \
+              '.bundle.createUpdaterArtifacts = true | .plugins.updater.pubkey = $k' <<< "$config")
+          else
+            echo "::warning::No update key: the bundles are not signed for updates and never offer one"
+            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          fi
+          if [ -n "${WINDOWS_THUMBPRINT:-}" ]; then
+            config=$(jq -c --arg t "$WINDOWS_THUMBPRINT" '.bundle.windows.certificateThumbprint = $t' <<< "$config")
+          fi
+          ./ui/node_modules/.bin/tauri build --ci --bundles ${{ matrix.bundles }} ${{ matrix.args }} --config "$config"
+      - name: Collect the bundles
+        run: |
+          mkdir -p dist
+          out=target/release/bundle
+          [ -d target/universal-apple-darwin ] && out=target/universal-apple-darwin/release/bundle
+          name="lode-desk-$VERSION-${{ matrix.platform }}"
+          take() { # take SOURCE_GLOB TARGET_NAME: copies one bundle and its signature, if any
+            for f in $1; do
+              [ -f "$f" ] || continue
+              cp "$f" "dist/$2"
+              [ -f "$f.sig" ] && cp "$f.sig" "dist/$2.sig"
+            done
+          }
+          take "$out/appimage/*.AppImage" "$name.AppImage"
+          take "$out/deb/*.deb" "$name.deb"
+          take "$out/rpm/*.rpm" "$name.rpm"
+          take "$out/msi/*.msi" "$name.msi"
+          take "$out/nsis/*-setup.exe" "$name-setup.exe"
+          take "$out/dmg/*.dmg" "$name.dmg"
+          take "$out/macos/*.app.tar.gz" "$name.app.tar.gz"
+          ls -l dist
+          [ -n "$(ls dist)" ] || { echo "::error::no bundles were built"; exit 1; }
+      - name: Install the .deb and check it
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y ./dist/lode-desk-*.deb
+          desktop=$(dpkg -L lode-desk | grep '\.desktop$')
+          grep -q 'x-scheme-handler/lode' "$desktop"
+          bin=$(dpkg -L lode-desk | grep '/bin/' | head -n 1)
+          ! ldd "$bin" | grep 'not found'
+          sudo apt-get remove -y lode-desk
+      - name: Install the .rpm on Fedora and check it
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" fedora:41 sh -euc '
+            dnf install -y /dist/lode-desk-*.rpm
+            grep -q "x-scheme-handler/lode" "$(rpm -ql lode-desk | grep "\.desktop$")"
+            ! ldd $(rpm -ql lode-desk | grep "/bin/" | head -n 1) | grep "not found"
+            dnf remove -y lode-desk'
+      - name: Check the AppImage
+        if: runner.os == 'Linux'
+        run: |
+          appimage=$(ls dist/*.AppImage)
+          chmod +x "$appimage"
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/lode/crates/lode-desk/$appimage" --appimage-extract > /dev/null)
+          grep -q 'x-scheme-handler/lode' "$RUNNER_TEMP"/squashfs-root/*.desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lode-desk-${{ matrix.platform }}
+          path: lode/crates/lode-desk/dist/
+          if-no-files-found: error
+
+  desk-feed:
+    name: Lode Desk update feed
+    needs: [desk, release]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lode-desk-*
+          path: desk
+          merge-multiple: true
+      - name: Checksums
+        working-directory: desk
+        run: |
+          for f in lode-desk-*; do case "$f" in *.sig) ;; *) sha256sum "$f" > "$f.sha256" ;; esac; done
+          cat *.sha256
+      - name: Write and check the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body -q .body > notes.md
+          else
+            version="$(sed -n 's/^version = "\(.*\)"$/\1/p' lode/crates/lode-desk/Cargo.toml | head -n 1)"
+            echo "Test build ${GITHUB_SHA::7}" > notes.md
+          fi
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          if ls desk/*.sig > /dev/null 2>&1; then
+            node lode/crates/lode-desk/packaging/feed.mjs desk "$version" "$base" notes.md > desk/latest.json
+            pipx run check-jsonschema --schemafile lode/crates/lode-desk/packaging/feed.schema.json desk/latest.json
+            cat desk/latest.json
+          else
+            echo "::warning::No signed bundles, so no update feed"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lode-desk-release
+          path: desk/
+      - name: Attach to the release and publish the feed
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: desk
+        run: |
+          files=$(ls lode-desk-* | grep -v '\.sig$')
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" $files
+          if [ -f latest.json ]; then
+            # The app reads the feed from one fixed release, so a release of another product
+            # never hides it.
+            gh release view lode-desk-feed --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 ||
+              gh release create lode-desk-feed --repo "$GITHUB_REPOSITORY" --latest=false \
+                --title "Lode Desk update feed" --notes "latest.json for Lode Desk's update check."
+            gh release upload lode-desk-feed --repo "$GITHUB_REPOSITORY" --clobber latest.json
+          fi
 
   image:
     needs: build

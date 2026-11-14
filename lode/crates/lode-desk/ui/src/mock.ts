@@ -15,9 +15,11 @@ import type {
   OpError,
   ProgressEvent,
   RecentWorkspace,
+  Settings,
   StatusFile,
   StatusResult,
   TreeEntry,
+  UpdateCheck,
   UpdateResult,
   ViewSpec,
   WhoAmI,
@@ -54,6 +56,10 @@ export interface MockOptions {
   unfinishedUpdate?: boolean;
   /** The `lode://` link the app was started with. */
   launchLink?: string;
+  /** What an update check finds; the running version is the newest by default. */
+  update?: UpdateCheck;
+  /** Installing the update fails with this error. */
+  refuseUpdate?: OpError;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -246,6 +252,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
 
   const changed = new Set<(workspace: string) => void>();
   let pending: string | null = opts.launchLink ?? null;
+  let settings: Settings = { check_updates: true };
   const linkListeners = new Set<() => void>();
   const statusOf = new Map<string, StatusResult>();
   const statusFor = (workspace: string): StatusResult => {
@@ -517,6 +524,20 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
 
   return {
     appVersion: async () => "0.1.0",
+    settings: async () => ({ ...settings }),
+    setSettings: async (next) => {
+      settings = { ...next };
+    },
+    updateCheck: async (asked) => {
+      if (!asked && !settings.check_updates) {
+        return { state: "off", reason: "checking for updates is turned off in the settings" };
+      }
+      return opts.update ?? { state: "current", current: "0.1.0" };
+    },
+    updateInstall: async () => {
+      await pause();
+      if (opts.refuseUpdate) throw opts.refuseUpdate;
+    },
     recentWorkspaces: async () => [...recent],
     forgetWorkspace: async (path) => {
       const i = recent.findIndex((r) => r.path === path);

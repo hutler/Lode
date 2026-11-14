@@ -2484,3 +2484,38 @@ input[aria-invalid="true"] {
   align-items: center;
   text-align: left;
 }
+
+/* Updates */
+.update-banner {
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--accent, var(--border));
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.update-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.update-head .spacer {
+  flex: 1;
+}
+.update-notes {
+  white-space: pre-wrap;
+  margin: 6px 0 0;
+}
+.update-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.update-settings .check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}

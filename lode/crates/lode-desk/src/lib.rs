@@ -14,6 +14,7 @@
 
 pub mod desk;
 pub mod links;
+pub mod update;
 pub mod watch;
 
 use std::path::PathBuf;
@@ -40,6 +41,47 @@ impl Ui for WindowUi {
     fn progress(&self, event: &ProgressEvent<'_>) {
         let _ = self.app.emit("lode://progress", event);
     }
+}
+
+/// The app's own files.
+struct AppFiles {
+    /// `settings.json` in the app's data directory.
+    settings: PathBuf,
+}
+
+#[tauri::command]
+fn settings(files: State<'_, AppFiles>) -> update::Settings {
+    update::load_settings(&files.settings)
+}
+
+#[tauri::command]
+fn set_settings(files: State<'_, AppFiles>, settings: update::Settings) -> Result<(), ErrorView> {
+    update::save_settings(&files.settings, &settings)
+}
+
+/// Looks for a newer version; `asked` when the user asked, so the setting does not stop it.
+#[tauri::command]
+async fn update_check(
+    app: AppHandle,
+    files: State<'_, AppFiles>,
+    asked: bool,
+) -> Result<update::UpdateCheck, ErrorView> {
+    Ok(update::find(&app, &files.settings, asked).await?.0)
+}
+
+/// Downloads the newer version, checks its signature, installs it and restarts the app.
+#[tauri::command]
+async fn update_install(app: AppHandle, files: State<'_, AppFiles>) -> Result<(), ErrorView> {
+    let Some(found) = update::find(&app, &files.settings, true).await?.1 else {
+        return Err(ErrorView {
+            code: "not_found".into(),
+            message: "there is no newer version to install".into(),
+            details: Value::Null,
+        });
+    };
+    let bytes = update::download(&found).await?;
+    found.install(bytes).map_err(update::error_view)?;
+    app.restart()
 }
 
 /// The `lode://` link waiting for the window, if any.
@@ -481,6 +523,7 @@ pub fn run() -> Result<(), tauri::Error> {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingLink(Mutex::new(links::from_args(std::env::args()))))
         .setup(|app| {
             use tauri_plugin_deep_link::DeepLinkExt;
@@ -501,6 +544,9 @@ pub fn run() -> Result<(), tauri::Error> {
             let paths = app.path();
             let home = paths.home_dir().unwrap_or_else(|_| PathBuf::from("."));
             let data = paths.app_data_dir()?;
+            app.manage(AppFiles {
+                settings: data.join("settings.json"),
+            });
             let ui = Arc::new(WindowUi {
                 app: app.handle().clone(),
             });
@@ -513,6 +559,10 @@ pub fn run() -> Result<(), tauri::Error> {
         })
         .invoke_handler(tauri::generate_handler![
             pending_link,
+            settings,
+            set_settings,
+            update_check,
+            update_install,
             app_version,
             recent_workspaces,
             forget_workspace,

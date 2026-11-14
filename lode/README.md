@@ -21,8 +21,13 @@ list, and the server image `ghcr.io/<owner>/loded`. Unpack, put the binaries on 
 and follow the user guide: Part I for the client, Part II for running a server (systemd,
 Windows service, container).
 
+The same release holds Lode Desk, the desktop app: an MSI and an NSIS setup for Windows, a
+universal `.dmg` for macOS, and `.deb`, `.rpm` and AppImage for Linux. Installed, it keeps
+itself up to date (see [crates/lode-desk/README.md](crates/lode-desk/README.md)).
+
 A release is made by pushing a tag `lode-v<version>`; `.github/workflows/lode-release.yml`
-builds and publishes it.
+builds and publishes it. The checklist, including the keys it needs, is in
+[docs/release.md](docs/release.md).
 
 ```
 docker build -t loded .                 # the server image, from this folder

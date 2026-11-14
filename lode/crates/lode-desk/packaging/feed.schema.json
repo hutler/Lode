@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hutler/simpledevops/lode/crates/lode-desk/packaging/feed.schema.json",
+  "title": "Lode Desk update feed",
+  "description": "latest.json as the Tauri updater reads it, with the platforms Lode Desk publishes.",
+  "type": "object",
+  "required": ["version", "notes", "pub_date", "platforms"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "notes": { "type": "string" },
+    "pub_date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "platforms": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "linux-x86_64",
+          "linux-x86_64-appimage",
+          "linux-x86_64-deb",
+          "linux-x86_64-rpm",
+          "windows-x86_64",
+          "windows-x86_64-msi",
+          "windows-x86_64-nsis",
+          "darwin-x86_64",
+          "darwin-aarch64",
+          "darwin-x86_64-app",
+          "darwin-aarch64-app"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["signature", "url"],
+        "additionalProperties": false,
+        "properties": {
+          "signature": { "type": "string", "minLength": 40, "pattern": "^[A-Za-z0-9+/]+=*$" },
+          "url": { "type": "string", "pattern": "^https://[^\\s]+/lode-desk-[0-9]+\\.[0-9]+\\.[0-9]+-[A-Za-z0-9_.-]+$" }
+        }
+      }
+    }
+  }
+}
