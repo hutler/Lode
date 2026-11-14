@@ -19,6 +19,7 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M6.md](M6.md) | Integration: webhooks, checks, submit gate, unattended client | T060–T064 |
 | [M7.md](M7.md) | Release v1 | T070–T072 |
 | [M8.md](M8.md) | Easy setup | T080–T087 |
+| [M9.md](M9.md) | GUI core | T090–T094 |
 
 ## Dependency graph
 
@@ -71,6 +72,11 @@ M8   T080  T084  T085                 (T080 after T054; T084 after T072; T085 af
      T082                             (after T081)
      T083                             (after T082)
      T087                             (after T080–T086)
+
+M9   T090                             (after T087)
+     T091                             (after T090)
+     T092  T093                       (after T091)
+     T094                             (after T092 T093)
 ```
 
 ## Status
