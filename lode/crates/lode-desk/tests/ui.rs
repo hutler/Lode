@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
-use lode_desk::app::{self, AppWindow, ChangeRow, Dialog, Options};
+use lode_desk::app::{
+    self, AppWindow, BlameLine, ChangeRow, Dialog, DiffRow, Options, Pane, Reading, RevRow, Span,
+};
 use lode_desk::changes::{self, FileEntry, Pending};
 use lode_desk::desk::Desk;
 use lode_ops::output::{ProgressEvent, Ui};
@@ -31,12 +33,72 @@ struct World {
     _server: TestServer,
     url: String,
     head: u64,
+    /// Depot `story`: more than a page of history, a text file and an image changed twice.
+    story: Story,
     /// A server that offers single sign-on as "Example Corp", password sign-in for everyone.
     sso: TestServer,
     /// A server that offers single sign-on, password sign-in for administrators only.
     sso_admins: TestServer,
     _provider: TestProvider,
     rt: Handle,
+}
+
+/// The revisions of depot `story`.
+struct Story {
+    first: u64,
+    head: u64,
+    total: usize,
+}
+
+/// A 4×4 PNG of one color.
+fn png_of(rgb: [u8; 3]) -> Vec<u8> {
+    let mut out = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut out, 4, 4);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let pixels: Vec<u8> = (0..16).flat_map(|_| rgb).collect();
+        enc.write_header()
+            .unwrap()
+            .write_image_data(&pixels)
+            .unwrap();
+    }
+    out
+}
+
+async fn story(server: &TestServer) -> Story {
+    server.create_depot("story").await;
+    let red = png_of([200, 30, 30]);
+    let first = server
+        .commit_files(
+            "story",
+            "main",
+            &[
+                ("notes.txt", &b"line one\nspeed = 10\nend\n"[..]),
+                ("pic.png", &red[..]),
+            ],
+        )
+        .await;
+    for i in 0..104 {
+        let text = format!("entry {i}\n");
+        server
+            .commit_files("story", "main", &[("log.txt", text.as_bytes())])
+            .await;
+    }
+    let blue = png_of([30, 30, 200]);
+    let head = server
+        .commit_files(
+            "story",
+            "main",
+            &[
+                ("notes.txt", &b"line one\nspeed = 12\nend\n"[..]),
+                ("pic.png", &blue[..]),
+            ],
+        )
+        .await;
+    // The depot's own first revision, then the ones above.
+    let total = usize::try_from(head).unwrap();
+    Story { first, head, total }
 }
 
 /// One app as a user has it: a home, the app's data and lode's config.
@@ -89,6 +151,7 @@ async fn start(rt: Handle) -> World {
             ],
         )
         .await;
+    let story = story(&server).await;
     add_user(&server, "alice", Some("correct horse"), None).await;
     add_user(&server, "bob", Some("battery staple"), None).await;
     server
@@ -104,6 +167,16 @@ async fn start(rt: Handle) -> World {
     server
         .acl(
             "game",
+            "alice",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Write,
+        )
+        .await;
+    server
+        .acl(
+            "story",
             "alice",
             "*",
             "**",
@@ -141,6 +214,7 @@ async fn start(rt: Handle) -> World {
         _server: server,
         url,
         head,
+        story,
         sso,
         sso_admins,
         _provider: provider,
@@ -813,6 +887,188 @@ async fn opening_a_folder_that_is_not_a_workspace(world: &World) {
     println!("opening a folder that is not a workspace ... ok");
 }
 
+fn revs(w: &AppWindow) -> Vec<RevRow> {
+    w.global::<Reading>().get_revs().iter().collect()
+}
+
+fn diff_rows(w: &AppWindow) -> Vec<DiffRow> {
+    w.global::<Reading>().get_diff_rows().iter().collect()
+}
+
+fn has_image(w: &AppWindow, label: &str) -> bool {
+    all(w, label)
+        .iter()
+        .any(|e| e.accessible_role() == Some(AccessibleRole::Image))
+}
+
+async fn history_blame_and_diffs(world: &World) {
+    let s = &world.story;
+    let home = Home::new();
+    let folder = home.path().join("story");
+    let w = home.window(world, Some(folder.clone()));
+    signed_in(world, &w).await;
+    click(&w, "Check out a depot…");
+    type_into(&w, "Depot", &format!("{}/story", world.url));
+    click(&w, "Browse…");
+    click(&w, "Check out");
+    until("the workspace opens", || w.get_dialog() == Dialog::None).await;
+    until("its changes load", || w.get_changes().loaded).await;
+    let r = w.global::<Reading>();
+
+    // The branch's history, a page at a time.
+    click(&w, "History");
+    assert_eq!(r.get_pane(), Pane::History);
+    until("the first page loads", || !r.get_history().loading).await;
+    assert_eq!(revs(&w).len(), 100);
+    assert!(r.get_history().more);
+    assert_eq!(r.get_history().title, "History of main");
+    let newest = &revs(&w)[0];
+    assert_eq!(newest.rev, i32::try_from(s.head).unwrap());
+    assert!(newest.selected && newest.branch_tag == "main" && !newest.line_above);
+    until("the newest revision's details", || r.get_detail().shown).await;
+    assert_eq!(r.get_detail().title, format!("r{}", s.head));
+    assert_eq!(value(&w, "Message"), newest.summary.as_str());
+    click(&w, "Load older revisions");
+    until("the next page loads", || revs(&w).len() == s.total).await;
+    until("no more pages", || !r.get_history().loading).await;
+    assert!(!r.get_history().more);
+    assert!(
+        !revs(&w).last().unwrap().line_below,
+        "the first revision ends the line"
+    );
+
+    // Selecting a revision, with the mouse and with the arrow keys.
+    let second = revs(&w)[1].clone();
+    click(&w, &format!("{} {}", second.label, second.summary));
+    until("its details", || r.get_detail().rev == second.rev).await;
+    assert!(revs(&w)[1].selected && !revs(&w)[0].selected);
+    r.invoke_step_rev(-1);
+    until("the newer one's details", || {
+        r.get_detail().rev == newest.rev
+    })
+    .await;
+    let files: Vec<String> = r.get_files().iter().map(|f| f.path.to_string()).collect();
+    assert_eq!(files, ["notes.txt", "pic.png"]);
+
+    // A text diff with the changed words marked.
+    click(&w, "Diff of notes.txt");
+    assert_eq!(r.get_pane(), Pane::Diff);
+    until("the diff loads", || !r.get_diff().loading).await;
+    assert_eq!(value(&w, "Compared"), format!("notes.txt in r{}", s.head));
+    assert_eq!((r.get_diff().insertions, r.get_diff().deletions), (1, 1));
+    r.invoke_set_layout("unified".into());
+    let rows = diff_rows(&w);
+    assert!(rows[0].hunk);
+    let added = rows.iter().find(|r| r.kind == "add").unwrap();
+    assert_eq!(added.text, "speed = 12");
+    let marks: Vec<Span> = added.spans.iter().collect();
+    assert_eq!(marks, [Span { start: 8, len: 2 }]);
+    click(&w, "Side by side");
+    assert_eq!(r.get_diff().layout, "split");
+    let pair = diff_rows(&w)
+        .into_iter()
+        .find(|r| r.left.kind == "delete")
+        .unwrap();
+    assert_eq!(
+        (pair.left.text.as_str(), pair.right.text.as_str()),
+        ("speed = 10", "speed = 12")
+    );
+    assert_eq!(
+        pair.right.spans.iter().collect::<Vec<_>>(),
+        [Span { start: 8, len: 2 }]
+    );
+    let prefs = std::fs::read_to_string(home.path().join("app/prefs.json")).unwrap();
+    assert!(prefs.contains("\"split\""), "the layout is kept: {prefs}");
+    click(&w, "Back to History");
+    assert_eq!(r.get_pane(), Pane::History);
+    until("history again", || r.get_detail().rev == newest.rev).await;
+
+    // Blame of the file, and a revision from it.
+    click(&w, "Blame notes.txt");
+    assert_eq!(r.get_pane(), Pane::Blame);
+    until("blame loads", || !r.get_blame().loading).await;
+    let lines: Vec<BlameLine> = r.get_blame_lines().iter().collect();
+    let by: Vec<i32> = lines.iter().map(|l| l.rev).collect();
+    let (first, head) = (
+        i32::try_from(s.first).unwrap(),
+        i32::try_from(s.head).unwrap(),
+    );
+    assert_eq!(by, [first, head, first]);
+    assert!(lines.iter().all(|l| l.start), "three runs of one line");
+    assert_eq!(lines[1].text, "speed = 12");
+    click(&w, &format!("Revision r{first}"));
+    assert_eq!(r.get_pane(), Pane::History);
+    until("that revision's details", || r.get_detail().rev == first).await;
+
+    // A file's own history.
+    click(&w, "History of notes.txt");
+    until("the file's history", || {
+        !r.get_history().loading && r.get_history().path == "notes.txt"
+    })
+    .await;
+    assert_eq!(
+        revs(&w).iter().map(|r| r.rev).collect::<Vec<_>>(),
+        [head, first]
+    );
+    click(&w, "Branch history");
+    until("the branch again", || {
+        !r.get_history().loading && revs(&w).len() == 100
+    })
+    .await;
+
+    // An image diff in each mode.
+    until("the newest revision's details", || {
+        r.get_detail().rev == head
+    })
+    .await;
+    click(&w, "Diff of pic.png");
+    until("the images load", || {
+        let d = r.get_diff();
+        !d.loading && d.image && !r.get_image().loading
+    })
+    .await;
+    let img = r.get_image();
+    assert!(img.both && img.mode == "side");
+    assert!(
+        img.old_caption.starts_with("Before   4 × 4"),
+        "{}",
+        img.old_caption
+    );
+    assert!(has_image(&w, "Before") && has_image(&w, "After"));
+    click(&w, "Swipe");
+    assert_eq!(r.get_image().mode, "swipe");
+    assert!(shown(&w, "Swipe position"));
+    assert!(has_image(&w, "Before") && has_image(&w, "After"));
+    r.set_image_pos(30.0);
+    click(&w, "Onion skin");
+    assert_eq!(r.get_image().mode, "onion");
+    assert!(shown(&w, "Opacity of after"));
+    assert!(has_image(&w, "Before") && has_image(&w, "After"));
+    let prefs = std::fs::read_to_string(home.path().join("app/prefs.json")).unwrap();
+    assert!(prefs.contains("\"onion\""), "the mode is kept: {prefs}");
+    click(&w, "Side by side");
+    assert_eq!(r.get_image().mode, "side");
+
+    // The working copy's diff, from Changes.
+    let root = std::fs::canonicalize(&folder).unwrap();
+    click(&w, "Changes");
+    assert_eq!(r.get_pane(), Pane::Changes);
+    std::fs::write(root.join("notes.txt"), "line one\nspeed = 14\nend\n").unwrap();
+    until("the edit shows", || w.get_changes().total == 1).await;
+    click(&w, "notes.txt");
+    click(&w, "Diff of notes.txt");
+    until("the working diff loads", || {
+        r.get_pane() == Pane::Diff && !r.get_diff().loading
+    })
+    .await;
+    assert_eq!(value(&w, "Compared"), "notes.txt (working copy)");
+    assert!(diff_rows(&w).iter().any(|r| r.right.text == "speed = 14"));
+    click(&w, "Back to Changes");
+    assert_eq!(r.get_pane(), Pane::Changes);
+    w.hide().unwrap();
+    println!("history, blame and diffs ... ok");
+}
+
 fn main() -> std::process::ExitCode {
     i_slint_backend_testing::init_integration_test_with_system_time();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -829,6 +1085,7 @@ fn main() -> std::process::ExitCode {
         opening_a_folder_that_is_not_a_workspace(&world).await;
         changes_pick_commit_revert_and_changelists(&world).await;
         twenty_thousand_rows(&world).await;
+        history_blame_and_diffs(&world).await;
         let _ = slint::quit_event_loop();
     })
     .unwrap();

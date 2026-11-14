@@ -11,6 +11,8 @@
 pub mod app;
 pub mod changes;
 pub mod desk;
+pub mod diffs;
+pub mod history;
 pub mod links;
 pub mod update;
 pub mod watch;

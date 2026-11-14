@@ -1,0 +1,1021 @@
+// History, blame and diffs of an open workspace (T132). The state lives in the global
+// `Reading`, which src/app/read.rs fills; the views only draw it and call its callbacks.
+
+import { Button, ListView, Slider, Palette } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Muted, Title } from "parts.slint";
+
+/// Which view of a workspace shows.
+export enum Pane { changes, history, blame, diff }
+
+/// One revision of the list, with its part of the graph.
+export struct RevRow {
+    rev: int,
+    label: string,
+    summary: string,
+    author: string,
+    date: string,
+    /// The branch's name on the newest row and at the branch point, else empty.
+    branch-tag: string,
+    /// Made on an ancestor branch (below the branch point).
+    inherited: bool,
+    merge: bool,
+    /// "merge BRANCH" for each merge it records.
+    merges: string,
+    agent: bool,
+    imported: string,
+    line-above: bool,
+    above-inherited: bool,
+    line-below: bool,
+    selected: bool,
+}
+
+/// The selected revision.
+export struct RevDetail {
+    shown: bool,
+    rev: int,
+    title: string,
+    on-branch: string,
+    summary: string,
+    body: string,
+    author: string,
+    submitter: string,
+    date: string,
+    branch: string,
+    merged: string,
+    agent: string,
+    imported: string,
+    client: string,
+    files: int,
+    truncated: bool,
+}
+
+/// A file the selected revision changed.
+export struct RevFile {
+    path: string,
+    name: string,
+    letter: string,
+    status: string,
+    can-blame: bool,
+}
+
+export struct HistoryState {
+    /// One file's history, or the branch's when empty.
+    path: string,
+    title: string,
+    subtitle: string,
+    loading: bool,
+    more: bool,
+    error: ErrorInfo,
+    /// Shown when there are no revisions.
+    empty: string,
+    lanes: int,
+    /// The row to keep in view, after a step with the arrow keys.
+    scroll-to: int,
+}
+
+export struct BlameLine {
+    /// The first line of a run of lines from one revision.
+    start: bool,
+    shade: bool,
+    rev: int,
+    label: string,
+    author: string,
+    summary: string,
+    date: string,
+    num: int,
+    text: string,
+}
+
+export struct BlameState {
+    path: string,
+    name: string,
+    at: string,
+    loading: bool,
+    truncated: bool,
+    error: ErrorInfo,
+}
+
+/// Marked characters of a line.
+export struct Span { start: int, len: int }
+
+/// One side of a side-by-side row.
+export struct DiffCell {
+    /// context, add, delete or empty.
+    kind: string,
+    num: string,
+    text: string,
+    spans: [Span],
+}
+
+/// One row of a diff: a hunk header, a unified line, a side-by-side pair, or a plain line.
+export struct DiffRow {
+    hunk: bool,
+    header: string,
+    /// hunk, context, add, delete, split or plain.
+    kind: string,
+    old-num: string,
+    new-num: string,
+    text: string,
+    spans: [Span],
+    left: DiffCell,
+    right: DiffCell,
+}
+
+/// What is shown instead of lines for a binary file.
+export struct DiffNote {
+    shown: bool,
+    title: string,
+    ext: string,
+    before: string,
+    after: string,
+    mode: string,
+    why: string,
+}
+
+export struct DiffState {
+    path: string,
+    name: string,
+    where: string,
+    back-label: string,
+    loading: bool,
+    /// The file has no change.
+    none: bool,
+    binary: bool,
+    insertions: int,
+    deletions: int,
+    /// unified or split.
+    layout: string,
+    note: DiffNote,
+    /// Why a large diff is plain text, when it is.
+    plain: string,
+    /// "The content is the same." and the like.
+    empty: string,
+    image: bool,
+    error: ErrorInfo,
+}
+
+export struct ImageState {
+    loading: bool,
+    both: bool,
+    /// side, swipe or onion.
+    mode: string,
+    has-old: bool,
+    has-new: bool,
+    old: image,
+    new: image,
+    old-caption: string,
+    new-caption: string,
+    /// "The file is new." or "The file was deleted." when one side is missing.
+    note: string,
+}
+
+export global Reading {
+    in-out property <Pane> pane: Pane.changes;
+    in property <string> mono: "monospace";
+    in-out property <HistoryState> history;
+    in property <[RevRow]> revs;
+    in-out property <RevDetail> detail;
+    in property <[RevFile]> files;
+    in-out property <BlameState> blame;
+    in property <[BlameLine]> blame-lines;
+    in-out property <DiffState> diff;
+    in property <[DiffRow]> diff-rows;
+    in-out property <ImageState> image;
+    in-out property <float> image-pos: 50;
+    in-out property <float> image-opacity: 50;
+    callback show-pane(Pane);
+    callback select-rev(int);
+    callback step-rev(int);
+    callback more-revs();
+    callback refresh-history();
+    callback branch-history();
+    callback file-history(string);
+    /// A file at a revision; -1 for the workspace's.
+    callback blame-file(string, int);
+    /// A file as a revision changed it; -1 for the working copy.
+    callback diff-file(string, int);
+    /// The branch's history with a revision selected.
+    callback show-revision(int);
+    callback set-layout(string);
+    callback set-image-mode(string);
+    callback back();
+    callback dismiss-error();
+}
+
+/// A text that acts as a button.
+component LinkButton inherits Rectangle {
+    in property <string> text;
+    in property <string> label: root.text;
+    in property <bool> mono;
+    callback clicked();
+    height: t.preferred-height;
+    min-width: 0;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } mouse-cursor: pointer; }
+    t := Text {
+        width: 100%;
+        text: root.text;
+        color: Palette.accent-background;
+        overflow: elide;
+        font-family: root.mono ? Reading.mono : "";
+        accessible-role: none;
+    }
+}
+
+component Tag inherits Rectangle {
+    in property <string> text;
+    in property <color> tint: Palette.accent-background;
+    height: 18px;
+    width: label.preferred-width + 12px;
+    border-radius: 9px;
+    background: root.tint.transparentize(0.8);
+    accessible-role: none;
+    label := Text {
+        text: root.text;
+        font-size: 10px;
+        color: Palette.foreground;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component Fact inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> mono;
+    spacing: 8px;
+    Muted { text: root.label; width: 90px; accessible-role: none; }
+    Text {
+        text: root.value;
+        color: Palette.foreground;
+        wrap: word-wrap;
+        horizontal-stretch: 1;
+        font-family: root.mono ? Reading.mono : "";
+        accessible-role: text;
+        accessible-label: root.label;
+        accessible-value: root.value;
+    }
+}
+
+global Lanes {
+    out property <color> own: Palette.accent-background;
+    out property <color> inherited: Palette.foreground.transparentize(0.6);
+    out property <color> merged: #d4a017;
+}
+
+/// The graph cell of one row: the branch's lane, and an edge from lane 2 at each merge.
+component GraphCell inherits Rectangle {
+    in property <RevRow> item;
+    in property <int> lanes;
+    property <color> own: root.item.inherited ? Lanes.inherited : Lanes.own;
+    width: root.lanes > 1 ? 40px : 24px;
+    accessible-role: none;
+    if root.item.line-above: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        stroke: root.item.above-inherited ? Lanes.inherited : Lanes.own;
+        stroke-width: 2px;
+        MoveTo { x: 12; y: 0; }
+        LineTo { x: 12; y: root.height / 2px; }
+    }
+    if root.item.line-below: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        stroke: root.own;
+        stroke-width: 2px;
+        MoveTo { x: 12; y: root.height / 2px; }
+        LineTo { x: 12; y: root.height / 1px; }
+    }
+    if root.item.merge: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        stroke: Lanes.merged;
+        stroke-width: 2px;
+        MoveTo { x: 28; y: root.height / 1px; }
+        CubicTo {
+            control-1-x: 28; control-1-y: root.height / 2px + 4;
+            control-2-x: 18; control-2-y: root.height / 2px;
+            x: 12; y: root.height / 2px;
+        }
+    }
+    if root.item.merge: Rectangle {
+        x: 28px - 2.5px;
+        y: root.height - 5.5px;
+        width: 5px;
+        height: 5px;
+        border-radius: 2.5px;
+        background: Lanes.merged;
+    }
+    Rectangle {
+        property <length> r: root.item.merge ? 5px : 4px;
+        x: 12px - self.r;
+        y: root.height / 2 - self.r;
+        width: 2 * self.r;
+        height: 2 * self.r;
+        border-radius: self.r;
+        background: root.item.merge ? Palette.background : root.own;
+        border-color: root.own;
+        border-width: 2px;
+    }
+}
+
+component RevRowView inherits Rectangle {
+    in property <RevRow> item;
+    in property <int> lanes;
+    callback select();
+    height: 40px;
+    background: root.item.selected ? Palette.accent-background.transparentize(0.75)
+        : touch.has-hover ? Palette.alternate-background : transparent;
+    accessible-role: list-item;
+    accessible-label: root.item.label + " " + root.item.summary;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.item.selected;
+    accessible-action-default => { root.select(); }
+    touch := TouchArea { clicked => { root.select(); } }
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 8px;
+        spacing: 8px;
+        GraphCell { item: root.item; lanes: root.lanes; }
+        Text {
+            text: root.item.label;
+            width: 64px;
+            font-family: Reading.mono;
+            vertical-alignment: center;
+            color: root.item.inherited ? Palette.foreground.transparentize(0.4) : Palette.foreground;
+            accessible-role: none;
+        }
+        if root.item.branch-tag != "": Tag {
+            y: (parent.height - self.height) / 2;
+            text: root.item.branch-tag;
+            tint: root.item.inherited ? Lanes.inherited : Lanes.own;
+        }
+        Text {
+            text: root.item.summary;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+        if root.item.agent: Tag { y: (parent.height - self.height) / 2; text: "agent"; tint: #8b5cf6; }
+        if root.item.imported != "": Tag { y: (parent.height - self.height) / 2; text: root.item.imported; }
+        if root.item.merge: Tag { y: (parent.height - self.height) / 2; text: root.item.merges; tint: Lanes.merged; }
+        Muted { text: root.item.author; width: 110px; overflow: elide; vertical-alignment: center; accessible-role: none; }
+        Muted { text: root.item.date; width: 150px; overflow: elide; vertical-alignment: center; accessible-role: none; }
+    }
+}
+
+component RevFileRow inherits Rectangle {
+    in property <RevFile> file;
+    in property <int> rev;
+    height: 26px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: root.file.letter;
+            width: 14px;
+            font-weight: 700;
+            vertical-alignment: center;
+            color: root.file.status == "added" ? #16a34a : root.file.status == "deleted" ? #dc2626 : #3b82f6;
+            accessible-role: none;
+        }
+        LinkButton {
+            y: (parent.height - self.height) / 2;
+            horizontal-stretch: 1;
+            text: root.file.name;
+            label: "Diff of " + root.file.path;
+            mono: true;
+            clicked => { Reading.diff-file(root.file.path, root.rev); }
+        }
+        LinkButton {
+            y: (parent.height - self.height) / 2;
+            width: self.preferred-width;
+            text: "History";
+            label: "History of " + root.file.path;
+            clicked => { Reading.file-history(root.file.path); }
+        }
+        if root.file.can-blame: LinkButton {
+            y: (parent.height - self.height) / 2;
+            width: self.preferred-width;
+            text: "Blame";
+            label: "Blame " + root.file.path;
+            clicked => { Reading.blame-file(root.file.path, root.rev); }
+        }
+    }
+}
+
+/// A branch's or a file's history: the revisions with their graph, loaded a page at a time as
+/// the list nears its end, and the selected revision's details.
+export component HistoryView inherits Rectangle {
+    in property <int> scroll-to: Reading.history.scroll-to;
+    changed scroll-to => {
+        if self.scroll-to >= 0 {
+            list.keep-in-view(self.scroll-to * 40px);
+        }
+    }
+    HorizontalLayout {
+        VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 8px;
+                Title { text: Reading.history.title; overflow: elide; }
+                Muted {
+                    text: Reading.history.subtitle;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                    font-family: Reading.history.path != "" ? Reading.mono : "";
+                }
+                if Reading.history.path != "": Button {
+                    text: "Branch history";
+                    clicked => { Reading.branch-history(); }
+                }
+                if Reading.history.path == "": Button {
+                    text: "Refresh";
+                    enabled: !Reading.history.loading;
+                    clicked => { Reading.refresh-history(); }
+                }
+            }
+            if Reading.history.error.shown: ErrorBanner {
+                error: Reading.history.error;
+                dismissable: true;
+                dismissed => { Reading.dismiss-error(); }
+            }
+            if Reading.history.empty != "": Muted { text: Reading.history.empty; wrap: word-wrap; }
+            keys := FocusScope {
+                vertical-stretch: 1;
+                key-pressed(e) => {
+                    if e.text == Key.DownArrow {
+                        Reading.step-rev(1);
+                        return accept;
+                    }
+                    if e.text == Key.UpArrow {
+                        Reading.step-rev(-1);
+                        return accept;
+                    }
+                    reject
+                }
+                list := ListView {
+                    function keep-in-view(top: length) {
+                        if top < -self.content-y {
+                            self.content-y = -top;
+                        } else if top + 40px > -self.content-y + self.visible-height {
+                            self.content-y = -(top + 40px - self.visible-height);
+                        }
+                    }
+                    changed content-y => {
+                        if Reading.history.more && !Reading.history.loading
+                            && -self.content-y + self.visible-height > self.content-height - 800px {
+                            Reading.more-revs();
+                        }
+                    }
+                    for r in Reading.revs: RevRowView {
+                        item: r;
+                        lanes: Reading.history.lanes;
+                        select => {
+                            keys.focus();
+                            Reading.select-rev(r.rev);
+                        }
+                    }
+                }
+            }
+            if Reading.history.loading: Muted { text: "Loading revisions…"; }
+            if Reading.history.more && !Reading.history.loading: HorizontalLayout {
+                alignment: start;
+                Button { text: "Load older revisions"; clicked => { Reading.more-revs(); } }
+            }
+        }
+        Rectangle {
+            width: 340px;
+            background: Palette.alternate-background;
+            if !Reading.detail.shown: Muted {
+                x: 16px;
+                y: 16px;
+                width: parent.width - 32px;
+                text: "Select a revision to see what it changed.";
+                wrap: word-wrap;
+            }
+            if Reading.detail.shown: VerticalLayout {
+                padding: 16px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 6px;
+                    Text {
+                        text: Reading.detail.title;
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: Palette.foreground;
+                        accessible-role: text;
+                        accessible-label: "Revision";
+                        accessible-value: self.text;
+                    }
+                    Muted { text: Reading.detail.on-branch; vertical-alignment: center; horizontal-stretch: 1; }
+                }
+                Text {
+                    text: Reading.detail.summary;
+                    font-weight: 600;
+                    color: Palette.foreground;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                    accessible-label: "Message";
+                    accessible-value: self.text;
+                }
+                if Reading.detail.body != "": Muted { text: Reading.detail.body; wrap: word-wrap; }
+                Fact { label: "Author"; value: Reading.detail.author; }
+                if Reading.detail.submitter != "": Fact { label: "Submitted by"; value: Reading.detail.submitter; }
+                Fact { label: "Date"; value: Reading.detail.date; }
+                Fact { label: "Branch"; value: Reading.detail.branch; mono: true; }
+                if Reading.detail.merged != "": Fact { label: "Merged"; value: Reading.detail.merged; mono: true; }
+                if Reading.detail.agent != "": Fact { label: "Agent"; value: Reading.detail.agent; mono: true; }
+                if Reading.detail.imported != "": Fact { label: "Imported"; value: Reading.detail.imported; mono: true; }
+                if Reading.detail.client != "": Fact { label: "Client"; value: Reading.detail.client; mono: true; }
+                Text {
+                    text: "Changed files  " + Reading.detail.files;
+                    font-weight: 600;
+                    color: Palette.foreground;
+                }
+                ListView {
+                    vertical-stretch: 1;
+                    for f in Reading.files: RevFileRow { file: f; rev: Reading.detail.rev; }
+                }
+                if Reading.detail.truncated: Muted { text: "More files changed than are listed."; }
+            }
+        }
+    }
+}
+
+component BlameRow inherits Rectangle {
+    in property <BlameLine> line;
+    height: 20px;
+    background: root.line.shade ? Palette.alternate-background : transparent;
+    if root.line.start: Rectangle {
+        y: 0;
+        height: 1px;
+        background: Palette.border;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        padding-left: 4px;
+        Rectangle {
+            width: 300px;
+            if root.line.start: HorizontalLayout {
+                spacing: 8px;
+                LinkButton {
+                    y: (parent.height - self.height) / 2;
+                    width: 56px;
+                    text: root.line.label;
+                    label: "Revision " + root.line.label;
+                    mono: true;
+                    clicked => { Reading.show-revision(root.line.rev); }
+                }
+                Muted { text: root.line.author; width: 80px; overflow: elide; vertical-alignment: center; font-size: 11px; accessible-role: none; }
+                Muted { text: root.line.summary; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; font-size: 11px; accessible-role: none; }
+            }
+        }
+        Muted {
+            text: root.line.num;
+            width: 44px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            font-family: Reading.mono;
+            font-size: 12px;
+            accessible-role: none;
+        }
+        Text {
+            text: root.line.text;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            font-family: Reading.mono;
+            font-size: 12px;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+    }
+}
+
+/// Who last changed each line of one file.
+export component BlameView inherits Rectangle {
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            Title { text: "Blame " + Reading.blame.name; }
+            Muted {
+                text: Reading.blame.path + Reading.blame.at;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+                font-family: Reading.mono;
+            }
+            Button {
+                text: "File history";
+                clicked => { Reading.file-history(Reading.blame.path); }
+            }
+        }
+        if Reading.blame.error.shown: ErrorBanner {
+            error: Reading.blame.error;
+            dismissable: true;
+            dismissed => { Reading.dismiss-error(); }
+        }
+        if Reading.blame.loading: Muted { text: "Loading blame…"; }
+        ListView {
+            vertical-stretch: 1;
+            for l in Reading.blame-lines: BlameRow { line: l; }
+        }
+        if Reading.blame.truncated: Muted { text: "The file is longer than blame shows."; }
+    }
+}
+
+/// A change bar in a diff's gutter.
+component Gutter inherits Rectangle {
+    in property <string> kind;
+    width: 6px;
+    accessible-role: none;
+    if root.kind == "add" || root.kind == "delete": Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: 6;
+        viewbox-height: root.height / 1px;
+        stroke: root.kind == "add" ? #16a34a : #dc2626;
+        stroke-width: 3px;
+        MoveTo { x: 3; y: 0; }
+        LineTo { x: 3; y: root.height / 1px; }
+    }
+}
+
+/// A line of code with its changed words marked behind it.
+component CodeText inherits Rectangle {
+    in property <string> text;
+    in property <[Span]> spans;
+    in property <string> kind;
+    in property <length> char-width;
+    horizontal-stretch: 1;
+    clip: true;
+    for s in root.spans: Rectangle {
+        x: s.start * root.char-width;
+        width: s.len * root.char-width;
+        height: root.height;
+        border-radius: 2px;
+        background: root.kind == "add" ? #16a34a66 : #dc262666;
+    }
+    Text {
+        x: 0;
+        width: root.width;
+        text: root.text;
+        font-family: Reading.mono;
+        font-size: 12px;
+        vertical-alignment: center;
+        color: Palette.foreground;
+        accessible-role: none;
+    }
+}
+
+global Tint {
+    out property <color> add: #16a34a22;
+    out property <color> delete: #dc262622;
+}
+
+component Num inherits Text {
+    width: 44px;
+    horizontal-alignment: right;
+    vertical-alignment: center;
+    font-family: Reading.mono;
+    font-size: 12px;
+    color: Palette.foreground.transparentize(0.5);
+    accessible-role: none;
+}
+
+component DiffRowView inherits Rectangle {
+    in property <DiffRow> item;
+    in property <length> char-width;
+    height: 20px;
+    background: root.item.kind == "hunk" ? Palette.accent-background.transparentize(0.9)
+        : root.item.kind == "add" ? Tint.add
+        : root.item.kind == "delete" ? Tint.delete
+        : transparent;
+    if root.item.kind == "hunk" || root.item.kind == "plain": Text {
+        x: 8px;
+        width: root.width - 16px;
+        text: root.item.kind == "hunk" ? root.item.header : root.item.text;
+        font-family: Reading.mono;
+        font-size: 12px;
+        vertical-alignment: center;
+        overflow: elide;
+        color: root.item.kind == "hunk" ? Palette.foreground.transparentize(0.4) : Palette.foreground;
+        accessible-role: none;
+    }
+    if root.item.kind == "context" || root.item.kind == "add" || root.item.kind == "delete": HorizontalLayout {
+        spacing: 6px;
+        Num { text: root.item.old-num; }
+        Num { text: root.item.new-num; }
+        Gutter { kind: root.item.kind; }
+        Text {
+            width: 10px;
+            text: root.item.kind == "add" ? "+" : root.item.kind == "delete" ? "-" : "";
+            font-family: Reading.mono;
+            font-size: 12px;
+            vertical-alignment: center;
+            color: Palette.foreground.transparentize(0.4);
+            accessible-role: none;
+        }
+        CodeText { text: root.item.text; spans: root.item.spans; kind: root.item.kind; char-width: root.char-width; }
+    }
+    if root.item.kind == "split": HorizontalLayout {
+        for cell[i] in [root.item.left, root.item.right]: Rectangle {
+            horizontal-stretch: 1;
+            background: cell.kind == "add" ? Tint.add
+                : cell.kind == "delete" ? Tint.delete
+                : cell.kind == "empty" ? Palette.alternate-background
+                : transparent;
+            HorizontalLayout {
+                spacing: 6px;
+                Num { text: cell.num; }
+                Gutter { kind: cell.kind; }
+                CodeText { text: cell.text; spans: cell.spans; kind: cell.kind; char-width: root.char-width; }
+            }
+        }
+    }
+}
+
+component Caption inherits Text {
+    color: Palette.foreground;
+    horizontal-alignment: center;
+    font-size: 12px;
+}
+
+/// Before and after of an image: side by side, a swipe between them, or one over the other.
+export component ImageDiffView inherits Rectangle {
+    VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            Button {
+                text: "Side by side";
+                checkable: true;
+                checked: Reading.image.mode == "side";
+                clicked => { Reading.set-image-mode("side"); }
+            }
+            Button {
+                text: "Swipe";
+                checkable: true;
+                checked: Reading.image.mode == "swipe";
+                enabled: Reading.image.both;
+                clicked => { Reading.set-image-mode("swipe"); }
+            }
+            Button {
+                text: "Onion skin";
+                checkable: true;
+                checked: Reading.image.mode == "onion";
+                enabled: Reading.image.both;
+                clicked => { Reading.set-image-mode("onion"); }
+            }
+            if Reading.image.mode == "swipe": HorizontalLayout {
+                spacing: 8px;
+                Slider {
+                    width: 200px;
+                    minimum: 0;
+                    maximum: 100;
+                    value <=> Reading.image-pos;
+                    accessible-label: "Swipe position";
+                }
+                Muted { text: "Before left of the line, after right of it"; vertical-alignment: center; }
+            }
+            if Reading.image.mode == "onion": HorizontalLayout {
+                spacing: 8px;
+                Muted { text: "Before"; vertical-alignment: center; }
+                Slider {
+                    width: 200px;
+                    minimum: 0;
+                    maximum: 100;
+                    value <=> Reading.image-opacity;
+                    accessible-label: "Opacity of after";
+                }
+                Muted { text: "After"; vertical-alignment: center; }
+            }
+            if Reading.image.note != "": Muted { text: Reading.image.note; vertical-alignment: center; }
+        }
+        if Reading.image.loading: Muted { text: "Loading images…"; }
+        if !Reading.image.loading && Reading.image.mode == "side": HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 1;
+            if Reading.image.has-old: VerticalLayout {
+                spacing: 4px;
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Palette.alternate-background;
+                    border-radius: 4px;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: Reading.image.old;
+                        image-fit: contain;
+                        accessible-role: image;
+                        accessible-label: "Before";
+                    }
+                }
+                Caption { text: Reading.image.old-caption; }
+            }
+            if Reading.image.has-new: VerticalLayout {
+                spacing: 4px;
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Palette.alternate-background;
+                    border-radius: 4px;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: Reading.image.new;
+                        image-fit: contain;
+                        accessible-role: image;
+                        accessible-label: "After";
+                    }
+                }
+                Caption { text: Reading.image.new-caption; }
+            }
+        }
+        if !Reading.image.loading && Reading.image.mode != "side": VerticalLayout {
+            spacing: 4px;
+            vertical-stretch: 1;
+            stage := Rectangle {
+                vertical-stretch: 1;
+                background: Palette.alternate-background;
+                border-radius: 4px;
+                accessible-role: groupbox;
+                accessible-label: Reading.image.mode == "swipe" ? "Swipe" : "Onion skin";
+                // Swipe: after below, before over the part left of the line.
+                // Onion skin: before below, after over it as faint as asked.
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: Reading.image.mode == "swipe" ? Reading.image.new : Reading.image.old;
+                    image-fit: contain;
+                    accessible-role: image;
+                    accessible-label: Reading.image.mode == "swipe" ? "After" : "Before";
+                }
+                if Reading.image.mode == "swipe": Rectangle {
+                    x: 0;
+                    width: stage.width * Reading.image-pos / 100;
+                    height: stage.height;
+                    clip: true;
+                    Image {
+                        x: 0;
+                        width: stage.width;
+                        height: stage.height;
+                        source: Reading.image.old;
+                        image-fit: contain;
+                        accessible-role: image;
+                        accessible-label: "Before";
+                    }
+                }
+                if Reading.image.mode == "swipe": Rectangle {
+                    x: stage.width * Reading.image-pos / 100 - 1px;
+                    width: 2px;
+                    height: stage.height;
+                    background: Palette.accent-background;
+                }
+                if Reading.image.mode == "onion": Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: Reading.image.new;
+                    image-fit: contain;
+                    opacity: Reading.image-opacity / 100;
+                    accessible-role: image;
+                    accessible-label: "After";
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Caption { text: Reading.image.old-caption; horizontal-stretch: 1; }
+                Caption { text: Reading.image.new-caption; horizontal-stretch: 1; }
+            }
+        }
+    }
+}
+
+/// The diff of one file, in the unified or the side-by-side layout.
+export component DiffView inherits Rectangle {
+    // Measures the monospace grid, so marked words line up with the text.
+    probe := Text {
+        x: 0;
+        y: 0;
+        text: "0123456789";
+        font-family: Reading.mono;
+        font-size: 12px;
+        opacity: 0;
+        accessible-role: none;
+    }
+    property <length> char-width: probe.preferred-width / 10;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                text: "← " + Reading.diff.back-label;
+                accessible-label: Reading.diff.back-label;
+                clicked => { Reading.back(); }
+            }
+            Text {
+                text: Reading.diff.name;
+                font-size: 18px;
+                font-weight: 700;
+                font-family: Reading.mono;
+                color: Palette.foreground;
+                vertical-alignment: center;
+            }
+            Muted {
+                text: Reading.diff.where;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+                font-family: Reading.mono;
+                accessible-role: text;
+                accessible-label: "Compared";
+                accessible-value: self.text;
+            }
+            if !Reading.diff.binary && !Reading.diff.loading && !Reading.diff.none: Text {
+                text: "+" + Reading.diff.insertions;
+                color: #16a34a;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "Lines added";
+                accessible-value: Reading.diff.insertions;
+            }
+            if !Reading.diff.binary && !Reading.diff.loading && !Reading.diff.none: Text {
+                text: "−" + Reading.diff.deletions;
+                color: #dc2626;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "Lines removed";
+                accessible-value: Reading.diff.deletions;
+            }
+            if !Reading.diff.binary: Button {
+                text: "Unified";
+                checkable: true;
+                checked: Reading.diff.layout == "unified";
+                clicked => { Reading.set-layout("unified"); }
+            }
+            if !Reading.diff.binary: Button {
+                text: "Side by side";
+                checkable: true;
+                checked: Reading.diff.layout == "split";
+                clicked => { Reading.set-layout("split"); }
+            }
+        }
+        if Reading.diff.error.shown: ErrorBanner {
+            error: Reading.diff.error;
+            dismissable: true;
+            dismissed => { Reading.dismiss-error(); }
+        }
+        if Reading.diff.loading: Muted { text: "Loading the diff…"; }
+        if Reading.diff.none: Muted { text: "This file has no changes."; }
+        if Reading.diff.empty != "": Muted { text: Reading.diff.empty; }
+        if Reading.diff.note.shown: Rectangle {
+            background: Palette.alternate-background;
+            border-radius: 6px;
+            height: note.preferred-height;
+            note := VerticalLayout {
+                padding: 16px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text {
+                        text: Reading.diff.note.title;
+                        font-weight: 700;
+                        color: Palette.foreground;
+                        accessible-role: text;
+                        accessible-label: "Note";
+                        accessible-value: self.text;
+                    }
+                    if Reading.diff.note.ext != "": Tag { text: "." + Reading.diff.note.ext; }
+                }
+                Fact { label: "Before"; value: Reading.diff.note.before; }
+                Fact { label: "After"; value: Reading.diff.note.after; }
+                if Reading.diff.note.mode != "": Fact { label: "Mode"; value: Reading.diff.note.mode; mono: true; }
+                Muted { text: Reading.diff.note.why; wrap: word-wrap; }
+            }
+        }
+        if Reading.diff.plain != "": Muted { text: Reading.diff.plain; wrap: word-wrap; }
+        if Reading.diff.image: ImageDiffView { vertical-stretch: 1; }
+        if !Reading.diff.image: ListView {
+            vertical-stretch: 1;
+            accessible-role: list;
+            accessible-label: Reading.diff.layout == "split" ? "Side-by-side diff" : "Unified diff";
+            for r in Reading.diff-rows: DiffRowView { item: r; char-width: root.char-width; }
+        }
+    }
+}

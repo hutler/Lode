@@ -24,6 +24,8 @@ pub(super) struct WorkspaceState {
     message: String,
     /// Bumped by each refresh; only the newest answer is shown.
     generation: u64,
+    /// The view the workspace is on.
+    pub(super) view: super::read::View,
 }
 
 pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
@@ -128,6 +130,8 @@ impl App {
         }
         self.render(w);
         if let Some(r) = root {
+            self.work.borrow_mut().entry(r.clone()).or_default();
+            self.restore_view(&r);
             self.refresh(r);
         }
     }
@@ -195,7 +199,7 @@ impl App {
     }
 
     /// This controller again, for a task that outlives the call.
-    fn me(&self) -> Option<Rc<Self>> {
+    pub(super) fn me(&self) -> Option<Rc<Self>> {
         self.this.borrow().upgrade()
     }
 

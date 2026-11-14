@@ -6,8 +6,10 @@ import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
 import { SignInDialog, SignInState } from "sign_in.slint";
 import { ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget, NewChangelistDialog, RenameChangelistDialog, CommitChangelistDialog, ConfirmDialog, MoveDialog, MessagesDialog } from "changes.slint";
 import { CheckoutDialog, CheckoutState } from "checkout.slint";
+import { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState, HistoryView, BlameView, DiffView } from "history.slint";
 
 export { ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
+export { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState }
 
 /// A workspace opened before.
 export struct Recent {
@@ -182,6 +184,31 @@ component Field inherits HorizontalLayout {
     Text { text: root.value; color: Palette.foreground; overflow: elide; accessible-role: text; accessible-label: root.label; accessible-value: root.value; }
 }
 
+/// A section of the workspace's sidebar.
+component NavButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked();
+    height: 30px;
+    border-radius: 4px;
+    background: root.active ? Palette.accent-background.transparentize(0.8)
+        : touch.has-hover ? Palette.background.transparentize(0.5) : transparent;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selected: root.active;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    Text {
+        x: 10px;
+        text: root.text;
+        vertical-alignment: center;
+        height: parent.height;
+        font-weight: root.active ? 600 : 400;
+        color: Palette.foreground;
+        accessible-role: none;
+    }
+}
+
 component WorkspacePage inherits Rectangle {
     in property <WorkspaceTab> ws;
     in property <ErrorInfo> error;
@@ -217,6 +244,17 @@ component WorkspacePage inherits Rectangle {
                 Field { label: "Revision"; value: root.ws.rev; }
                 Field { label: "Server"; value: root.ws.server; }
                 Muted { text: root.ws.root; wrap: word-wrap; font-size: 11px; }
+                Rectangle { height: 8px; }
+                NavButton {
+                    text: "Changes";
+                    active: Reading.pane == Pane.changes;
+                    clicked => { Reading.show-pane(Pane.changes); }
+                }
+                NavButton {
+                    text: "History";
+                    active: Reading.pane != Pane.changes;
+                    clicked => { Reading.show-pane(Pane.history); }
+                }
             }
         }
         VerticalLayout {
@@ -231,7 +269,11 @@ component WorkspacePage inherits Rectangle {
                     dismissed => { root.dismiss-error(); }
                 }
             }
-            ChangesView {
+            if Reading.pane == Pane.history: HistoryView { vertical-stretch: 1; }
+            if Reading.pane == Pane.blame: BlameView { vertical-stretch: 1; }
+            if Reading.pane == Pane.diff: DiffView { vertical-stretch: 1; }
+            if Reading.pane == Pane.changes: ChangesView {
+                vertical-stretch: 1;
                 state: root.changes;
                 rows: root.rows;
                 message <=> root.message;

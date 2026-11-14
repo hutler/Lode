@@ -2,6 +2,7 @@
 // box with recent messages, and the changelist dialogs. The Rust side (src/changes.rs and
 // src/app.rs) builds the rows and runs the operations.
 
+import { Reading } from "history.slint";
 import { Button, LineEdit, TextEdit, ListView, ProgressIndicator, Palette, ScrollView } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check } from "parts.slint";
 
@@ -450,10 +451,29 @@ export component ChangesView inherits Rectangle {
                             clicked => { root.revert-selected(); }
                         }
                         if root.state.details.status != "untracked": Button {
+                            text: "Diff";
+                            accessible-label: "Diff of " + root.state.details.path;
+                            clicked => { Reading.diff-file(root.state.details.path, -1); }
+                        }
+                        if root.state.details.status != "untracked": Button {
                             text: "Move to…";
                             accessible-label: "Move to changelist";
                             enabled: root.state.busy == "";
                             clicked => { root.move-selected(); }
+                        }
+                    }
+                    if root.state.details.status != "untracked" && root.state.details.status != "added": HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        Button {
+                            text: "History";
+                            accessible-label: "History of " + root.state.details.path;
+                            clicked => { Reading.file-history(root.state.details.path); }
+                        }
+                        Button {
+                            text: "Blame";
+                            accessible-label: "Blame " + root.state.details.path;
+                            clicked => { Reading.blame-file(root.state.details.path, -1); }
                         }
                     }
                     Muted {

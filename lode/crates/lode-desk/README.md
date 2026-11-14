@@ -10,7 +10,7 @@ The app is moving from Tauri (a web view with React) to [Slint](https://slint.de
 Rust UI (milestone M13). The Slint window is the default build: Home with recent workspaces,
 sign-in (password and single sign-on), check out and workspace tabs (T130), and each
 workspace's pending changes: picking, commit with message history, revert, add, and
-changelists (T131). The rest of the screens, the `lode://` links and updates are still in the
+changelists (T131), and history, blame and diffs (T132). The rest of the screens, the `lode://` links and updates are still in the
 Tauri window, which is built with `--features web` until T135 removes it.
 
 This folder is its own Cargo workspace, so building the CLI and server never needs the GUI
