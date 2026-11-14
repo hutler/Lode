@@ -146,6 +146,20 @@ file names (`< > : " | ? *`), segments ending in a dot or space, Windows reserve
 in the same directory when compared case-insensitively. Every path in a depot can therefore be
 checked out on Windows, macOS and Linux.
 
+### 5.8 Obliterate
+
+A server administrator can remove file content from a depot for good, for a leaked secret or a
+huge file committed by mistake: every version of a file or of every file under a folder, or
+only the version a revision had (`lode admin obliterate <depot> <path[@rev]>… --reason TEXT`).
+Content is removed, history is not: revisions, messages and paths stay, and the depot keeps a
+record of what was removed, by whom, when and why. From then on that content answers
+`obliterated` wherever it would be read, a checkout or update leaves those files out and says
+so, and uploading or committing the same content again is refused.
+
+Content still in the head of an active branch cannot be obliterated; commit its removal or a
+fixed file first. Copies outside the server are not reached: backups, workspaces and shared
+caches on people's computers, and webhook payloads already sent.
+
 ## 6. Default modules
 
 ### 6.1 Locks
@@ -275,7 +289,8 @@ are JSON on stdout with a stable `code`; the process exit code is non-zero.
 
 Caching proxy · S3 blob backend · chunked storage for very large files · streams
 (branch hierarchy with merge direction) · smarter merge using `merged_from` · single sign-on
-(OIDC) · Postgres metadata backend · obliterate · importers (SVN, Git).
+(OIDC) · Postgres metadata backend · importers (SVN). Obliterate (§5.8, 0.2) and the Git
+importer (0.1) are built.
 
 ## 9. CLI summary
 

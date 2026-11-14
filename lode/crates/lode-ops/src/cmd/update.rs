@@ -68,6 +68,8 @@ enum Outcome {
     Deleted,
     /// No longer visible after a full sync, but modified locally: kept, untracked.
     Kept,
+    /// Its content at this revision was obliterated on the server: left out (T120).
+    Obliterated,
 }
 
 impl Outcome {
@@ -79,6 +81,7 @@ impl Outcome {
             Outcome::Conflicted => "conflicted",
             Outcome::Deleted => "deleted",
             Outcome::Kept => "kept",
+            Outcome::Obliterated => "obliterated",
         }
     }
 }
@@ -576,6 +579,9 @@ pub(crate) async fn sync(
     crate::crash::point("update.deleted");
     let fetched = fetch_entries(&mut ws, &client, &depot, downloads, ctx).await?;
     crate::crash::point("update.fetched");
+    for p in &fetched.obliterated {
+        run.note(p, Outcome::Obliterated);
+    }
     ws.db_mut().write(|tx| {
         tx.set_config(keys::SYNCED_REV, &target.to_string())?;
         if let Some(e) = epoch {
@@ -595,7 +601,10 @@ pub(crate) async fn sync(
         *counts.entry(o.name()).or_default() += 1;
     }
     for (p, o) in &run.outcomes {
-        if matches!(o, Outcome::Conflicted | Outcome::Kept | Outcome::Merged) {
+        if matches!(
+            o,
+            Outcome::Conflicted | Outcome::Kept | Outcome::Merged | Outcome::Obliterated
+        ) {
             run.ctx.out.line(format!("{:<10} {p}", o.name()));
         }
     }
@@ -636,6 +645,7 @@ pub(crate) async fn sync(
         "files": files,
         "counts": counts,
         "downloaded": fetched.downloaded,
+        "obliterated": fetched.obliterated,
     }))
 }
 

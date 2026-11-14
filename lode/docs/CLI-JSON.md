@@ -79,7 +79,7 @@ Needs `--name` with `--password-stdin`, or `--token-stdin`.
 
 ### `lode checkout <url>/<depot> [dir]`
 
-`{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "resumed": bool }`
+`{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "obliterated", "resumed": bool }`
 
 `files` counts the files in the view, `fetched` those placed by this run, `downloaded` the
 distinct blobs fetched from the server.
@@ -305,13 +305,16 @@ side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
   "rev": 12, "from": 9, "full": false,
   "files": [ { "path": "a.txt", "outcome": "merged" } ],
   "counts": { "merged": 1 },
-  "downloaded": 0
+  "downloaded": 0,
+  "obliterated": []
 }
 ```
 
 Outcomes: `added`, `updated`, `merged`, `conflicted`, `deleted`, `kept` (no longer visible
-after a full sync and modified locally: left on disk, untracked). `full` is true when the
-access epoch changed and the whole manifest was compared.
+after a full sync and modified locally: left on disk, untracked), `obliterated` (the content
+at that revision was obliterated on the server: left out, and listed in `obliterated`; an
+older tracked copy is removed). `full` is true when the access epoch changed and the whole
+manifest was compared. `checkout` and `view` changes list obliterated files the same way.
 
 ### `lode branch list [--all]` / `create <name> [--from B[@REV]] [--switch]` / `archive <name>`
 
@@ -442,6 +445,8 @@ may also manage that agent's tokens).
 | `acl remove <id>` | `{ "removed": id }` |
 | `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null }` |
 | `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
+| `obliterate <depot> <path[@rev]>… --reason R [--dry-run] [--yes]` | `{ "dry_run", "objects": [ { "id", "size", "uses": [ { "rev", "branch", "path" } ] } ], "bytes", "in_use"? }`; `in_use` (`[ { "branch", "path", "id" } ]`) only on a dry run, otherwise it is a `conflict` with `details.in_use` |
+| `obliterated <depot>` | `{ "obliterated": [ { "id", "size", "path", "reason", "by", "at" } ] }`, oldest first |
 | `webhook add <depot> <url> --events E,… [--branch G]` | `{ "hook": hook, "secret" }`; the secret goes to stdout once |
 | `webhook list <depot>` | `{ "webhooks": [ { "id", "depot", "url", "events", "branch"?, "active", "created_by", "created_at" } ] }` |
 | `webhook remove <depot> <id>` | `{ "removed": id }` |
@@ -453,7 +458,8 @@ default to `**` and are checked before anything is sent (`usage` on a bad one). 
 prompted for twice in a terminal, or read from stdin with `--password-stdin` (required with
 `--json`). A new token's value goes to stdout once (alone on the line in human output, the
 rest on stderr); listings never show values. `fsck` exits 1 with code `fsck_failed` and the
-report as `details` when it finds problems. `acl check` evaluates the rules as for a token
+report as `details` when it finds problems. `obliterate` without `--dry-run` needs `--reason`,
+and `--yes` when nobody can be asked (`usage` otherwise). `acl check` evaluates the rules as for a token
 with every scope; a real token's scopes can only narrow that.
 
 ### Unattended machines

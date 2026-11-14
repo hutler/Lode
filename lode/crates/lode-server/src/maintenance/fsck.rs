@@ -35,6 +35,8 @@ struct Fsck<'a> {
     checked: std::collections::HashMap<ObjectId, bool>,
     problems: Vec<String>,
     bad_objects: HashSet<ObjectId>,
+    /// Content obliterated from the depot: expected to be missing.
+    obliterated: std::sync::Arc<HashSet<ObjectId>>,
 }
 
 impl Fsck<'_> {
@@ -59,6 +61,7 @@ impl Fsck<'_> {
                 );
                 false
             }
+            Err(StoreError::NotFound(_)) if self.obliterated.contains(&id) => true,
             Err(StoreError::NotFound(_)) => {
                 self.problem(Some(id), format!("{at}: object {id} is missing"));
                 false
@@ -179,6 +182,7 @@ pub async fn fsck(
         checked: std::collections::HashMap::new(),
         problems: Vec::new(),
         bad_objects: HashSet::new(),
+        obliterated: state.obliterated(depot).await?,
     };
 
     // Metadata: branches, parents, the revision counter.
@@ -278,6 +282,20 @@ pub async fn fsck(
             f.revision_tree(r.num, r.root_tree).await;
         }
         min = last + 1;
+    }
+
+    // Obliterated content that is still stored, for instance after a crash between the
+    // record and the deletion. GC removes it.
+    let gone: Vec<ObjectId> = f.obliterated.iter().copied().collect();
+    for id in gone {
+        match state.blobs().contains(depot, &id).await {
+            Ok(true) => f.problem(
+                Some(id),
+                format!("object {id} was obliterated but is still stored; run gc"),
+            ),
+            Ok(false) => {}
+            Err(e) => f.problems.push(format!("cannot check object {id}: {e}")),
+        }
     }
 
     let mut checked = f.checked.len() as u64;

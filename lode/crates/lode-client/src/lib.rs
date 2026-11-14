@@ -25,7 +25,8 @@ use futures::StreamExt;
 use lode_core::{DepotPath, ObjectId};
 use lode_proto::admin::{
     AccessCheck, AclList, AclRule, CreateGroupRequest, CreatePrincipalRequest, GroupList,
-    GroupView, MaintenanceReport, PatchPrincipalRequest, PrincipalList,
+    GroupView, MaintenanceReport, ObliterateReport, ObliterateRequest, ObliterationList,
+    PatchPrincipalRequest, PrincipalList,
 };
 use lode_proto::auth::{
     CreateTokenRequest, CreateTokenResponse, Info, LoginRequest, LoginResponse, PrincipalView,
@@ -1043,6 +1044,24 @@ impl Client {
             self.url(&["depots", depot, "webhooks", &id.to_string(), "ping"])?,
         )
         .await
+    }
+
+    /// `POST /admin/depots/{d}/obliterate`: removes content for good (T120), or with
+    /// `dry_run` says what would be removed.
+    pub async fn obliterate(
+        &self,
+        depot: &str,
+        req: &ObliterateRequest,
+    ) -> Result<ObliterateReport> {
+        let url = self.url(&["admin", "depots", depot, "obliterate"])?;
+        // A dry run changes nothing; a real one repeated finds nothing left to remove.
+        self.json_body(Retry::Yes, Method::POST, url, req).await
+    }
+
+    /// `GET /admin/depots/{d}/obliterated`: what was obliterated from a depot.
+    pub async fn obliterated(&self, depot: &str) -> Result<ObliterationList> {
+        let url = self.url(&["admin", "depots", depot, "obliterated"])?;
+        self.json(Retry::Yes, Method::GET, url).await
     }
 
     /// `POST /admin/depots/{d}/fsck`.

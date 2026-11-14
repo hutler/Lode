@@ -854,7 +854,20 @@ dir = "/mnt/backup/lode"</code></pre>
 <p>Content that nothing refers to any more, such as uploads from abandoned commits or deleted shelves, is removed by garbage collection:</p>
 <pre><code>lode admin gc game --dry-run     # report only
 lode admin gc game</code></pre>
-<p>It is safe to run while the team works. Data newer than the grace period (24 hours by default) is never removed. Running it weekly from a scheduler is enough. Garbage collection never removes committed history; version 1 has no way to delete old revisions.</p>
+<p>It is safe to run while the team works. Data newer than the grace period (24 hours by default) is never removed. Running it weekly from a scheduler is enough. Garbage collection never removes committed history. To remove committed content for good, see "Removing content for good" below.</p>
+<h3>Removing content for good</h3>
+<p>When a password, a key or a huge file was committed by mistake, deleting it in a new revision is not enough: the old revisions still hold it. <code>lode admin obliterate</code> removes the content itself. Revisions, their messages and the paths they changed stay; only the stored content goes.</p>
+<ol>
+  <li>Commit the fix first: delete the file or replace it with a clean version. Content that is still in the newest revision of an active branch cannot be obliterated, because every checkout of that branch would break.</li>
+  <li>See what would go. <code>PATH</code> selects every version of a file, or of every file under a folder; <code>PATH@REV</code> only the version that revision had:
+<pre><code>lode admin obliterate game config/secrets.ini@r41 --dry-run</code></pre>
+  The report lists each piece of content with every revision and path that stored it, including copies under other names, and any branch that still holds it.</li>
+  <li>Remove it, saying why:
+<pre><code>lode admin obliterate game config/secrets.ini@r41 --reason "leaked API key, rotated"</code></pre>
+  It asks before removing anything; <code>--yes</code> skips the question in scripts.</li>
+</ol>
+<p>Afterwards, reading that content (<code>lode cat</code>, a diff, blame, a download) answers <code>obliterated</code>. Checking out or updating to an old revision leaves those files out and says so. Committing the same content again is refused. <code>lode admin obliterated game</code> lists what was removed, by whom, when and why.</p>
+<p>Obliterate cannot be undone, and it does not reach copies outside the server: backups made before it, workspaces and the shared download cache on people's computers, and webhook payloads already sent. For a leaked secret, rotate the secret as well; for backups, make a fresh one and remove the older ones when your retention allows.</p>
 <h3>Checking integrity</h3>
 <pre><code>lode admin fsck game             # quick: structure and presence
 lode admin fsck game --full      # also re-reads and verifies all content

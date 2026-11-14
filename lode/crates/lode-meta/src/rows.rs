@@ -330,3 +330,33 @@ pub struct RevisionFilter {
     /// Only revisions whose author is of this kind.
     pub author_kind: Option<PrincipalKind>,
 }
+
+/// Content obliterated from a depot (T120).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObliteratedRow {
+    /// Depot.
+    pub depot_id: DepotId,
+    /// The blob id; the object is gone from the store.
+    pub id: ObjectId,
+    /// Its size in bytes.
+    pub size: u64,
+    /// The path it was selected by (it may have been used at other paths too).
+    pub path: String,
+    /// Why it was removed.
+    pub reason: String,
+    /// Who removed it.
+    pub by: PrincipalId,
+    /// When.
+    pub at: Millis,
+}
+
+/// A change together with its revision and that revision's branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevChange {
+    /// The revision.
+    pub rev: u64,
+    /// Its branch.
+    pub branch_id: BranchId,
+    /// The change.
+    pub change: ChangeRow,
+}

@@ -108,6 +108,10 @@ pub mod paths {
     pub const ADMIN_GC: &str = "/api/v1/admin/depots/{d}/gc";
     /// Admin: consistency check of a depot.
     pub const ADMIN_FSCK: &str = "/api/v1/admin/depots/{d}/fsck";
+    /// Admin: obliterate content of a depot (T120).
+    pub const ADMIN_OBLITERATE: &str = "/api/v1/admin/depots/{d}/obliterate";
+    /// Admin: what was obliterated from a depot.
+    pub const ADMIN_OBLITERATED: &str = "/api/v1/admin/depots/{d}/obliterated";
     /// Locks module.
     pub const LOCKS: &str = "/api/v1/depots/{d}/locks";
     /// Shelves module: list and create.

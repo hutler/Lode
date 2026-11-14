@@ -78,3 +78,13 @@ First release.
 - `lode init` (new depot from a folder, with templates) and `lode import git`.
 - Client installers: a Windows MSI (also for winget), a Homebrew formula, and
   `lode self-update` for archive installs. Releases also carry the bare `lode` executables.
+
+### 0.2.0 (M12, not yet released)
+
+- The database gains the `obliterated` table (core schema 3), added automatically on the first
+  start. A 0.1 server refuses a database a 0.2 server has opened, so take a backup first if
+  you may need to go back.
+- New error code `obliterated` (HTTP 410). Older clients show it as an unknown error with the
+  server's message; a 0.1 client fails a checkout or update that meets an obliterated file
+  instead of leaving it out, so upgrade clients before obliterating content that people may
+  still check out at old revisions.

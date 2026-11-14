@@ -358,6 +358,23 @@ impl Blobs<'_> {
     pub fn store(&self) -> &Arc<dyn BlobStore> {
         self.state.blobs()
     }
+
+    /// Whether `id` was obliterated from `depot` (T120). Such content must not be read or
+    /// stored again; [`Blobs::check_storable`] gives the error to answer with.
+    pub async fn is_obliterated(&self, depot: DepotId, id: &ObjectId) -> ApiResult<bool> {
+        self.state.is_obliterated(depot, id).await
+    }
+
+    /// Refuses content that was obliterated from `depot`, with code `obliterated`.
+    pub async fn check_storable(&self, depot: DepotId, id: &ObjectId) -> ApiResult<()> {
+        if self.is_obliterated(depot, id).await? {
+            return Err(ApiError::new(
+                lode_core::ErrorCode::Obliterated,
+                format!("content {id} was obliterated from this depot and cannot be stored again"),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// The metadata database.

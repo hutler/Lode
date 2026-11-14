@@ -174,6 +174,7 @@ rev_meta   (depot_id, rev, key TEXT, value TEXT, PRIMARY KEY (depot_id, rev, key
 outbox     (id INTEGER PK AUTOINCREMENT, depot_id, kind TEXT, payload TEXT /*json*/, created_at)
 outbox_cursor (subscriber TEXT PK, last_id INT)
 counter    (name TEXT PK, value INT)   -- 'access_epoch' (§6), raised with every acl or grp_member change
+obliterated (depot_id, id BLOB, size, path, reason, by_id, at, PRIMARY KEY (depot_id, id))  -- §11
 ```
 
 `rev_change` is the per-path history index (drives `log <path>`, `blame`, rename following).
@@ -305,7 +306,7 @@ Errors use one shape with a stable `code`:
 
 Codes: `unauthenticated` 401 · `permission_denied` 403 · `not_found` 404 · `invalid_request`,
 `invalid_path` 400 · `out_of_date`, `conflict`, `locked`, `lock_required`, `missing_objects`,
-`branch_archived` 409 · `hash_mismatch` 422 · `too_large` 413 · `internal` 500.
+`branch_archived` 409 · `obliterated` 410 · `hash_mismatch` 422 · `too_large` 413 · `internal` 500.
 Modules may define further codes for their own rejections; the checks module adds
 `checks_required` 409.
 
@@ -910,6 +911,23 @@ absorbs.
   immutable; any object referenced by the copied database is already on disk).
   `loded backup --config <file> <dest>` runs beside a live server; `dest` must be missing or
   empty and becomes a data directory, including `loded.toml`.
+- **Obliterate** (T120, SPEC §5.8): `POST /admin/depots/{d}/obliterate` with
+  `{targets: [{path, rev?}], reason, dry_run}`, server admins only. A target without `rev`
+  selects every `new_id` that `rev_change` recorded for the path or under it; with `rev`, the
+  entries of that revision's tree. The empty blob and ids already obliterated are dropped.
+  The answer lists each object with every `(rev, branch, path)` that stored it (a scan of the
+  depot's `rev_change`) and, on a dry run, `in_use`: entries of active branch heads holding a
+  selected id, found by walking the heads (trees free of the ids are remembered, so the second
+  walk only reads new trees). A real run refuses `in_use` with `conflict`, then takes
+  `gc_running` and the exclusive `gc_fence`, walks the heads again, writes the `obliterated`
+  rows, drops the blame cache and deletes the objects. Trees keep naming the ids, so no tree
+  or revision changes. The server keeps each depot's obliterated ids in memory: upload,
+  download, file reads, blame, MCP and shelf diffs answer `obliterated` (410) for them, and a
+  commit naming one is refused with its paths. A blame walk stops at an obliterated older
+  version (truncated). Clients leave such files out of a sync (`obliterated` in the result).
+  GC deletes any obliterated object still stored, whatever the mark says; fsck accepts a
+  referenced obliterated object as missing and reports one that is still stored.
+  `GET /admin/depots/{d}/obliterated` lists the records.
 - **Scheduled backups** (T082): with `[backup] every`, `loded serve` runs the same backup on
   a schedule into `[backup] dir`, as `lode-backup-<UTC time>` (written as `.partial` and
   renamed when complete). The newest complete backup's name says when the next is due, so

@@ -709,6 +709,105 @@ pub trait Reads {
         out.truncate(limit as usize);
         Ok(out)
     }
+    /// Every obliterated id of a depot.
+    fn obliterated_ids(&self, depot: DepotId) -> Result<Vec<ObjectId>> {
+        let mut st = self
+            .db()
+            .prepare("SELECT id FROM obliterated WHERE depot_id = ?1")?;
+        let rows = st.query_map([depot.0], |r| get_id(r, 0))?;
+        collect(rows)
+    }
+
+    /// What was obliterated from a depot, oldest first.
+    fn obliterations(&self, depot: DepotId) -> Result<Vec<ObliteratedRow>> {
+        let mut st = self.db().prepare(
+            "SELECT depot_id, id, size, path, reason, by_id, at FROM obliterated \
+             WHERE depot_id = ?1 ORDER BY at, path, id",
+        )?;
+        let rows = st.query_map([depot.0], |r| {
+            Ok(ObliteratedRow {
+                depot_id: DepotId(r.get(0)?),
+                id: get_id(r, 1)?,
+                size: get_u64(r, 2)?,
+                path: r.get(3)?,
+                reason: r.get(4)?,
+                by: PrincipalId(r.get(5)?),
+                at: r.get(6)?,
+            })
+        })?;
+        collect(rows)
+    }
+
+    /// Every change to `path`, or to any path under it when `subtree` is set, on every
+    /// branch, oldest first.
+    fn changes_at_path(&self, depot: DepotId, path: &str, subtree: bool) -> Result<Vec<RevChange>> {
+        let cols = CHANGE_COLS
+            .split(", ")
+            .map(|c| format!("c.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        // `path/` up to `path0` ('0' follows '/') is exactly the paths under `path`, and
+        // the range keeps the query on the path index.
+        let (cond, lo, hi) = if subtree {
+            let base = if path.is_empty() {
+                String::new()
+            } else {
+                format!("{path}/")
+            };
+            let hi = if path.is_empty() {
+                "\u{10FFFF}".to_owned()
+            } else {
+                format!("{path}0")
+            };
+            ("c.path >= ?2 AND c.path < ?3", base, hi)
+        } else {
+            ("c.path = ?2 AND ?3 = ?3", path.to_owned(), String::new())
+        };
+        let mut st = self.db().prepare(&format!(
+            "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
+             JOIN revision r ON r.depot_id = c.depot_id AND r.num = c.rev \
+             WHERE c.depot_id = ?1 AND {cond} ORDER BY c.rev, c.path"
+        ))?;
+        let rows = st.query_map(params![depot.0, lo, hi], |r| {
+            Ok(RevChange {
+                rev: get_u64(r, 0)?,
+                branch_id: BranchId(r.get(1)?),
+                change: change_row_at(r, 2)?,
+            })
+        })?;
+        collect(rows)
+    }
+
+    /// Every change that stored one of `ids`, at any path, oldest first. Scans the depot's
+    /// changes; meant for rare administrative use.
+    fn changes_storing(&self, depot: DepotId, ids: &[ObjectId]) -> Result<Vec<RevChange>> {
+        let cols = CHANGE_COLS
+            .split(", ")
+            .map(|c| format!("c.{c}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut out = Vec::new();
+        for part in ids.chunks(500) {
+            let marks = vec!["?"; part.len()].join(", ");
+            let mut st = self.db().prepare(&format!(
+                "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
+                 JOIN revision r ON r.depot_id = c.depot_id AND r.num = c.rev \
+                 WHERE c.depot_id = ? AND c.new_id IN ({marks})"
+            ))?;
+            let mut args: Vec<rusqlite::types::Value> = vec![depot.0.into()];
+            args.extend(part.iter().map(|id| id.as_bytes().to_vec().into()));
+            let rows = st.query_map(rusqlite::params_from_iter(args), |r| {
+                Ok(RevChange {
+                    rev: get_u64(r, 0)?,
+                    branch_id: BranchId(r.get(1)?),
+                    change: change_row_at(r, 2)?,
+                })
+            })?;
+            out.extend(collect(rows)?);
+        }
+        out.sort_by(|a, b| (a.rev, &a.change.path).cmp(&(b.rev, &b.change.path)));
+        Ok(out)
+    }
 }
 
 impl Reads for ReadTx<'_> {
@@ -1094,5 +1193,23 @@ impl WriteTx<'_> {
         } else {
             Ok(())
         }
+    }
+
+    /// Records obliterated content. Recording the same id again keeps the first record.
+    pub fn insert_obliterated(&self, row: &ObliteratedRow) -> Result<bool> {
+        let n = self.conn().execute(
+            "INSERT INTO obliterated (depot_id, id, size, path, reason, by_id, at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (depot_id, id) DO NOTHING",
+            params![
+                row.depot_id.0,
+                row.id.as_bytes().as_slice(),
+                to_i64(row.size)?,
+                row.path,
+                row.reason,
+                row.by.0,
+                row.at
+            ],
+        )?;
+        Ok(n == 1)
     }
 }

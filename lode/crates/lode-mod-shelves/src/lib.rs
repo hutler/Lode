@@ -794,6 +794,9 @@ async fn content(ctx: &ModuleCtx, depot: DepotId, id: Option<ObjectId>) -> ApiRe
     let Some(id) = id else {
         return Ok(Content::Text(String::new()));
     };
+    if ctx.blobs().is_obliterated(depot, &id).await? {
+        return Ok(Content::Skipped("obliterated"));
+    }
     let obj = match ctx.blobs().store().get(depot, &id).await {
         Ok(o) => o,
         Err(lode_store::StoreError::NotFound(_)) => return Ok(Content::Skipped("missing")),

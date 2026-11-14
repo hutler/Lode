@@ -21,6 +21,8 @@ pub const COMMIT_AFTER_TRANSACTION: &str = "commit.after_transaction";
 pub const GC_AFTER_MARK: &str = "gc.after_mark";
 /// GC: inside a deletion batch, after one object was deleted.
 pub const GC_IN_BATCH: &str = "gc.in_batch";
+/// Obliterate: after the record is written, before any object is deleted (GC finishes it).
+pub const OBLITERATE_AFTER_RECORD: &str = "obliterate.after_record";
 
 /// Every failpoint, for tests that try them all.
 pub const ALL: &[&str] = &[
@@ -29,6 +31,7 @@ pub const ALL: &[&str] = &[
     COMMIT_AFTER_TRANSACTION,
     GC_AFTER_MARK,
     GC_IN_BATCH,
+    OBLITERATE_AFTER_RECORD,
 ];
 
 /// The armed failpoints of one server.

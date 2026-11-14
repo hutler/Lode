@@ -454,6 +454,24 @@ async fn check_blobs(state: &AppState, d: lode_core::DepotId, changes: &[Change]
             }
         }
     }
+    let obliterated = state.obliterated(d).await?;
+    let mut gone: Vec<&str> = changes
+        .iter()
+        .filter(|c| c.new_id.is_some_and(|id| obliterated.contains(&id)))
+        .map(|c| c.path.as_str())
+        .collect();
+    if !gone.is_empty() {
+        gone.sort_unstable();
+        gone.dedup();
+        return Err(ApiError::new(
+            ErrorCode::Obliterated,
+            format!(
+                "{} holds content that was obliterated from this depot and cannot be committed again",
+                gone.first().copied().unwrap_or_default()
+            ),
+        )
+        .with_details(json!({ "paths": gone })));
+    }
     let mut missing = Vec::new();
     for (id, size) in &sizes {
         match state.blobs().get_stored(d, id).await {

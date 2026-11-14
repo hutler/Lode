@@ -65,6 +65,13 @@ impl<K: Hash + Eq + Clone, V: Clone> Lru<K, V> {
         }
     }
 
+    /// Removes every entry.
+    pub fn clear(&self) {
+        let mut g = self.lock();
+        g.map.clear();
+        g.order.clear();
+    }
+
     /// Number of entries.
     pub fn len(&self) -> usize {
         self.lock().map.len()

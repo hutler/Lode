@@ -652,6 +652,9 @@ async fn side(ctx: &ModuleCtx, depot: &DepotRow, id: &ObjectId, size: u64) -> Ap
     if size > DIFF_FILE_MAX {
         return Ok(Side::Skipped("too_large"));
     }
+    if ctx.blobs().is_obliterated(depot.id, id).await? {
+        return Ok(Side::Skipped("obliterated"));
+    }
     let obj = ctx.blobs().store().get(depot.id, id).await?;
     let mut buf = Vec::new();
     let mut reader = obj.reader;

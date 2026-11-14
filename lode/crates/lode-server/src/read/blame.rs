@@ -137,11 +137,13 @@ fn walk(
 
 /// Reads a version as text, or `None` when it is too large or not text.
 async fn text_of(state: &AppState, depot: DepotId, id: &ObjectId) -> ApiResult<Option<String>> {
+    if state.is_obliterated(depot, id).await? {
+        return Err(crate::maintenance::gone(id));
+    }
     let obj = match state.blobs().get(depot, id).await {
         Ok(o) => o,
         Err(StoreError::NotFound(_)) => {
-            tracing::error!(%id, "a committed blob is missing from the store");
-            return Err(ApiError::internal());
+            return Err(crate::maintenance::missing_object(state, depot, id).await)
         }
         Err(e) => return Err(e.into()),
     };
@@ -213,8 +215,13 @@ async fn compute(
         if revs.iter().all(Option::is_some) {
             break;
         }
+        // An obliterated older version ends the walk like a binary one: its lines are
+        // attributed to the version after it, and the result says it is truncated.
         let older = match walk.versions.get(k + 1) {
-            Some(o) => text_of(state, depot, &o.id).await?,
+            Some(o) => match text_of(state, depot, &o.id).await {
+                Err(e) if e.body().code == ErrorCode::Obliterated.as_str() => None,
+                r => r?,
+            },
             None => None,
         };
         let Some(older) = older else {

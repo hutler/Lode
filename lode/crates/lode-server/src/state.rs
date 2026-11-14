@@ -1,6 +1,6 @@
 //! State shared by every request.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use lode_core::{DepotId, LodeConfig, ObjectId};
@@ -41,6 +41,7 @@ struct Inner {
     outbox_notify: Arc<tokio::sync::Notify>,
     gc_fence: tokio::sync::RwLock<()>,
     gc_running: tokio::sync::Mutex<()>,
+    obliterated: Mutex<HashMap<DepotId, Arc<HashSet<ObjectId>>>>,
     failpoints: Arc<Failpoints>,
 }
 
@@ -86,6 +87,7 @@ impl AppState {
                 outbox_notify: Arc::new(tokio::sync::Notify::new()),
                 gc_fence: tokio::sync::RwLock::new(()),
                 gc_running: tokio::sync::Mutex::new(()),
+                obliterated: Mutex::new(HashMap::new()),
                 failpoints: Arc::default(),
             }),
         };
@@ -203,6 +205,50 @@ impl AppState {
     /// Held while a garbage collection runs; one at a time.
     pub(crate) fn gc_running(&self) -> &tokio::sync::Mutex<()> {
         &self.inner.gc_running
+    }
+
+    /// The ids obliterated from `depot` (T120), loaded once and kept until the next
+    /// obliterate of that depot.
+    pub async fn obliterated(
+        &self,
+        depot: DepotId,
+    ) -> crate::error::ApiResult<Arc<HashSet<ObjectId>>> {
+        if let Some(set) = self.cached_obliterated(depot) {
+            return Ok(set);
+        }
+        let ids = self
+            .meta()
+            .read(move |tx| lode_meta::Reads::obliterated_ids(tx, depot))
+            .await?;
+        let set = Arc::new(ids.into_iter().collect::<HashSet<_>>());
+        if let Ok(mut map) = self.inner.obliterated.lock() {
+            map.insert(depot, set.clone());
+        }
+        Ok(set)
+    }
+
+    fn cached_obliterated(&self, depot: DepotId) -> Option<Arc<HashSet<ObjectId>>> {
+        self.inner
+            .obliterated
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&depot).cloned())
+    }
+
+    /// Whether `id` was obliterated from `depot`.
+    pub async fn is_obliterated(
+        &self,
+        depot: DepotId,
+        id: &ObjectId,
+    ) -> crate::error::ApiResult<bool> {
+        Ok(self.obliterated(depot).await?.contains(id))
+    }
+
+    /// Drops the cached obliterated ids of `depot`, after they changed.
+    pub(crate) fn forget_obliterated(&self, depot: DepotId) {
+        if let Ok(mut map) = self.inner.obliterated.lock() {
+            map.remove(&depot);
+        }
     }
 
     /// Failpoints tests can arm (see [`crate::failpoint`]).

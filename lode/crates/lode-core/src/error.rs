@@ -34,13 +34,15 @@ pub enum ErrorCode {
     TooLarge,
     /// Required checks have not passed (409). Defined by the checks module.
     ChecksRequired,
+    /// The content was obliterated from the depot and cannot be read or stored again (410).
+    Obliterated,
     /// Server fault (500).
     Internal,
 }
 
 impl ErrorCode {
     /// Every code, for exhaustive tests and documentation.
-    pub const ALL: [ErrorCode; 15] = [
+    pub const ALL: [ErrorCode; 16] = [
         ErrorCode::Unauthenticated,
         ErrorCode::PermissionDenied,
         ErrorCode::NotFound,
@@ -55,6 +57,7 @@ impl ErrorCode {
         ErrorCode::HashMismatch,
         ErrorCode::TooLarge,
         ErrorCode::ChecksRequired,
+        ErrorCode::Obliterated,
         ErrorCode::Internal,
     ];
 
@@ -75,6 +78,7 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::TooLarge => "too_large",
             ErrorCode::ChecksRequired => "checks_required",
+            ErrorCode::Obliterated => "obliterated",
             ErrorCode::Internal => "internal",
         }
     }
@@ -95,6 +99,7 @@ impl ErrorCode {
             | ErrorCode::ChecksRequired => 409,
             ErrorCode::HashMismatch => 422,
             ErrorCode::TooLarge => 413,
+            ErrorCode::Obliterated => 410,
             ErrorCode::Internal => 500,
         }
     }
@@ -156,5 +161,6 @@ mod tests {
         assert_eq!(ErrorCode::BranchArchived.http_status(), 409);
         assert_eq!(ErrorCode::HashMismatch.http_status(), 422);
         assert_eq!(ErrorCode::TooLarge.http_status(), 413);
+        assert_eq!(ErrorCode::Obliterated.http_status(), 410);
     }
 }

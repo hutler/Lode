@@ -266,6 +266,7 @@ Errors show the message, a next step where one helps, and a code. The codes:
 | `conflicted` | Files are still in conflict. | Resolve them first. |
 | `conflict` | The shelf changed since you looked, or the name is taken. | Look again, then retry. |
 | `checks_required` | The shelf's required checks have not passed. | Wait for them or fix the change. |
+| `obliterated` | An administrator removed this content from the server for good. | Nothing to fix: the file's other versions still open. An update leaves such files out and lists them. |
 | `module_disabled` | The server does not have that feature (locks, shelves, checks). | Ask the server's admin. |
 | `usage` | The request itself was wrong, such as a bad branch name. | Read the message. |
 | `invalid_path`, `invalid_pattern` | A path or view pattern cannot be used. | Fix it. |

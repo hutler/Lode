@@ -22,6 +22,7 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M9.md](M9.md) | GUI core | T090–T094 |
 | [M10.md](M10.md) | GUI team work | T100–T104 |
 | [M11.md](M11.md) | GUI branches, merges, setup and release | T110–T115 |
+| [M12.md](M12.md) | Lode 0.2: obliterate, SVN import, single sign-on, S3 storage | T120–T124 |
 
 ## Dependency graph
 
@@ -89,6 +90,9 @@ M11  T110  T112                       (after T093, T091)
      T113                             (after T093 T102)
      T114                             (after T113)
      T115                             (after T110-T114)
+
+M12  T120  T121  T122  T123           (T120 after T019 T053; T121 after T086; T122 after T040; T123 after T012)
+     T124                             (after T120-T123 and T072)
 ```
 
 ## Status
@@ -169,3 +173,4 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T113 | review | `lode/T113-desk-links` | `lode-desk` adds `links` (strict `lode://` parser and builder for a revision, a file at a revision or on a branch, and a shelf, with the same rules in `ui/src/links.ts`, both tested against shared cases), the deep-link and single-instance plugins (the `lode` scheme, a second start handing its link to the running app, `pending_link` and the `lode://open-link` event); "Copy link" on revisions, files and shelves; opening a link in a matching open or recent workspace, asking when several fit and offering a prefilled checkout when none does; refused links say why and open nothing |
 | T114 | review | `lode/T114-desk-installers` | Lode Desk bundles for every system (MSI, NSIS, universal `.dmg`, `.deb`, `.rpm`, AppImage), each registering `lode://` (Linux desktop files pass the link with `%u`); `lode-desk` adds `update` (check at start and daily from the `lode-desk-feed` release, setting and `LODE_DESK_NO_UPDATE` to turn it off, install only packages signed with the built-in key, tested against a package signed with another key) with an update banner and Home settings; `packaging/feed.mjs` and `feed.schema.json` for `latest.json`; the release workflow builds, installs and checks the bundles and publishes them with the feed, with code signing wired but off; `docs/release.md`. Not yet run in CI (no GitHub repo) |
 | T115 | review | `lode/T115-desk-guide` | `docs/desk-guide.md` (install to merge, links, updates and every error code, with 28 light screenshots in `docs/desk-guide/` from `npm run guide-screens`); `tests/acceptance.rs` follows the guide with two people against a real server; `docs/desk-acceptance.md` is the manual checklist for Windows, macOS and Linux (to be filled in on the person's PC); the branch picker gains "Update to r…" for the current branch, which the guide's daily loop needs |
+| T120 | review | `lode/T120-obliterate` | content is removed, history is not: trees keep naming the ids, so no revision changes; core schema 3 adds `obliterated` (who, when, why per id); error code `obliterated` (410) for upload, download, file reads, blame, MCP and shelf diffs, and a commit naming such content is refused with its paths; the server caches each depot's obliterated ids in memory; selection by path (every version, file or folder, every branch) or `PATH@REV`; the empty file and already-obliterated ids are dropped; refused while an active head holds the content (`conflict`, `details.in_use`), archived branches do not block; runs under `gc_running` and the exclusive GC fence, with a second head walk inside; blame cache cleared; failpoint `obliterate.after_record`, GC removes a still-stored obliterated object and fsck reports one; clients leave obliterated files out of checkout, update and view changes (`obliterated` in the result, update outcome `obliterated`) and remove a tracked older copy; `lode admin obliterate` (dry run first, asks, `--yes`) and `lode admin obliterated`; Lode Desk explains the code; user guide (and PDF), SPEC §5.8, ARCHITECTURE §11, CLI-JSON, UPGRADING |

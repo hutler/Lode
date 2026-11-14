@@ -6,7 +6,8 @@ use lode_client::Client;
 use lode_core::{DepotPath, PathGlobSet};
 use lode_proto::admin::{
     AccessCheck, AccessLevel, AclEffect, AclRule, AclSubject, CreatePrincipalRequest,
-    MaintenanceReport, PatchPrincipalRequest,
+    MaintenanceReport, ObliterateReport, ObliterateRequest, ObliterateTarget,
+    PatchPrincipalRequest,
 };
 use lode_proto::auth::{CreateTokenRequest, PrincipalView, TokenView};
 use lode_proto::webhooks::{CreateWebhookRequest, DeliveryState, DeliveryView, WebhookView};
@@ -71,6 +72,41 @@ pub enum AdminCmd {
         /// Also re-hash every object.
         #[arg(long)]
         full: bool,
+    },
+    /// Remove file content from a depot for good, such as a leaked password or a huge file
+    /// committed by mistake. History stays; the content can no longer be read or stored.
+    #[command(
+        long_about = "Remove file content from a depot for good, such as a leaked password
+or a huge file committed by mistake. Revisions, messages and paths stay; the stored content is
+deleted, and reading it (cat, checkout, download) answers `obliterated`. Uploading the same
+content again is refused.
+\nPATH removes every version of a file, or of every file under a folder, on every branch.
+PATH@REV removes only the version that revision had. Content still in the head of an active
+branch is refused: commit its removal or a fixed file first.
+\nShows what would be removed and asks before removing it; --yes skips the question, --dry-run
+only shows. Copies of the content elsewhere are not reached: existing backups, workspaces and
+shared caches on people's computers, and webhook payloads already sent."
+    )]
+    Obliterate {
+        /// Depot.
+        depot: String,
+        /// `PATH` (every version) or `PATH@REV` (the version at a revision).
+        #[arg(required = true)]
+        paths: Vec<String>,
+        /// Why; kept with the record. Required unless --dry-run.
+        #[arg(long, short = 'm')]
+        reason: Option<String>,
+        /// Show what would be removed, and remove nothing.
+        #[arg(long, short = 'n')]
+        dry_run: bool,
+        /// Do not ask before removing.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+    /// List what was obliterated from a depot.
+    Obliterated {
+        /// Depot.
+        depot: String,
     },
     /// Manage webhooks (needs the webhooks module on the server).
     #[command(subcommand)]
@@ -597,6 +633,121 @@ fn print_report(ctx: &Ctx, what: &str, r: &MaintenanceReport) {
     ));
 }
 
+fn print_obliterate(ctx: &Ctx, r: &ObliterateReport) {
+    for o in &r.objects {
+        ctx.out.line(format!(
+            "{}  {}",
+            o.id.to_hex().get(..12).unwrap_or_default(),
+            crate::output::human_bytes(o.size)
+        ));
+        for u in &o.uses {
+            ctx.out
+                .line(format!("    r{:<6} {:<12} {}", u.rev, u.branch, u.path));
+        }
+    }
+    for u in &r.in_use {
+        ctx.out
+            .line(format!("still in the head of {}: {}", u.branch, u.path));
+    }
+}
+
+fn obliterate_targets(paths: &[String]) -> OpResult<Vec<ObliterateTarget>> {
+    paths
+        .iter()
+        .map(|arg| {
+            let (p, rev) = crate::cmd::history::split_rev(arg)?;
+            let p = p.trim_matches('/');
+            if p.is_empty() {
+                return Err(OpError::usage("name a file or folder, not the whole depot"));
+            }
+            Ok(ObliterateTarget {
+                path: depot_path(p)?,
+                rev,
+            })
+        })
+        .collect()
+}
+
+async fn obliterate(
+    ctx: &Ctx,
+    c: &Client,
+    depot: &str,
+    paths: &[String],
+    reason: Option<String>,
+    dry_run: bool,
+    yes: bool,
+) -> OpResult<Value> {
+    let targets = obliterate_targets(paths)?;
+    let reason = reason.unwrap_or_default();
+    if !dry_run && reason.trim().is_empty() {
+        return Err(OpError::usage(
+            "say why with --reason (it is kept with the record)",
+        ));
+    }
+    let preview = c
+        .obliterate(
+            depot,
+            &ObliterateRequest {
+                targets: targets.clone(),
+                reason: reason.clone(),
+                dry_run: true,
+            },
+        )
+        .await?;
+    print_obliterate(ctx, &preview);
+    let total = format!(
+        "{} object{}, {}",
+        preview.objects.len(),
+        if preview.objects.len() == 1 { "" } else { "s" },
+        crate::output::human_bytes(preview.bytes)
+    );
+    if dry_run {
+        ctx.out
+            .line(format!("obliterate: {total} would be removed (dry run)"));
+        return to_json(&preview);
+    }
+    if !preview.in_use.is_empty() {
+        return Err(OpError::failed(
+            "conflict",
+            "the content is still in the head of an active branch; commit its removal or a \
+             fixed file first",
+        )
+        .with_details(json!({ "in_use": to_json(&preview.in_use)? })));
+    }
+    if preview.objects.is_empty() {
+        ctx.out.line("obliterate: nothing to remove");
+        return to_json(&preview);
+    }
+    if !yes {
+        if ctx.g.json || !ctx.out.ui().interactive() {
+            return Err(OpError::usage(
+                "obliterating cannot be undone; pass --yes to confirm (try --dry-run first)",
+            ));
+        }
+        let q = format!("Remove {total} from {depot} for good? This cannot be undone.");
+        if !ctx.out.ui().confirm(&q)? {
+            return Err(OpError::failed("aborted", "nothing was removed"));
+        }
+    }
+    let r = c
+        .obliterate(
+            depot,
+            &ObliterateRequest {
+                targets,
+                reason,
+                dry_run: false,
+            },
+        )
+        .await?;
+    ctx.out.line(format!(
+        "obliterate: {} object{}, {} removed",
+        r.objects.len(),
+        if r.objects.len() == 1 { "" } else { "s" },
+        crate::output::human_bytes(r.bytes)
+    ));
+    to_json(&r)
+}
+
 /// Runs `lode admin`.
 pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
     let c = client(ctx)?;
@@ -817,6 +968,32 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             to_json(&check)
         }
         AdminCmd::Webhook(cmd) => webhook(ctx, &c, cmd).await,
+        AdminCmd::Obliterate {
+            depot,
+            paths,
+            reason,
+            dry_run,
+            yes,
+        } => obliterate(ctx, &c, &depot, &paths, reason, dry_run, yes).await,
+        AdminCmd::Obliterated { depot } => {
+            let list = c.obliterated(&depot).await?;
+            for o in &list.obliterated {
+                ctx.out.line(format!(
+                    "{}  {}  {:<10} {}  {}  ({})",
+                    format_time(o.at),
+                    o.id.to_hex().get(..12).unwrap_or_default(),
+                    crate::output::human_bytes(o.size),
+                    o.by,
+                    o.path,
+                    o.reason
+                ));
+            }
+            if list.obliterated.is_empty() {
+                ctx.out
+                    .line(format!("Nothing was obliterated from {depot}."));
+            }
+            to_json(&list)
+        }
         AdminCmd::Gc { depot, dry_run } => {
             let r = c.gc(&depot, dry_run).await?;
             print_report(ctx, "gc", &r);

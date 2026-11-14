@@ -176,7 +176,7 @@ pub fn remove_and_prune(root: &Path, path: &DepotPath) -> io::Result<()> {
 }
 
 /// How a sync went.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct Fetched {
     /// Files placed.
     pub files: u64,
@@ -184,6 +184,28 @@ pub struct Fetched {
     pub bytes: u64,
     /// Distinct blobs downloaded from the server (not counting the shared cache).
     pub downloaded: u64,
+    /// Files left out because their content was obliterated on the server (T120), by path.
+    pub obliterated: Vec<DepotPath>,
+}
+
+fn is_obliterated(e: &lode_client::Error) -> bool {
+    matches!(e, lode_client::Error::Api(a) if a.known_code() == Some(lode_core::ErrorCode::Obliterated))
+}
+
+/// Leaves out a file whose content was obliterated: a tracked older version on disk would
+/// claim to be this revision's, so it goes too. An untracked file in its place stays.
+fn leave_out(
+    ws: &mut Workspace,
+    root: &Path,
+    e: &ManifestEntry,
+    stats: &mut Fetched,
+) -> OpResult<()> {
+    if ws.db().file(&e.path)?.is_some() {
+        remove_and_prune(root, &e.path)?;
+        ws.db_mut().write(|tx| tx.remove_file(&e.path))?;
+    }
+    stats.obliterated.push(e.path.clone());
+    Ok(())
 }
 
 /// Test hook: exit abruptly after placing this many files, as if killed.
@@ -286,9 +308,18 @@ pub async fn fetch_entries(
                 format!("symlink {} is too long", e.path),
             ));
         }
-        client
+        match client
             .get_blob_to_max(depot, &e.id, &mut target_text, MAX_SYMLINK)
-            .await?;
+            .await
+        {
+            Ok(_) => {}
+            Err(err) if is_obliterated(&err) => {
+                leave_out(ws, &root, &e, &mut stats)?;
+                progress.step(e.size);
+                continue;
+            }
+            Err(err) => return Err(err.into()),
+        }
         let text = String::from_utf8(target_text)
             .map_err(|_| OpError::failed("protocol", format!("symlink {} is not UTF-8", e.path)))?;
         let target = prepare_target(&root, &e.path)?;
@@ -316,20 +347,31 @@ pub async fn fetch_entries(
             if !hit {
                 // The manifest's size bounds what the server may send.
                 let size = group.first().map_or(0, |e| e.size);
-                client.download_blob_max(&depot, &id, &tmp, size).await?;
+                match client.download_blob_max(&depot, &id, &tmp, size).await {
+                    Ok(_) => {}
+                    Err(e) if is_obliterated(&e) => return Ok((None, group, false)),
+                    Err(e) => return Err(e.into()),
+                }
                 if let Some(c) = &cache {
                     if let Err(e) = c.store_file(&id, &tmp) {
                         out.warn(format!("shared cache: {e}"));
                     }
                 }
             }
-            Ok::<_, OpError>((tmp, group, !hit))
+            Ok::<_, OpError>((Some(tmp), group, !hit))
         }
     }))
     .buffer_unordered(PARALLEL_DOWNLOADS);
     futures::pin_mut!(downloads);
     while let Some(done) = downloads.next().await {
         let (tmp, group, from_server) = done?;
+        let Some(tmp) = tmp else {
+            for e in &group {
+                leave_out(ws, &root, e, &mut stats)?;
+                progress.step(e.size);
+            }
+            continue;
+        };
         if from_server {
             stats.downloaded += 1;
         }
@@ -352,6 +394,12 @@ pub async fn fetch_entries(
         if let Err(e) = c.evict() {
             out.warn(format!("shared cache: {e}"));
         }
+    }
+    stats.obliterated.sort();
+    for p in &stats.obliterated {
+        out.warn(format!(
+            "{p}: its content at this revision was obliterated on the server; left out"
+        ));
     }
     Ok(stats)
 }

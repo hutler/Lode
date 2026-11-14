@@ -426,6 +426,7 @@ async fn store(
     bytes: &[u8],
 ) -> ApiResult<(lode_core::ObjectId, u64)> {
     let id = blob_id(bytes).map_err(|_| ApiError::internal())?;
+    ctx.blobs().check_storable(depot.id, &id).await?;
     let mut reader = bytes;
     ctx.blobs()
         .store()

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::PrincipalView;
 use crate::PrincipalKind;
+use lode_core::ObjectId;
 
 /// `POST /admin/principals`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,4 +160,102 @@ pub struct AccessCheck {
     pub path: lode_core::DepotPath,
     /// The level granted; `None` when the path is invisible.
     pub level: Option<AccessLevel>,
+}
+
+/// One thing to obliterate: every version of `path` (or of every file under it) on every
+/// branch, or only the version `rev` had.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObliterateTarget {
+    /// A file or a folder.
+    pub path: lode_core::DepotPath,
+    /// Only the version at this revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<u64>,
+}
+
+/// `POST /admin/depots/{d}/obliterate`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObliterateRequest {
+    /// What to remove.
+    pub targets: Vec<ObliterateTarget>,
+    /// Why; recorded with each object. Required unless `dry_run`.
+    #[serde(default)]
+    pub reason: String,
+    /// Report what would be removed without removing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// A revision that stored obliterated content, and where.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentUse {
+    /// The revision.
+    pub rev: u64,
+    /// Its branch.
+    pub branch: String,
+    /// The path it stored the content at.
+    pub path: lode_core::DepotPath,
+}
+
+/// An active branch whose head still holds selected content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentInUse {
+    /// The branch.
+    pub branch: String,
+    /// Where its head holds the content.
+    pub path: lode_core::DepotPath,
+    /// The content.
+    pub id: ObjectId,
+}
+
+/// One object an obliterate removes (or would remove).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObliteratedObject {
+    /// Blob id.
+    pub id: ObjectId,
+    /// Size in bytes.
+    pub size: u64,
+    /// Every revision that stored it, at any path, oldest first.
+    pub uses: Vec<ContentUse>,
+}
+
+/// Answer of an obliterate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObliterateReport {
+    /// True when nothing was changed.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// The objects removed, or that would be.
+    pub objects: Vec<ObliteratedObject>,
+    /// Their total size.
+    pub bytes: u64,
+    /// Active branch heads that still hold selected content. Only a dry run answers with
+    /// any; otherwise they are a `conflict`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_use: Vec<ContentInUse>,
+}
+
+/// One record of obliterated content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Obliteration {
+    /// Blob id.
+    pub id: ObjectId,
+    /// Size in bytes.
+    pub size: u64,
+    /// The path it was selected by.
+    pub path: String,
+    /// Why.
+    pub reason: String,
+    /// Who removed it.
+    pub by: String,
+    /// When.
+    #[serde(with = "crate::rfc3339")]
+    pub at: crate::Timestamp,
+}
+
+/// `GET /admin/depots/{d}/obliterated`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObliterationList {
+    /// Oldest first.
+    pub obliterated: Vec<Obliteration>,
 }

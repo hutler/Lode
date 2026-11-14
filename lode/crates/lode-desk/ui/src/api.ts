@@ -299,9 +299,14 @@ export interface UpdateResult {
   locks_left: string[];
   from: number;
   full: boolean;
-  files: { path: string; outcome: "added" | "updated" | "merged" | "conflicted" | "deleted" | "kept" | string }[];
+  files: {
+    path: string;
+    outcome: "added" | "updated" | "merged" | "conflicted" | "deleted" | "kept" | "obliterated" | string;
+  }[];
   counts: Record<string, number>;
   downloaded: number;
+  /** Files left out because their content was obliterated on the server. */
+  obliterated?: string[];
 }
 
 /** `lode merge --json`: the merged range and what happened to each file. */

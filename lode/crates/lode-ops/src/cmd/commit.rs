@@ -441,6 +441,18 @@ pub(crate) async fn upload(
                 {
                     Err(changed_while_committing(&path))
                 }
+                Err(lode_client::Error::Api(a))
+                    if a.known_code() == Some(lode_core::ErrorCode::Obliterated) =>
+                {
+                    Err(OpError::failed(
+                        "obliterated",
+                        format!(
+                            "{path} holds content that was obliterated from this depot and \
+                             cannot be committed again"
+                        ),
+                    )
+                    .with_details(json!({ "paths": [path.as_str()] })))
+                }
                 Err(e) => Err(OpError::from(e)),
             }
         }

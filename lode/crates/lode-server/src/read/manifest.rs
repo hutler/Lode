@@ -359,11 +359,13 @@ pub async fn open_file(
         .map_err(load_error)?
         .filter(|e| e.kind != EntryKind::Dir)
         .ok_or_else(not_found)?;
+    if state.is_obliterated(depot, &entry.id).await? {
+        return Err(crate::maintenance::gone(&entry.id));
+    }
     let obj = match state.blobs().get(depot, &entry.id).await {
         Ok(o) => o,
         Err(StoreError::NotFound(_)) => {
-            tracing::error!(id = %entry.id, "a committed blob is missing from the store");
-            return Err(ApiError::internal());
+            return Err(crate::maintenance::missing_object(state, depot, &entry.id).await)
         }
         Err(e) => return Err(e.into()),
     };

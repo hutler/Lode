@@ -14,6 +14,7 @@ const NEXT_STEP: Record<string, string> = {
   checkout_incomplete: "Check out into the same folder again to finish it.",
   update_incomplete: "An update or branch switch stopped before it finished. Finish it, then try again.",
   network: "Check the server address and your connection.",
+  obliterated: "An administrator removed this content from the server for good. Other versions of the file still open.",
 };
 
 /** An operation's error: its message, its code, and the next step when there is one. */

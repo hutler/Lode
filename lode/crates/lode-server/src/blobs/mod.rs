@@ -101,6 +101,12 @@ async fn upload(
     caller.require_any_scope(&[SCOPE_WRITE, SCOPE_SHELVE])?;
     let id = parse_id(&id)?;
     let (d, _) = resolve(&state, &caller, &depot).await?;
+    if state.is_obliterated(d.id, &id).await? {
+        return Err(ApiError::new(
+            ErrorCode::Obliterated,
+            format!("content {id} was obliterated from this depot and cannot be stored again"),
+        ));
+    }
     let (parts, body) = request.into_parts();
     let headers = parts.headers;
     let encoding = headers
@@ -159,6 +165,9 @@ async fn download(
     caller.require_scope(SCOPE_READ)?;
     let id = parse_id(&id)?;
     let (d, _) = resolve(&state, &caller, &depot).await?;
+    if state.is_obliterated(d.id, &id).await? {
+        return Err(crate::maintenance::gone(&id));
+    }
     let not_found = || ApiError::not_found(format!("no blob {id}"));
     let stored = match state.blobs().get_stored(d.id, &id).await {
         Ok(s) => s,

@@ -39,6 +39,11 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             name: "access_epoch",
             sql: include_str!("../migrations/core/0002_access_epoch.sql"),
         },
+        Migration {
+            version: 3,
+            name: "obliterated",
+            sql: include_str!("../migrations/core/0003_obliterated.sql"),
+        },
     ],
 };
 

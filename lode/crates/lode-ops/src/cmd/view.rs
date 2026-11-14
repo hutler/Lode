@@ -268,5 +268,6 @@ async fn sync_view(
         "view": view_json(next),
         "added": fetched.files,
         "removed": removed,
+        "obliterated": fetched.obliterated,
     }))
 }

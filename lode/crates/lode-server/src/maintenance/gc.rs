@@ -168,6 +168,9 @@ pub async fn collect_garbage(
     state.failpoints().check(crate::failpoint::GC_AFTER_MARK)?;
 
     // List after marking: anything stored later is not a candidate.
+    // Obliterated content still stored (a crash between the record and the deletion, or an
+    // upload that raced the obliterate) goes whatever the mark and the grace period say.
+    let obliterated = state.obliterated(depot).await?;
     let grace = Duration::from_secs(state.config().gc.grace_seconds);
     let now_ms = u128::try_from(state.clock().now_ms()).unwrap_or(0);
     let mut checked = 0u64;
@@ -176,6 +179,10 @@ pub async fn collect_garbage(
     while let Some(item) = listing.next().await {
         let (id, modified) = item.map_err(|e| internal("cannot list objects", e))?;
         checked += 1;
+        if obliterated.contains(&id) {
+            candidates.push(id);
+            continue;
+        }
         if mark.live.contains(&id) {
             continue;
         }
@@ -201,7 +208,7 @@ pub async fn collect_garbage(
         mark.revisions(state).await?;
         mark.module_roots(state).await?;
         for id in batch {
-            if mark.live.contains(id) {
+            if mark.live.contains(id) && !obliterated.contains(id) {
                 continue;
             }
             let size = match state.blobs().get_stored(depot, id).await {
