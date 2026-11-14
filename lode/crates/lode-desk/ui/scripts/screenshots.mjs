@@ -244,6 +244,23 @@ const scenes = {
     await d.getByRole("button", { name: "Switch" }).click();
     await page.getByRole("dialog", { name: "Switched to release-1.2" }).waitFor();
   },
+  async merged(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: /: change branch$/ }).click();
+    const d = page.getByRole("dialog", { name: "Branches" });
+    await d.getByRole("option", { name: /^release-1\.2/ }).click();
+    await d.getByRole("button", { name: "Merge…" }).click();
+    await page.getByRole("dialog", { name: "Merge into main" }).getByRole("button", { name: "Merge" }).click();
+    await page.getByRole("dialog", { name: /^Merged / }).waitFor();
+  },
+  async "three-way"(page) {
+    await scenes.merged(page);
+    await page.getByRole("button", { name: "Resolve conflicts" }).click();
+    await page.getByRole("region", { name: "Pending changes" }).getByText("Boat.cpp").dblclick();
+    const view = page.getByRole("region", { name: "Resolve conflict" });
+    await view.getByRole("group", { name: "Conflict 1 of 2" }).getByRole("button", { name: "Use mine" }).click();
+    await view.getByRole("group", { name: "Conflict 1 of 1" }).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

@@ -8,6 +8,7 @@ pub mod changelist;
 pub mod checkout;
 pub mod checks;
 pub mod commit;
+pub mod conflict;
 pub mod diff;
 pub mod files;
 pub mod history;

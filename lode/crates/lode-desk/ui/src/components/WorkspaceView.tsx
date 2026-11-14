@@ -4,6 +4,7 @@ import {
   asOpError,
   backend,
   type BranchInfo,
+  type MergeResult,
   type OpError,
   type StatusResult,
   type UpdateResult,
@@ -11,6 +12,8 @@ import {
 } from "../api";
 import { BlameView } from "./BlameView";
 import { BranchPicker, CreateBranchDialog, SyncResultDialog } from "./BranchPicker";
+import { ConflictView } from "./ConflictView";
+import { MergeDialog, MergeResultDialog } from "./MergeDialog";
 import { FinishUpdateContext } from "./ErrorBanner";
 import { Modal } from "./Modal";
 import { ProgressBar, useProgress } from "./ProgressBar";
@@ -31,6 +34,8 @@ type Dialog =
   | { kind: "branches"; select?: string }
   | { kind: "create"; from: string; branches: BranchInfo[] }
   | { kind: "finishing" }
+  | { kind: "merge"; source: string; branches: BranchInfo[] }
+  | { kind: "merged"; result: MergeResult }
   | { kind: "result"; result: UpdateResult }
   | null;
 
@@ -62,12 +67,13 @@ type View =
   | { kind: "shelves" }
   | { kind: "history"; path: string | null; rev: number | null }
   | { kind: "blame"; path: string; rev: number | null }
-  | { kind: "diff"; path: string; rev: number | null };
+  | { kind: "diff"; path: string; rev: number | null }
+  | { kind: "conflict"; path: string };
 
 function sectionOf(v: View): Section {
   if (v.kind === "locks") return "Locks";
   if (v.kind === "shelves") return "Shelves";
-  return v.kind === "changes" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
+  return v.kind === "changes" || v.kind === "conflict" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
 }
 
 /** One open workspace: the sidebar and the section it shows. */
@@ -77,6 +83,8 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
   const [dialog, setDialog] = useState<Dialog>(null);
   // Bumped when the workspace moves, so every section loads again for the new branch.
   const [generation, setGeneration] = useState(0);
+  // Said in Changes after a conflict is resolved.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const synced = useCallback(
     async (result: UpdateResult) => {
@@ -173,6 +181,8 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
             onHistory={(path) => history(path)}
             onBlame={(path) => blame(path, null)}
             onDiff={(path) => diff(path, null)}
+            onResolve={(path) => setView({ kind: "conflict", path })}
+            notice={notice}
             active={view.kind === "changes"}
           />
         </div>
@@ -186,6 +196,20 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
               onPath={(path) => history(path)}
               onBlame={blame}
               onDiff={diff}
+            />
+          </div>
+        )}
+        {view.kind === "conflict" && (
+          <div className="section">
+            <ConflictView
+              key={`${generation}:${view.path}`}
+              info={info}
+              path={view.path}
+              onBack={() => setView({ kind: "changes" })}
+              onResolved={(how) => {
+                setNotice(`Resolved ${view.path}: ${how}.`);
+                setView({ kind: "changes" });
+              }}
             />
           </div>
         )}
@@ -233,6 +257,7 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
             onClose={() => setDialog(null)}
             onSwitched={(r) => void synced(r)}
             onCreate={(from, branches) => setDialog({ kind: "create", from, branches })}
+            onMerge={(source, branches) => setDialog({ kind: "merge", source, branches })}
           />
         )}
         {dialog?.kind === "create" && (
@@ -247,6 +272,28 @@ export function WorkspaceView({ info, onError, onInfo }: Props) {
           />
         )}
         {dialog?.kind === "finishing" && <Finishing />}
+        {dialog?.kind === "merge" && (
+          <MergeDialog
+            info={info}
+            source={dialog.source}
+            branches={dialog.branches}
+            onClose={() => setDialog({ kind: "branches", select: dialog.source })}
+            onMerged={(result) => {
+              setDialog({ kind: "merged", result });
+              setGeneration((g) => g + 1);
+            }}
+          />
+        )}
+        {dialog?.kind === "merged" && (
+          <MergeResultDialog
+            result={dialog.result}
+            onClose={() => setDialog(null)}
+            onChanges={() => {
+              setDialog(null);
+              setView({ kind: "changes" });
+            }}
+          />
+        )}
         {dialog?.kind === "result" && (
           <SyncResultDialog
             result={dialog.result}

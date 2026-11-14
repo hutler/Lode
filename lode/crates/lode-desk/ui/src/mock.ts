@@ -5,6 +5,9 @@ import type {
   Backend,
   BranchInfo,
   ChangelistInfo,
+  ConflictInfo,
+  MergeResult,
+  PendingMerge,
   LockInfo,
   LogPage,
   CheckoutResult,
@@ -23,6 +26,7 @@ import { demoBlame, demoHead, demoLog, demoRevision } from "./mockHistory";
 import { imageType } from "./api";
 import { demoChecks } from "./mockChecks";
 import { demoImage } from "./mockImages";
+import { demoConflict } from "./mockMerge";
 import { demoShelves, type MockShelf } from "./mockShelves";
 
 export interface MockOptions {
@@ -61,8 +65,20 @@ function demoBranches(depot: string): BranchInfo[] {
   return [
     { name: "main", head_rev: 1482, created_rev: 1, parent: null, state: "active" },
     { name: "release-1.2", head_rev: 1404, created_rev: 1391, parent: { branch: "main", rev: 1390 }, state: "active" },
-    { name: "art/harbor-night", head_rev: 1470, created_rev: 1471, parent: { branch: "main", rev: 1470 }, state: "active" },
-    { name: "proto/boats", head_rev: 1150, created_rev: 1151, parent: { branch: "main", rev: 1150 }, state: "archived" },
+    {
+      name: "art/harbor-night",
+      head_rev: 1470,
+      created_rev: 1471,
+      parent: { branch: "main", rev: 1470 },
+      state: "active",
+    },
+    {
+      name: "proto/boats",
+      head_rev: 1150,
+      created_rev: 1151,
+      parent: { branch: "main", rev: 1150 },
+      state: "archived",
+    },
   ];
 }
 
@@ -240,6 +256,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const commitFiles = async (workspace: string, picked: StatusFile[], message: string): Promise<CommitResult> => {
     const st = statusFor(workspace);
     refuseUnfinished(workspace);
+    refuseConflicts(workspace);
     if (opts.refuseCommit) throw opts.refuseCommit;
     if (!message.trim()) fail("aborted", "empty commit message; nothing was committed");
     if (picked.length === 0) fail("nothing_to_commit", "nothing to commit in the given paths");
@@ -256,7 +273,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       await pause();
       emit({ label: "Uploading", done: i, total: picked.length, bytes: i * 1_200_000, finished: false });
     }
-    emit({ label: "Uploading", done: picked.length, total: picked.length, bytes: picked.length * 1_200_000, finished: true });
+    emit({
+      label: "Uploading",
+      done: picked.length,
+      total: picked.length,
+      bytes: picked.length * 1_200_000,
+      finished: true,
+    });
     st.rev += 1;
     st.files = st.files.filter((f) => !picked.includes(f));
     const info = workspaces.get(workspace);
@@ -268,7 +291,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
   const listsFor = (workspace: string): ChangelistInfo[] => {
     let l = lists.get(workspace);
     if (!l) {
-      const named = [...new Set(statusFor(workspace).files.map((f) => f.changelist).filter((c): c is string => !!c))].sort();
+      const named = [
+        ...new Set(
+          statusFor(workspace)
+            .files.map((f) => f.changelist)
+            .filter((c): c is string => !!c),
+        ),
+      ].sort();
       l = named.map((name) => ({
         name,
         description: name === "sails" ? "Sail rigging: flap harder when the wind turns" : "",
@@ -290,7 +319,14 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       table = info.depot === "skyfall" && info.branch === "main" ? demoLocks() : [];
       // Locks the demo status shows as held here.
       for (const f of statusFor(workspace).files.filter((x) => x.locked)) {
-        table.push({ path: f.path, branch: info.branch, owner: { name: "alice", kind: "user" }, workspace, created_at: LOCK_TIME, mine: true });
+        table.push({
+          path: f.path,
+          branch: info.branch,
+          owner: { name: "alice", kind: "user" },
+          workspace,
+          created_at: LOCK_TIME,
+          mine: true,
+        });
       }
       lockTables.set(key, table);
     }
@@ -343,6 +379,35 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     }
     return { branch: name, cap };
   };
+  // Pending merges and conflicts per workspace.
+  const mergesOf = new Map<string, PendingMerge[]>();
+  const conflictsOf = new Map<string, Map<string, ConflictInfo>>();
+  const conflictTable = (workspace: string) => {
+    let t = conflictsOf.get(workspace);
+    if (!t) {
+      t = new Map();
+      conflictsOf.set(workspace, t);
+    }
+    return t;
+  };
+  const refuseConflicts = (workspace: string) => {
+    const paths = [...conflictTable(workspace).keys()];
+    if (paths.length) {
+      const e: OpError = {
+        code: "conflicted",
+        message: `resolve the conflicts first (\`lode resolve\`): ${paths.join(", ")}`,
+        details: { paths },
+      };
+      throw e;
+    }
+  };
+  /** Leaves `path` in conflict with theirs from `rev`. */
+  const conflictOn = (workspace: string, path: string, rev: number) => {
+    const st = statusFor(workspace);
+    const f = st.files.find((x) => x.path === path);
+    if (f) f.status = "conflicted";
+    conflictTable(workspace).set(path, demoConflict(path, rev));
+  };
   let unfinished = opts.unfinishedUpdate ? (recent[0]?.path ?? null) : null;
   const refuseUnfinished = (workspace: string) => {
     if (unfinished === workspace) fail("update_incomplete", "an update did not finish; run `lode update` first");
@@ -359,10 +424,17 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     // Locks stay on the old branch: keep them in its table before the files forget them.
     const locksLeft = switching ? st.files.filter((f) => f.locked).map((f) => f.path) : [];
     if (switching && locksLeft.length && !opts.noLocks) locksOf(workspace);
-    const incoming = info.depot === "skyfall" && (target !== info.rev || switching || unfinished === workspace) ? INCOMING : [];
+    const incoming =
+      info.depot === "skyfall" && (target !== info.rev || switching || unfinished === workspace) ? INCOMING : [];
     for (let i = 1; i <= 4; i++) {
       await pause();
-      emit({ label: "Fetching", done: Math.round((incoming.length * i) / 4), total: incoming.length, bytes: i * 3_100_000, finished: false });
+      emit({
+        label: "Fetching",
+        done: Math.round((incoming.length * i) / 4),
+        total: incoming.length,
+        bytes: i * 3_100_000,
+        finished: false,
+      });
     }
     emit({ label: "Fetching", done: incoming.length, total: incoming.length, bytes: 12_400_000, finished: true });
     const files: UpdateResult["files"] = incoming.map((path) => ({ path, outcome: "updated" }));
@@ -372,7 +444,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         f.locked = false;
         // The release branch has its own fix to the boat, so the local edit does not merge.
         if (branch === "release-1.2" && f.path === "Source/Skyfall/Boat.cpp") {
-          f.status = "conflicted";
+          conflictOn(workspace, f.path, target);
           files.push({ path: f.path, outcome: "conflicted" });
         } else if (f.status === "modified") {
           files.push({ path: f.path, outcome: "merged" });
@@ -456,7 +528,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     status: async (workspace) => {
       const st = statusFor(workspace);
-      return { ...st, files: st.files.map((f) => ({ ...f })) };
+      return { ...st, files: st.files.map((f) => ({ ...f })), merges: [...(mergesOf.get(workspace) ?? [])] };
     },
     add: async (workspace, paths) => {
       const st = statusFor(workspace);
@@ -468,6 +540,12 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     commit: async (workspace, paths, message): Promise<CommitResult> => {
       const st = statusFor(workspace);
+      const m = mergesOf.get(workspace)?.[0];
+      if (m)
+        fail(
+          "usage",
+          `the merge of \`${m.branch}\` r${m.from_rev}..r${m.to_rev} must be committed whole: commit without paths or -c`,
+        );
       return commitFiles(
         workspace,
         st.files.filter((f) => paths.includes(f.path) && f.status !== "untracked"),
@@ -481,7 +559,10 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const files = st.files.filter((f) => (f.changelist ?? "default") === name && f.status !== "untracked");
       const r = await commitFiles(workspace, files, message ?? list?.description ?? "");
       if (list && !st.files.some((f) => f.changelist === name)) {
-        lists.set(workspace, listsFor(workspace).filter((l) => l !== list));
+        lists.set(
+          workspace,
+          listsFor(workspace).filter((l) => l !== list),
+        );
       }
       return r;
     },
@@ -516,7 +597,10 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     changelistDelete: async (workspace, name) => {
       if (!listsFor(workspace).some((l) => l.name === name)) fail("not_found", `no changelist \`${name}\``);
       for (const f of statusFor(workspace).files) if (f.changelist === name) f.changelist = null;
-      lists.set(workspace, listsFor(workspace).filter((l) => l.name !== name));
+      lists.set(
+        workspace,
+        listsFor(workspace).filter((l) => l.name !== name),
+      );
     },
     log: async (workspace, path, before, max): Promise<LogPage> => {
       const info = workspaces.get(workspace);
@@ -547,7 +631,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     diffRevision: async (workspace, rev, path) => {
       const info = workspaces.get(workspace);
       if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
-      const change = demoRevision(historyOf(info.depot, info.branch).branch, rev)?.changes?.find((c) => c.path === path);
+      const change = demoRevision(historyOf(info.depot, info.branch).branch, rev)?.changes?.find(
+        (c) => c.path === path,
+      );
       if (!change) fail("not_found", `r${rev} did not change ${path}`);
       return demoRevisionDiff(rev, path, change.action);
     },
@@ -608,8 +694,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     shelve: async (workspace, req) => {
       const st = statusFor(workspace);
       const table = shelvesOf(workspace);
-      const list = req.changelist ? (req.changelist === "default" ? null : listsFor(workspace).find((l) => l.name === req.changelist)) : null;
-      if (req.changelist && req.changelist !== "default" && !list) fail("not_found", `no changelist \`${req.changelist}\``);
+      const list = req.changelist
+        ? req.changelist === "default"
+          ? null
+          : listsFor(workspace).find((l) => l.name === req.changelist)
+        : null;
+      if (req.changelist && req.changelist !== "default" && !list)
+        fail("not_found", `no changelist \`${req.changelist}\``);
       const existing = req.update === null ? null : shelfOf(workspace, req.update);
       if (existing && (existing.owner.name !== "alice" || existing.state !== "open")) {
         fail("permission_denied", `shelf ${existing.id} is not an open shelf of yours`);
@@ -620,10 +711,15 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         (f) =>
           f.status !== "untracked" &&
           f.status !== "unchanged" &&
-          (req.changelist ? (f.changelist ?? "default") === req.changelist : req.paths.length === 0 || req.paths.includes(f.path)),
+          (req.changelist
+            ? (f.changelist ?? "default") === req.changelist
+            : req.paths.length === 0 || req.paths.includes(f.path)),
       );
       if (files.length === 0) {
-        fail("nothing_to_shelve", req.changelist ? `nothing to shelve in changelist ${req.changelist}` : "nothing to shelve");
+        fail(
+          "nothing_to_shelve",
+          req.changelist ? `nothing to shelve in changelist ${req.changelist}` : "nothing to shelve",
+        );
       }
       for (let i = 1; i <= files.length; i++) {
         await pause();
@@ -631,7 +727,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       }
       const changes = files.map((f) => ({
         path: f.path,
-        action: f.status === "added" ? ("add" as const) : f.status === "deleted" ? ("delete" as const) : ("modify" as const),
+        action:
+          f.status === "added" ? ("add" as const) : f.status === "deleted" ? ("delete" as const) : ("modify" as const),
         kind: "file",
       }));
       const diff = files.map((f) => {
@@ -690,7 +787,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       }
       if (s.unmet?.length) {
         const lines = s.unmet.map((m) =>
-          m.reason === "absent" ? `${m.name}: not reported yet (expected from ${m.reporter})` : `${m.name}: ${m.state ?? "?"}`,
+          m.reason === "absent"
+            ? `${m.name}: not reported yet (expected from ${m.reporter})`
+            : `${m.name}: ${m.state ?? "?"}`,
         );
         const e: OpError = {
           code: "checks_required",
@@ -710,7 +809,10 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     shelfDelete: async (workspace, id) => {
       const s = shelfOf(workspace, id);
       if (s.owner.name !== "alice" && !opts.admin) {
-        fail("permission_denied", `shelf ${id} belongs to ${s.owner.name}; only its owner or a depot admin may delete it`);
+        fail(
+          "permission_denied",
+          `shelf ${id} belongs to ${s.owner.name}; only its owner or a depot admin may delete it`,
+        );
       }
       s.state = "deleted";
       s.updated_at = now();
@@ -723,7 +825,8 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         const here = st.files.find((f) => f.path === c.path && f.status !== "untracked");
         if (here) {
           // A file changed here too: text merges, except Boat.cpp, which the demo leaves in conflict.
-          const conflicted = c.path.endsWith("Boat.cpp") || s.diff.find((d) => d.path === c.path)?.skipped !== undefined;
+          const conflicted =
+            c.path.endsWith("Boat.cpp") || s.diff.find((d) => d.path === c.path)?.skipped !== undefined;
           if (conflicted) here.status = "conflicted";
           return { path: c.path, outcome: conflicted ? "conflicted" : "merged" };
         }
@@ -763,7 +866,9 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
         action = f?.status === "added" ? "add" : f?.status === "deleted" ? "delete" : f ? "modify" : undefined;
       } else {
         const info = workspaces.get(workspace);
-        action = demoRevision(info ? historyOf(info.depot, info.branch).branch : "main", rev)?.changes?.find((c) => c.path === path)?.action;
+        action = demoRevision(info ? historyOf(info.depot, info.branch).branch : "main", rev)?.changes?.find(
+          (c) => c.path === path,
+        )?.action;
       }
       if (!action) fail("not_found", rev === null ? `${path} has no changes` : `r${rev} did not change ${path}`);
       if (side === "old") return action === "add" ? null : image(false);
@@ -801,7 +906,13 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       if (!parent) fail("not_found", `branch \`${fromBranch}\` not found`);
       const rev = fromRev ?? parent.head_rev;
       if (rev > parent.head_rev || rev < 1) fail("not_found", `revision ${rev} is not on branch \`${fromBranch}\``);
-      const made: BranchInfo = { name, head_rev: rev, created_rev: rev, parent: { branch: fromBranch, rev }, state: "active" };
+      const made: BranchInfo = {
+        name,
+        head_rev: rev,
+        created_rev: rev,
+        parent: { branch: fromBranch, rev },
+        state: "active",
+      };
       table.push(made);
       return switchTo ? { ...made, switch: await sync(workspace, name, null) } : { ...made };
     },
@@ -821,6 +932,115 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       return sync(workspace, branch, rev);
     },
     update: async (workspace, rev) => sync(workspace, infoOf(workspace).branch, rev),
+    commitAll: async (workspace, message) => {
+      const st = statusFor(workspace);
+      const r = await commitFiles(
+        workspace,
+        st.files.filter((f) => f.status !== "untracked"),
+        message,
+      );
+      mergesOf.delete(workspace);
+      return r;
+    },
+    merge: async (workspace, source, rev): Promise<MergeResult> => {
+      const info = infoOf(workspace);
+      refuseUnfinished(workspace);
+      refuseConflicts(workspace);
+      if (source === info.branch) fail("usage", `\`${source}\` is this workspace's branch`);
+      const b = branchesOf(info.depot).find((x) => x.name === source);
+      if (!b) fail("not_found", `branch \`${source}\` not found`);
+      const first = b.created_rev;
+      if (rev !== null && (rev < first || rev > b.head_rev))
+        fail("not_found", `r${rev} is not on branch \`${source}\``);
+      const from = rev ?? first;
+      const to = rev ?? b.head_rev;
+      if (b.head_rev <= b.created_rev && rev === null) {
+        return { source, from_rev: to, to_rev: to, base: to, nothing_to_do: true, files: [], counts: {} };
+      }
+      for (let i = 1; i <= 3; i++) {
+        await pause();
+        emit({ label: "Merging", done: i, total: 3, bytes: i * 2_000_000, finished: i === 3 });
+      }
+      const st = statusFor(workspace);
+      const files: MergeResult["files"] = [];
+      const touch = (path: string, status: StatusFile["status"]) => {
+        if (!st.files.some((f) => f.path === path)) {
+          st.files.push({
+            path,
+            status,
+            copy_from: null,
+            moved: false,
+            changelist: null,
+            locked: false,
+            needs_lock: false,
+            lock_required: false,
+          });
+        }
+      };
+      files.push({ path: "Source/Skyfall/Weather.cpp", outcome: "applied" });
+      touch("Source/Skyfall/Weather.cpp", "modified");
+      if (rev === null) {
+        files.push({ path: "Source/Skyfall/Wake.cpp", outcome: "applied" });
+        touch("Source/Skyfall/Wake.cpp", "added");
+        files.push({ path: "Config/DefaultGame.ini", outcome: "merged" });
+        touch("Config/DefaultGame.ini", "modified");
+        for (const path of ["Source/Skyfall/Boat.cpp", "Content/Maps/Harbor.umap"]) {
+          if (st.files.some((f) => f.path === path && f.status === "modified")) {
+            conflictOn(workspace, path, to);
+            files.push({ path, outcome: "conflicted" });
+          }
+        }
+        files.push({ path: "Docs/Release-1.2.md", outcome: "unchanged" });
+      }
+      const merges = mergesOf.get(workspace) ?? [];
+      merges.push({ branch: source, from_rev: from, to_rev: to });
+      mergesOf.set(workspace, merges);
+      changed.forEach((l) => l(workspace));
+      const counts: Record<string, number> = {};
+      for (const f of files) counts[f.outcome] = (counts[f.outcome] ?? 0) + 1;
+      return {
+        source,
+        from_rev: from,
+        to_rev: to,
+        base: rev === null ? (b.parent?.rev ?? null) : null,
+        nothing_to_do: false,
+        files,
+        counts,
+      };
+    },
+    abandonMerge: async (workspace) => {
+      infoOf(workspace);
+      mergesOf.delete(workspace);
+    },
+    conflict: async (workspace, path) => {
+      const c = conflictTable(workspace).get(path);
+      if (!c) fail("not_found", `not in conflict: ${path}`);
+      return structuredClone(c);
+    },
+    resolve: async (workspace, paths, using) => {
+      const t = conflictTable(workspace);
+      const missing = paths.filter((p) => !t.has(p));
+      if (missing.length) fail("not_found", `not in conflict: ${missing.join(", ")}`);
+      const st = statusFor(workspace);
+      for (const p of paths) {
+        t.delete(p);
+        const f = st.files.find((x) => x.path === p);
+        if (f) f.status = "modified";
+      }
+      void using;
+      changed.forEach((l) => l(workspace));
+      return { resolved: paths };
+    },
+    resolveWith: async (workspace, path, content) => {
+      const t = conflictTable(workspace);
+      if (!t.has(path)) fail("not_found", `not in conflict: ${path}`);
+      t.delete(path);
+      const f = statusFor(workspace).files.find((x) => x.path === path);
+      if (f) f.status = "modified";
+      void content;
+      changed.forEach((l) => l(workspace));
+      return { resolved: [path] };
+    },
     openLink: async () => {},
     bumpShelf: (workspace, id) => {
       const s = shelfOf(workspace, id);

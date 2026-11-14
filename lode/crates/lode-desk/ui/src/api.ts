@@ -55,11 +55,20 @@ export interface StatusFile {
   lock_required: boolean;
 }
 
+/** A merge waiting for the next commit, which records it. */
+export interface PendingMerge {
+  branch: string;
+  from_rev: number;
+  to_rev: number;
+}
+
 /** `lode status --json`. */
 export interface StatusResult {
   branch: string;
   rev: number;
   files: StatusFile[];
+  /** Merges the next commit records (none when absent). */
+  merges?: PendingMerge[];
 }
 
 /** `lode commit --json`. */
@@ -295,6 +304,41 @@ export interface UpdateResult {
   downloaded: number;
 }
 
+/** `lode merge --json`: the merged range and what happened to each file. */
+export interface MergeResult {
+  source: string;
+  from_rev: number;
+  to_rev: number;
+  base: number | null;
+  nothing_to_do: boolean;
+  files: { path: string; outcome: "applied" | "merged" | "conflicted" | "unchanged" | "skipped" | string }[];
+  counts: Record<string, number>;
+}
+
+/** One side of a conflict: its size, and its text for a text merge (null for binary or too large). */
+export interface ConflictSide {
+  size: number;
+  text: string | null;
+}
+
+/** A conflicted file's sides. */
+export interface ConflictInfo {
+  path: string;
+  /** Where the incoming side came from; null for a shelf. */
+  theirs_rev: number | null;
+  /** Conflict markers were written into the file; otherwise it was left as it was. */
+  text: boolean;
+  base: ConflictSide | null;
+  /** Null when the file was deleted here. */
+  mine: ConflictSide | null;
+  /** Null when the file was deleted there. */
+  theirs: ConflictSide | null;
+  /** The file as it is now. */
+  result: ConflictSide | null;
+  /** The incoming file beside it, for a binary conflict (relative to the workspace). */
+  theirs_file: string | null;
+}
+
 /** `lode branch create --json`, with the switch's result when it switched. */
 export type CreatedBranch = BranchInfo & { switch?: UpdateResult };
 
@@ -376,6 +420,18 @@ export interface Backend {
   switchBranch(workspace: string, branch: string, rev: number | null): Promise<UpdateResult>;
   /** Updates to the branch head (or `rev`); also finishes an update or switch that stopped. */
   update(workspace: string, rev: number | null): Promise<UpdateResult>;
+  /** Commits every tracked change, as a pending merge must be committed. */
+  commitAll(workspace: string, message: string): Promise<CommitResult>;
+  /** Merges `source` since the merge base, or its revision `rev` only. */
+  merge(workspace: string, source: string, rev: number | null): Promise<MergeResult>;
+  /** Forgets the pending merge; files stay as they are. */
+  abandonMerge(workspace: string): Promise<void>;
+  /** The base, mine, theirs and current content of a conflicted file. */
+  conflict(workspace: string, path: string): Promise<ConflictInfo>;
+  /** Resolves conflicts with one side, or as the files are now (`merged`). */
+  resolve(workspace: string, paths: string[], using: "mine" | "theirs" | "merged"): Promise<{ resolved: string[] }>;
+  /** Saves an edited result as the file and marks it resolved. */
+  resolveWith(workspace: string, path: string, content: string): Promise<{ resolved: string[] }>;
   /** Opens a web link in the system browser. */
   openLink(url: string): Promise<void>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
@@ -485,6 +541,14 @@ async function tauriBackend(): Promise<Backend> {
     branchArchive: (workspace, name) => invoke("branch_archive", { workspace, name }),
     switchBranch: (workspace, branch, rev) => invoke("switch", { workspace, branch, rev }),
     update: (workspace, rev) => invoke("update", { workspace, rev }),
+    commitAll: (workspace, message) => invoke("commit_all", { workspace, message }),
+    merge: (workspace, source, rev) => invoke("merge", { workspace, source, rev }),
+    abandonMerge: async (workspace) => {
+      await invoke("abandon_merge", { workspace });
+    },
+    conflict: (workspace, path) => invoke("conflict", { workspace, path }),
+    resolve: (workspace, paths, using) => invoke("resolve", { workspace, paths, using }),
+    resolveWith: (workspace, path, content) => invoke("resolve_with", { workspace, path, content }),
     imageSide: async (workspace, path, rev, side) => {
       const raw = await invoke<ArrayBuffer>("image_side", { workspace, path, rev, side });
       return decodeImageSide(raw, path);

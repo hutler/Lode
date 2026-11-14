@@ -33,10 +33,12 @@ interface PickerProps {
   onCreate: (from: string, branches: BranchInfo[]) => void;
   /** The branch to select first (default: the current one). */
   initial?: string;
+  /** Opens the merge dialog for merging `source` into the workspace. */
+  onMerge?: (source: string, branches: BranchInfo[]) => void;
 }
 
 /** The depot's branches: filter, switch to one (its head or a revision), create or archive. */
-export function BranchPicker({ info, onClose, onSwitched, onCreate, initial }: PickerProps) {
+export function BranchPicker({ info, onClose, onSwitched, onCreate, initial, onMerge }: PickerProps) {
   const [list, setList] = useState<{
     current: string;
     branches: BranchInfo[];
@@ -208,6 +210,11 @@ export function BranchPicker({ info, onClose, onSwitched, onCreate, initial }: P
           >
             New branch…
           </button>
+          {pick && !isCurrent && pick.state === "active" && onMerge && list && (
+            <button type="button" onClick={() => onMerge(pick.name, list.branches)} disabled={!!busy}>
+              Merge…
+            </button>
+          )}
           {pick && !isCurrent && pick.state === "active" && (
             <button type="button" onClick={() => setArchiving(pick.name)} disabled={!!busy}>
               Archive…

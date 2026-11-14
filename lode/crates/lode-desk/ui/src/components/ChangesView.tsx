@@ -5,6 +5,7 @@ import {
   backend,
   type ChangelistInfo,
   type OpError,
+  type PendingMerge,
   type ProgressEvent,
   type StatusFile,
   type StatusResult,
@@ -27,6 +28,10 @@ interface Props {
   onBlame?: (path: string) => void;
   /** Opens a file's diff against its base. */
   onDiff?: (path: string) => void;
+  /** Opens a conflicted file to resolve it. */
+  onResolve?: (path: string) => void;
+  /** Said in the commit area when it changes (after a conflict is resolved elsewhere). */
+  notice?: string | null;
   /** Whether the view is showing; it refreshes when it comes back. */
   active?: boolean;
 }
@@ -105,7 +110,24 @@ interface Menu {
 }
 
 /** The pending changes of a workspace, with picking, committing, adding and reverting. */
-export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDiff, active = true }: Props) {
+/** The commit message a merge suggests: `Merge BRANCH rA..rB` (or `rN` for one revision). */
+export function mergeMessage(merges: PendingMerge[]): string {
+  return merges
+    .map((m) => `Merge ${m.branch} ${m.from_rev === m.to_rev ? `r${m.to_rev}` : `r${m.from_rev}..r${m.to_rev}`}`)
+    .join("; ");
+}
+
+export function ChangesView({
+  info,
+  onStatus,
+  onError,
+  onHistory,
+  onBlame,
+  onDiff,
+  onResolve,
+  notice,
+  active = true,
+}: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
@@ -120,6 +142,10 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   const [lists, setLists] = useState<ChangelistInfo[]>([]);
   const [listAsk, setListAsk] = useState<ChangelistAsk | null>(null);
   const [shelving, setShelving] = useState<ShelveWhat | null>(null);
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
+  useEffect(() => {
+    if (notice) setDone(notice);
+  }, [notice]);
   // Files being dragged, and the group under the pointer.
   const dragged = useRef<string[]>([]);
   const [dropOn, setDropOn] = useState<string | null>(null);
@@ -188,6 +214,18 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   const all = groups.flatMap((g) => g.files.map((f) => f.path));
   const byPath = new Map((status?.files ?? []).map((f) => [f.path, f]));
   const pickedFiles = [...picked].filter((p) => byPath.has(p));
+  const merges = status?.merges ?? [];
+  const merging = merges.length > 0;
+  const conflicted = (status?.files ?? []).filter((f) => f.status === "conflicted");
+  const suggestion = mergeMessage(merges);
+  // A merge suggests its commit message once; what the user types stays.
+  const suggested = useRef("");
+  useEffect(() => {
+    if (suggestion && suggestion !== suggested.current) {
+      suggested.current = suggestion;
+      setMessage((m) => (m.trim() ? m : suggestion));
+    }
+  }, [suggestion]);
 
   const toggle = (paths: string[], on: boolean) =>
     setPicked((p) => {
@@ -233,9 +271,15 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
     setProgress(null);
     try {
       const b = await backend();
-      const untracked = pickedFiles.filter((p) => byPath.get(p)?.status === "untracked");
-      if (untracked.length) await b.add(root, untracked);
-      const r = await b.commit(root, pickedFiles, message.trim());
+      let r;
+      if (merging) {
+        // A merge is committed whole.
+        r = await b.commitAll(root, message.trim());
+      } else {
+        const untracked = pickedFiles.filter((p) => byPath.get(p)?.status === "untracked");
+        if (untracked.length) await b.add(root, untracked);
+        r = await b.commit(root, pickedFiles, message.trim());
+      }
       setDone(`Committed r${r.rev} (${r.files} file${r.files === 1 ? "" : "s"}).`);
       setMessage("");
       setPicked(new Set());
@@ -277,7 +321,9 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
           <span className="muted">{all.length === 0 ? "" : `${pickedFiles.length} of ${all.length} picked`}</span>
           <button
             className="refresh"
-            onClick={() => setListAsk({ kind: "new", picked: pickedFiles.filter((p) => byPath.get(p)?.status !== "untracked") })}
+            onClick={() =>
+              setListAsk({ kind: "new", picked: pickedFiles.filter((p) => byPath.get(p)?.status !== "untracked") })
+            }
             disabled={!!busy}
           >
             New changelist…
@@ -287,6 +333,24 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
           </button>
         </header>
 
+        {merging && (
+          <div className="merge-notice" role="note" aria-label="Pending merge">
+            <span>
+              Merging{" "}
+              {merges.map((m, i) => (
+                <span key={i}>
+                  {i > 0 && ", "}
+                  <strong>{m.branch}</strong>{" "}
+                  {m.from_rev === m.to_rev ? `r${m.to_rev}` : `r${m.from_rev}..r${m.to_rev}`}
+                </span>
+              ))}
+              . The next commit records the merge and takes every change.
+            </span>
+            <button onClick={() => setConfirmAbandon(true)} disabled={!!busy}>
+              Abandon merge…
+            </button>
+          </div>
+        )}
         <div className="file-list">
           {status && groups.length === 0 && (
             <p className="empty">No changes. Edit files in the workspace folder and they show up here.</p>
@@ -336,8 +400,22 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                     <span className="group-actions">
                       <button
                         className="link"
-                        disabled={!!busy || g.files.length === 0}
-                        onClick={() => setListAsk({ kind: "commit", name: g.changelist!, description: g.description ?? "", files: g.files.length })}
+                        disabled={!!busy || g.files.length === 0 || merging || conflicted.length > 0}
+                        title={
+                          merging
+                            ? "A merge is committed whole"
+                            : conflicted.length
+                              ? "Resolve the conflicts first"
+                              : undefined
+                        }
+                        onClick={() =>
+                          setListAsk({
+                            kind: "commit",
+                            name: g.changelist!,
+                            description: g.description ?? "",
+                            files: g.files.length,
+                          })
+                        }
                         aria-label={`Commit changelist ${g.changelist}`}
                       >
                         Commit…
@@ -346,7 +424,12 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                         className="link"
                         disabled={!!busy || g.files.length === 0}
                         onClick={() =>
-                          setShelving({ kind: "changelist", name: g.changelist!, description: g.description ?? "", files: g.files.length })
+                          setShelving({
+                            kind: "changelist",
+                            name: g.changelist!,
+                            description: g.description ?? "",
+                            files: g.files.length,
+                          })
                         }
                         aria-label={`Shelve changelist ${g.changelist}`}
                       >
@@ -363,7 +446,9 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                     </span>
                   )}
                 </div>
-                {g.files.length === 0 && <p className="group-empty muted small">Drag files here, or right-click a file and move it.</p>}
+                {g.files.length === 0 && (
+                  <p className="group-empty muted small">Drag files here, or right-click a file and move it.</p>
+                )}
                 <ul>
                   {g.files.map((f) => {
                     const [dir, name] = splitPath(f.path);
@@ -372,7 +457,11 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                         key={f.path}
                         className={`file ${selected === f.path ? "selected" : ""}`}
                         onClick={() => setSelected(f.path)}
-                        onDoubleClick={() => f.status !== "untracked" && onDiff?.(f.path)}
+                        onDoubleClick={() =>
+                          f.status === "conflicted" && onResolve
+                            ? onResolve(f.path)
+                            : f.status !== "untracked" && onDiff?.(f.path)
+                        }
                         onContextMenu={(e) => openMenu(e, f)}
                         draggable={f.status !== "untracked"}
                         onDragStart={(e) => {
@@ -448,6 +537,12 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
             </div>
           )}
           <div className="commit-actions">
+            {conflicted.length > 0 && (
+              <span className="commit-why" id="commit-why">
+                Resolve {conflicted.length === 1 ? "the conflicted file" : `${conflicted.length} conflicted files`}{" "}
+                before you commit.
+              </span>
+            )}
             {done && (
               <span className="done" role="status">
                 {done}
@@ -469,11 +564,14 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
             <button
               className="primary"
               type="submit"
-              disabled={!!busy || pickedFiles.length === 0 || !message.trim()}
+              disabled={!!busy || (!merging && pickedFiles.length === 0) || !message.trim() || conflicted.length > 0}
+              aria-describedby={conflicted.length ? "commit-why" : undefined}
             >
               {busy === "Committing"
                 ? "Committing…"
-                : `Commit ${pickedFiles.length} file${pickedFiles.length === 1 ? "" : "s"}`}
+                : merging
+                  ? "Commit merge"
+                  : `Commit ${pickedFiles.length} file${pickedFiles.length === 1 ? "" : "s"}`}
             </button>
           </div>
         </form>
@@ -510,13 +608,21 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
               </dd>
             </dl>
             <div className="details-actions">
+              {sel.status === "conflicted" && onResolve && (
+                <button className="primary" onClick={() => onResolve(sel.path)}>
+                  Resolve…
+                </button>
+              )}
               {sel.needs_lock && (
                 <button className="primary" onClick={() => setLockPaths([sel.path])} disabled={!!busy}>
                   Lock…
                 </button>
               )}
               {onDiff && sel.status !== "untracked" && (
-                <button className={sel.needs_lock ? "" : "primary"} onClick={() => onDiff(sel.path)}>
+                <button
+                  className={sel.needs_lock || sel.status === "conflicted" ? "" : "primary"}
+                  onClick={() => onDiff(sel.path)}
+                >
                   Show diff
                 </button>
               )}
@@ -562,11 +668,37 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
               <dt>Revision</dt>
               <dd>r{status?.rev ?? info.rev}</dd>
             </dl>
-            <p className="muted small">Select a file to see more about it. Right-click a file to add, revert or lock it.</p>
+            <p className="muted small">
+              Select a file to see more about it. Right-click a file to add, revert or lock it.
+            </p>
           </>
         )}
       </aside>
 
+      {confirmAbandon && (
+        <Modal title="Abandon the merge?" onClose={() => setConfirmAbandon(false)}>
+          <p>
+            The next commit will not record the merge of {merges.map((m) => m.branch).join(", ")}. The files stay as
+            they are; revert them if you do not want the changes either.
+          </p>
+          <div className="form-actions">
+            <button onClick={() => setConfirmAbandon(false)} autoFocus>
+              Cancel
+            </button>
+            <button
+              className="danger"
+              onClick={() => {
+                setConfirmAbandon(false);
+                suggested.current = "";
+                if (message.trim() === suggestion) setMessage("");
+                void run("Abandoning", async () => (await backend()).abandonMerge(root));
+              }}
+            >
+              Abandon merge
+            </button>
+          </div>
+        </Modal>
+      )}
       {menu && (
         <div className="menu" role="menu" style={{ left: menu.x, top: menu.y }}>
           {menu.file.status === "untracked" ? (
@@ -647,14 +779,20 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
       )}
 
       {lockPaths && (
-        <LockDialog workspace={root} paths={lockPaths} onClose={() => setLockPaths(null)} onLocked={() => void refresh()} />
+        <LockDialog
+          workspace={root}
+          paths={lockPaths}
+          onClose={() => setLockPaths(null)}
+          onLocked={() => void refresh()}
+        />
       )}
 
       {confirmRevert && (
         <Modal title="Revert changes?" onClose={() => setConfirmRevert(null)}>
           <p>
-            The local changes to {confirmRevert.length === 1 ? <strong>{confirmRevert[0]}</strong> : `${confirmRevert.length} files`}{" "}
-            will be lost. This cannot be undone.
+            The local changes to{" "}
+            {confirmRevert.length === 1 ? <strong>{confirmRevert[0]}</strong> : `${confirmRevert.length} files`} will be
+            lost. This cannot be undone.
           </p>
           <div className="form-actions">
             <button onClick={() => setConfirmRevert(null)} autoFocus>

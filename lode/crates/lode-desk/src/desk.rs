@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lode_ops::cmd::{
-    branch, changelist, checkout, checks, commit, diff, files, history, info, locks, login, revert,
-    shelve, status, update,
+    branch, changelist, checkout, checks, commit, conflict, diff, files, history, info, locks,
+    login, merge, revert, shelve, status, update,
 };
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
@@ -103,6 +103,46 @@ pub fn encode_side(side: Option<diff::Content>) -> Vec<u8> {
             out
         }
     }
+}
+
+/// Text sides of a conflict larger than this are not sent to the window (8 MB).
+pub const CONFLICT_LIMIT: u64 = 8 * 1024 * 1024;
+
+/// How to resolve a conflict, as `lode resolve` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Using {
+    /// The local side.
+    Mine,
+    /// The incoming side.
+    Theirs,
+    /// The file as it is now.
+    Merged,
+}
+
+/// One side of a conflict for the window: its size, and its text for a text merge.
+fn side_json(side: Option<diff::Content>, text: bool) -> Value {
+    match side {
+        None => Value::Null,
+        Some(c) => serde_json::json!({
+            "size": c.size,
+            "text": c.bytes.filter(|_| text).map(|b| String::from_utf8_lossy(&b).into_owned()),
+        }),
+    }
+}
+
+/// A conflict's sides as the window receives them.
+pub fn conflict_json(s: conflict::ConflictSides) -> Value {
+    serde_json::json!({
+        "path": s.path,
+        "theirs_rev": s.theirs_rev,
+        "text": s.text,
+        "base": side_json(s.base, s.text),
+        "mine": side_json(s.mine, s.text),
+        "theirs": side_json(s.theirs, s.text),
+        "result": side_json(s.result, s.text),
+        "theirs_file": s.theirs_file,
+    })
 }
 
 /// How many workspaces the welcome page remembers.
@@ -863,6 +903,96 @@ impl Desk {
     pub async fn update(&self, workspace: String, rev: Option<u64>) -> Result<Value, ErrorView> {
         let ctx = self.ctx(Path::new(&workspace), None)?;
         run_op(move || async move { update::update(&ctx, update::UpdateArgs { rev }).await }).await
+    }
+
+    /// `lode commit` of every tracked change, as a pending merge must be committed.
+    pub async fn commit_all(&self, workspace: String, message: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            commit::commit(
+                &ctx,
+                commit::CommitArgs {
+                    message: Some(message),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode merge`: everything of `source` since the merge base, or its revision `rev` only.
+    pub async fn merge(
+        &self,
+        workspace: String,
+        source: String,
+        rev: Option<u64>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { merge::merge(&ctx, merge::MergeArgs { source, rev }).await })
+            .await
+    }
+
+    /// `lode revert --merge`: the next commit no longer records the pending merge; files stay.
+    pub async fn abandon_merge(&self, workspace: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            revert::revert(
+                &ctx,
+                revert::RevertArgs {
+                    merge: true,
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// The base, mine, theirs and current content of a conflicted file (depot path).
+    pub async fn conflict(&self, workspace: String, path: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        let sides =
+            run_op(
+                move || async move { conflict::conflict_sides(&ctx, &path, CONFLICT_LIMIT).await },
+            )
+            .await?;
+        Ok(conflict_json(sides))
+    }
+
+    /// `lode resolve --mine|--theirs|--merged` of `paths` (depot paths).
+    pub async fn resolve(
+        &self,
+        workspace: String,
+        paths: Vec<String>,
+        using: Using,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            update::resolve(
+                &ctx,
+                update::ResolveArgs {
+                    paths: paths.into_iter().map(PathBuf::from).collect(),
+                    mine: using == Using::Mine,
+                    theirs: using == Using::Theirs,
+                    merged: using == Using::Merged,
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// Saves `content` as the resolved file `path` and marks it resolved.
+    pub async fn resolve_with(
+        &self,
+        workspace: String,
+        path: String,
+        content: String,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { conflict::resolve_with(&ctx, &path, content.as_bytes()).await })
+            .await
     }
 
     /// Watches `workspace` for changes until [`Desk::unwatch`]; a second call is a no-op.

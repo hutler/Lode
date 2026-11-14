@@ -341,6 +341,59 @@ async fn update(
 }
 
 #[tauri::command]
+async fn commit_all(
+    desk: State<'_, Desk>,
+    workspace: String,
+    message: String,
+) -> Result<Value, ErrorView> {
+    desk.commit_all(workspace, message).await
+}
+
+#[tauri::command]
+async fn merge(
+    desk: State<'_, Desk>,
+    workspace: String,
+    source: String,
+    rev: Option<u64>,
+) -> Result<Value, ErrorView> {
+    desk.merge(workspace, source, rev).await
+}
+
+#[tauri::command]
+async fn abandon_merge(desk: State<'_, Desk>, workspace: String) -> Result<Value, ErrorView> {
+    desk.abandon_merge(workspace).await
+}
+
+#[tauri::command]
+async fn conflict(
+    desk: State<'_, Desk>,
+    workspace: String,
+    path: String,
+) -> Result<Value, ErrorView> {
+    desk.conflict(workspace, path).await
+}
+
+#[tauri::command]
+async fn resolve(
+    desk: State<'_, Desk>,
+    workspace: String,
+    paths: Vec<String>,
+    using: desk::Using,
+) -> Result<Value, ErrorView> {
+    desk.resolve(workspace, paths, using).await
+}
+
+#[tauri::command]
+async fn resolve_with(
+    desk: State<'_, Desk>,
+    workspace: String,
+    path: String,
+    content: String,
+) -> Result<Value, ErrorView> {
+    desk.resolve_with(workspace, path, content).await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -412,6 +465,12 @@ pub fn run() -> Result<(), tauri::Error> {
             branch_archive,
             switch,
             update,
+            commit_all,
+            merge,
+            abandon_merge,
+            conflict,
+            resolve,
+            resolve_with,
             watch,
             unwatch,
         ])

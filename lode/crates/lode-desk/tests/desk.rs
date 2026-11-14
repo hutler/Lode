@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use lode_desk::desk::{Desk, RecentWorkspace, ShelveRequest, Side};
+use lode_desk::desk::{Desk, RecentWorkspace, ShelveRequest, Side, Using};
 use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
 use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
@@ -1138,4 +1138,174 @@ async fn branches_create_switch_and_archive() {
         .find(|b| b["name"] == "hotfix")
         .unwrap();
     assert_eq!(hotfix["state"], "archived");
+}
+
+/// T111: a merge with conflicts, each conflict's three sides, resolving with mine, theirs and an
+/// edited result, and abandoning the merge.
+#[tokio::test]
+async fn merge_conflicts_and_resolve() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    s.server
+        .commit_files("game", "main", &[("img.bin", b"\x00\x01base")])
+        .await;
+    s.desk.update(root.clone(), None).await.unwrap();
+    s.desk
+        .branch_create(root.clone(), "feat".into(), Some("main".into()), false)
+        .await
+        .unwrap();
+    s.server
+        .commit_files(
+            "game",
+            "feat",
+            &[
+                ("a.txt", b"apple pie\n"),
+                ("b.txt", b"banana split\n"),
+                ("d/c.txt", b"cherry tart\n"),
+                ("img.bin", b"\x00\x01theirs!"),
+                ("e.txt", b"elderberry\n"),
+            ],
+        )
+        .await;
+    std::fs::write(dir.join("a.txt"), "apple crumble\n").unwrap();
+    std::fs::write(dir.join("b.txt"), "banana bread\n").unwrap();
+    std::fs::write(dir.join("d/c.txt"), "cherry jam\n").unwrap();
+    std::fs::write(dir.join("img.bin"), b"\x00\x01mine").unwrap();
+
+    let out = s
+        .desk
+        .merge(root.clone(), "feat".into(), None)
+        .await
+        .unwrap();
+    assert_eq!(out["source"], "feat", "{out}");
+    let outcome = |p: &str| {
+        out["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == p)
+            .map(|f| f["outcome"].as_str().unwrap().to_owned())
+    };
+    for p in ["a.txt", "b.txt", "d/c.txt", "img.bin"] {
+        assert_eq!(outcome(p).as_deref(), Some("conflicted"), "{p}: {out}");
+    }
+    assert_eq!(outcome("e.txt").as_deref(), Some("applied"), "{out}");
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert_eq!(st["merges"][0]["branch"], "feat", "{st}");
+
+    // A text conflict: base, mine and theirs, and the file with its markers.
+    let c = s.desk.conflict(root.clone(), "a.txt".into()).await.unwrap();
+    assert_eq!(c["text"], true, "{c}");
+    assert_eq!(c["base"]["text"], "apple\n");
+    assert_eq!(c["mine"]["text"], "apple crumble\n");
+    assert_eq!(c["theirs"]["text"], "apple pie\n");
+    let result = c["result"]["text"].as_str().unwrap();
+    assert!(result.contains("<<<<<<< mine"), "{result}");
+    assert!(result.contains("apple pie"), "{result}");
+    assert!(c["theirs_rev"].as_u64().is_some(), "{c}");
+
+    // A binary conflict: sizes only, theirs beside the file.
+    let c = s
+        .desk
+        .conflict(root.clone(), "img.bin".into())
+        .await
+        .unwrap();
+    assert_eq!(c["text"], false, "{c}");
+    assert_eq!(c["mine"]["size"], 6);
+    assert_eq!(c["theirs"]["size"], 9);
+    assert!(c["mine"]["text"].is_null());
+    let beside = c["theirs_file"].as_str().unwrap();
+    assert!(beside.starts_with("img.bin.theirs-r"), "{beside}");
+
+    // Not in conflict.
+    let err = s
+        .desk
+        .conflict(root.clone(), "e.txt".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "not_found", "{err:?}");
+
+    // Commit is refused while conflicts remain, and a merge is committed whole.
+    let err = s
+        .desk
+        .commit_all(root.clone(), "early".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "conflicted", "{err:?}");
+    let err = s
+        .desk
+        .commit(root.clone(), vec!["e.txt".into()], "part".into())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "usage", "{err:?}");
+
+    s.desk
+        .resolve(root.clone(), vec!["a.txt".into()], Using::Mine)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+        "apple crumble\n"
+    );
+    s.desk
+        .resolve(
+            root.clone(),
+            vec!["b.txt".into(), "img.bin".into()],
+            Using::Theirs,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("b.txt")).unwrap(),
+        "banana split\n"
+    );
+    assert_eq!(
+        std::fs::read(dir.join("img.bin")).unwrap(),
+        b"\x00\x01theirs!"
+    );
+    assert!(!dir.join(beside).exists());
+    let out = s
+        .desk
+        .resolve_with(root.clone(), "d/c.txt".into(), "cherry jam tart\n".into())
+        .await
+        .unwrap();
+    assert_eq!(out["resolved"], serde_json::json!(["d/c.txt"]), "{out}");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("d/c.txt")).unwrap(),
+        "cherry jam tart\n"
+    );
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert!(
+        !paths(&st).iter().any(|(_, status)| status == "conflicted"),
+        "{st}"
+    );
+
+    let done = s
+        .desk
+        .commit_all(root.clone(), "Merge feat".into())
+        .await
+        .unwrap();
+    let rev = s
+        .desk
+        .revision(root.clone(), done["rev"].as_u64().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(rev["merged_from"][0]["branch"], "feat", "{rev}");
+
+    // Abandoning keeps the files but forgets the merge.
+    s.server
+        .commit_files("game", "feat", &[("f.txt", b"fig\n")])
+        .await;
+    s.desk
+        .merge(root.clone(), "feat".into(), None)
+        .await
+        .unwrap();
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert_eq!(st["merges"].as_array().unwrap().len(), 1, "{st}");
+    let out = s.desk.abandon_merge(root.clone()).await.unwrap();
+    assert!(out.is_object(), "{out}");
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert!(st["merges"].as_array().unwrap().is_empty(), "{st}");
+    assert_eq!(std::fs::read_to_string(dir.join("f.txt")).unwrap(), "fig\n");
 }

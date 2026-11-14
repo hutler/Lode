@@ -398,7 +398,11 @@ pub struct Content {
 }
 
 /// The one depot path `path` names in the workspace.
-fn one_path(ctx: &Ctx, ws: &lode_workspace::Workspace, path: &str) -> OpResult<DepotPath> {
+pub(crate) fn one_path(
+    ctx: &Ctx,
+    ws: &lode_workspace::Workspace,
+    path: &str,
+) -> OpResult<DepotPath> {
     local::depot_paths(ctx, ws, &[PathBuf::from(path)])?
         .into_iter()
         .next()
