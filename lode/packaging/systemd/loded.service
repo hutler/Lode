@@ -1,32 +1,38 @@
-# systemd unit for the Lode server.
+# systemd unit for the Lode server, installed by the lode-server .deb and .rpm packages as
+# /usr/lib/systemd/system/loded.service.
 #
-# Install (as root):
-#   useradd --system --home-dir /var/lib/lode --shell /usr/sbin/nologin lode
-#   install -m 0755 loded lode /usr/local/bin/
-#   install -d -o lode -g lode -m 0750 /var/lib/lode
-#   sudo -u lode loded init /var/lib/lode        # prints the admin token once
-#   install -m 0644 loded.service /etc/systemd/system/
-#   systemctl daemon-reload && systemctl enable --now loded
+# After installing the package:
+#   sudo -u lode loded setup             # asks a few questions; the data directory is /var/lib/lode
+#   sudo systemctl enable --now loded
 #
-# Logs: journalctl -u loded. Log level: Environment=LODED_LOG=debug below.
+# Without the package (from the release archive), `sudo loded service install --config
+# <data_dir>/loded.toml` writes a unit like this one for the binary where it is.
+#
+# Logs: journalctl -u loded. To change a setting, `sudo systemctl edit loded`: for example
+# ReadWritePaths=/srv/lode-backups for a backup directory outside /var/lib/lode.
 
 [Unit]
 Description=Lode version control server
 Documentation=https://github.com/hutler/simpledevops/tree/main/lode/docs
 After=network-online.target
 Wants=network-online.target
+# Not before `loded setup` has run.
+ConditionPathExists=/var/lib/lode/loded.toml
 
 [Service]
 Type=simple
 User=lode
 Group=lode
-ExecStart=/usr/local/bin/loded serve --config /var/lib/lode/loded.toml
+ExecStart=/usr/bin/loded serve --config /var/lib/lode/loded.toml
 Restart=on-failure
 RestartSec=5
 # Let in-flight requests finish on stop (loded shuts down gracefully on SIGTERM).
 TimeoutStopSec=60
 Environment=LODED_LOG=info
 LimitNOFILE=65536
+# Port 443 for built-in HTTPS without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 # Hardening: the server only needs its data directory.
 NoNewPrivileges=yes
@@ -40,8 +46,6 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 ReadWritePaths=/var/lib/lode
-# Uncomment to bind a port below 1024 (such as 443 with [tls]) without root.
-#AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target

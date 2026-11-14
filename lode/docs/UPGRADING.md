@@ -24,6 +24,10 @@ How to move a server and its clients from one release to the next. The user guid
    `docker stop lode`).
 4. Replace the executables:
    - Release archive: unpack it over the old `loded` and `lode`.
+   - Package: install the newer one (`curl -fsSL …/install.sh | sh`, `apt install
+     ./lode-server_<version>_amd64.deb`, `dnf install ./lode-server-<version>.x86_64.rpm`, or
+     the newer MSI). The package stops and starts a running service itself, so steps 3 and 5
+     can be skipped.
    - Container: `docker pull ghcr.io/hutler/loded:<version>`, then recreate the container with
      the same volume.
 5. Start it: `loded service start`. The log shows the database migration, if any, and the
@@ -65,3 +69,8 @@ First release.
 - `loded setup` and `loded service`. On Windows, the WinSW wrapper and
   `packaging/windows/loded-service.xml` are gone: stop and remove the WinSW service
   (`loded-service.exe uninstall`), then run `loded service install --config ...`.
+- Packages: `.deb` and `.rpm` (`lode-server`, `lode`), a Windows MSI, the Linux install
+  script and `packaging/compose.yaml`. The container image's first start can now run
+  `loded setup` (`LODED_DOMAIN`, `LODED_EMAIL`, `LODED_ADMIN_PASSWORD_FILE`); without them it
+  behaves as before.
+- `lode init` (new depot from a folder, with templates) and `lode import git`.

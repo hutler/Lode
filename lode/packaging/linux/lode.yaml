@@ -1,0 +1,28 @@
+# nfpm configuration of the lode client package (.deb and .rpm), built by the release
+# workflow:  VERSION=0.1.0 ARCH=amd64 BIN=target/x86_64-unknown-linux-musl/release \
+#            nfpm package -f packaging/linux/lode.yaml -p deb
+name: lode
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: devel
+priority: optional
+maintainer: Lode maintainers <noreply@users.noreply.github.com>
+description: |
+  Lode version control client (lode).
+  The command line client of the Lode version control system.
+vendor: SimpleDevOps
+homepage: https://github.com/hutler/simpledevops
+license: Apache-2.0
+contents:
+  - src: ${BIN}/lode
+    expand: true
+    dst: /usr/bin/lode
+    file_info:
+      mode: 0755
+  - src: LICENSE
+    dst: /usr/share/doc/lode/LICENSE
+    file_info:
+      mode: 0644
+rpm:
+  group: Development/Tools

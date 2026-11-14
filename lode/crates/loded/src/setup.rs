@@ -291,10 +291,18 @@ pub async fn run(args: SetupArgs) -> anyhow::Result<()> {
     println!("{}", report.admin_token);
     println!();
     println!("Next:");
-    println!(
-        "  loded service install --config {}   (run as administrator or root)",
-        quote(&config_path)
-    );
+    if packaged_unit() {
+        // Installed from the lode-server package, whose unit runs as `lode`.
+        if running_as_root() {
+            println!("  sudo chown -R lode:lode {}", quote(data_dir));
+        }
+        println!("  sudo systemctl enable --now loded");
+    } else {
+        println!(
+            "  loded service install --config {}   (run as administrator or root)",
+            quote(&config_path)
+        );
+    }
     println!("  lode login {url}   (name: admin)");
     if answers.domain.is_some() {
         println!();
@@ -305,6 +313,30 @@ pub async fn run(args: SetupArgs) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// True when the lode-server package's systemd unit is installed.
+fn packaged_unit() -> bool {
+    cfg!(target_os = "linux")
+        && [
+            "/usr/lib/systemd/system/loded.service",
+            "/lib/systemd/system/loded.service",
+        ]
+        .iter()
+        .any(|p| Path::new(p).is_file())
+}
+
+/// True when this process runs as root (Unix).
+fn running_as_root() -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata("/proc/self").is_ok_and(|m| m.uid() == 0)
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 fn quote(p: &Path) -> String {

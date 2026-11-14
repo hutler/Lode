@@ -1,0 +1,33 @@
+# Lode server with built-in HTTPS (a Let's Encrypt certificate) and a named data volume.
+#
+#   1. Point your domain's DNS at this machine and open port 443.
+#   2. Set LODED_DOMAIN (and LODED_EMAIL) below.
+#   3. Put the admin password in admin-password.txt next to this file (one line).
+#   4. docker compose up -d
+#
+# Then sign in from any machine:  lode login https://<your domain>   (name: admin)
+# The data, the certificate and daily backups live in the volume `lode-data`. To upgrade:
+# docker compose pull && docker compose up -d. Logs: docker compose logs loded.
+services:
+  loded:
+    image: ghcr.io/hutler/loded:latest
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    environment:
+      LODED_DOMAIN: lode.example.com
+      LODED_EMAIL: admin@example.com
+      LODED_ADMIN_PASSWORD_FILE: /run/secrets/lode_admin_password
+    secrets:
+      - lode_admin_password
+    volumes:
+      - lode-data:/var/lib/lode
+    # Lets in-flight requests finish on stop.
+    stop_grace_period: 60s
+
+secrets:
+  lode_admin_password:
+    file: ./admin-password.txt
+
+volumes:
+  lode-data:

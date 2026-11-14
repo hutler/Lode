@@ -481,6 +481,16 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 </ul>
 
 <h1>2. Installing and first start</h1>
+<h3>With a package</h3>
+<p>The easiest way. Each package installs the server and the client, creates what the service needs, and leaves your data in place when it is removed.</p>
+<table>
+  <tr><th style="width:24%">Platform</th><th>Install</th><th style="width:34%">Then</th></tr>
+  <tr><td>Linux (Debian, Ubuntu, Fedora, RHEL, Rocky, openSUSE)</td><td><code>curl -fsSL https://raw.githubusercontent.com/hutler/simpledevops/main/lode/packaging/install.sh | sh</code><br>picks the <code>.deb</code> or <code>.rpm</code> for the machine and checks it against <code>SHA256SUMS</code>. The packages <code>lode-server</code> and <code>lode</code> are also on the releases page.</td><td><code>sudo -u lode loded setup</code><br><code>sudo systemctl enable --now loded</code></td></tr>
+  <tr><td>Windows</td><td><code>lode-server-0.1.0-x64.msi</code> from the releases page. It installs into <code>C:\Program Files\Lode</code> and adds that folder to <code>PATH</code>.</td><td>Leave "Set up the Lode server now" ticked on the last page: it asks the setup questions, then installs and starts the service. Later, "Lode server setup" in the Start menu does the same.</td></tr>
+  <tr><td>Docker</td><td><code>packaging/compose.yaml</code> from the release archive (chapter 5, Container)</td><td><code>docker compose up -d</code></td></tr>
+</table>
+<p>The Linux package runs the server as the account <code>lode</code> with its data in <code>/var/lib/lode</code>, using the systemd unit it installs; removing it (<code>apt remove lode-server</code>, <code>dnf remove lode-server</code>) keeps both. Uninstalling the MSI stops and removes the service and keeps <code>C:\ProgramData\Lode</code>. The packages are not signed in version 0.x: Windows SmartScreen may ask you to confirm ("More info", "Run anyway").</p>
+<h3>From the archive</h3>
 <p>Unpack the release archive for the server's platform (Part I, chapter 1) and put <code>loded</code> somewhere on the <code>PATH</code>. Then, as administrator (Windows) or root (Linux), run the setup:</p>
 <pre><code>loded setup
 Data directory [/var/lib/lode]:
@@ -583,12 +593,13 @@ loded service stop
 loded service uninstall          # removes the service; the data directory is kept</code></pre>
 <p>Add <code>--dry-run</code> to <code>install</code> or <code>uninstall</code> to see what would be done. The server shuts down cleanly on stop and finishes requests in progress.</p>
 <h3>Linux (systemd)</h3>
-<p><code>install</code> writes <code>/etc/systemd/system/loded.service</code>, gives the data and backup directories to the service account, and enables the unit. The service runs as the account <code>lode</code> (<code>--user</code> for another), which must exist:</p>
+<p>With the <code>lode-server</code> package, the account, the data directory and the unit are already there: run <code>sudo -u lode loded setup</code> and <code>sudo systemctl enable --now loded</code>, and skip <code>loded service install</code>. The packaged unit lets the server write only <code>/var/lib/lode</code>; for a backup directory elsewhere, add it with <code>sudo systemctl edit loded</code> (<code>[Service]</code> <code>ReadWritePaths=/mnt/backup/lode</code>).</p>
+<p>Without the package, <code>install</code> writes <code>/etc/systemd/system/loded.service</code>, gives the data and backup directories to the service account, and enables the unit. The service runs as the account <code>lode</code> (<code>--user</code> for another), which must exist:</p>
 <pre><code>useradd --system --home-dir /var/lib/lode --shell /usr/sbin/nologin lode
 loded service install --config /var/lib/lode/loded.toml
 loded service start
 journalctl -u loded                              # logs</code></pre>
-<p>The unit restarts the server if it fails, gives it 60 seconds to finish requests on stop, may write only its data and backup directories, and may bind port 443 without running as root. <code>packaging/systemd/loded.service</code> in the release archive is the same unit for installing by hand.</p>
+<p>The unit restarts the server if it fails, gives it 60 seconds to finish requests on stop, may write only its data and backup directories, and may bind port 443 without running as root. <code>packaging/systemd/loded.service</code> in the release archive is the unit the package installs.</p>
 <h3>Windows</h3>
 <p><code>install</code> registers <code>loded</code> as a Windows service named <code>loded</code> ("Lode server") that starts automatically, runs as LocalSystem and is restarted if it fails. No wrapper program is needed. In an administrator PowerShell:</p>
 <pre><code>&amp; "C:\Program Files\Lode\loded.exe" setup
@@ -596,12 +607,24 @@ journalctl -u loded                              # logs</code></pre>
 &amp; "C:\Program Files\Lode\loded.exe" service start</code></pre>
 <p>The service also appears in the Services console and works with <code>Start-Service loded</code> and <code>Stop-Service loded</code>. Its log is <code>logs\loded.log</code> in the data directory. Allow the listen port through Windows Firewall for other machines to connect.</p>
 <h3>Container</h3>
-<p>The image <code>ghcr.io/hutler/loded</code> runs the server as an unprivileged user (uid 10001) and keeps all data in the volume <code>/var/lib/lode</code>. On first start it runs <code>loded init</code> and prints the admin token to the log, once.</p>
+<p>The image <code>ghcr.io/hutler/loded</code> runs the server as an unprivileged user (uid 10001) and keeps all data in the volume <code>/var/lib/lode</code>.</p>
+<p>The quickest way is <code>packaging/compose.yaml</code>: built-in HTTPS with a Let's Encrypt certificate, daily backups, and a named volume. Point your domain at the machine, set <code>LODED_DOMAIN</code> and <code>LODED_EMAIL</code> in the file, put the admin password in <code>admin-password.txt</code> beside it, and run:</p>
+<pre><code>docker compose up -d
+docker compose logs loded                         # setup summary and server log
+lode login https://lode.example.com               # name: admin</code></pre>
+<p>On first start the image sets itself up from these variables:</p>
+<table>
+  <tr><th style="width:36%">Variables</th><th>First start</th></tr>
+  <tr><td><code>LODED_DOMAIN</code>, <code>LODED_ADMIN_PASSWORD_FILE</code>, optional <code>LODED_EMAIL</code></td><td><code>loded setup</code> for HTTPS on port 443; publish it as <code>-p 443:443</code></td></tr>
+  <tr><td><code>LODED_ADMIN_PASSWORD_FILE</code> only</td><td><code>loded setup</code> for plain HTTP on port 7480</td></tr>
+  <tr><td>none</td><td><code>loded init</code>, which prints the admin token to the log, once</td></tr>
+</table>
+<p>Without compose:</p>
 <pre><code>docker run -d --name lode --restart unless-stopped \
     -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.1.0
 docker logs lode                                  # the admin token, on first start only
 docker exec lode loded fsck --config /var/lib/lode/loded.toml</code></pre>
-<p>Either publish the port on the host's loopback address and put a TLS proxy in front, or set <code>acme_domain</code> in <code>/var/lib/lode/loded.toml</code> and publish it as port 443 (<code>-p 443:7480</code>), as in chapter 4. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>
+<p>Either publish the port on the host's loopback address and put a TLS proxy in front, or use the variables above for built-in HTTPS. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>
 
 <h1>6. Depots</h1>
 <pre><code>lode admin depot create game

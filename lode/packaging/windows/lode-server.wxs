@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows installer of the Lode server (WiX Toolset 5). Built by the release workflow:
+    wix build packaging/windows/lode-server.wxs -arch x64 -ext WixToolset.UI.wixext
+      -ext WixToolset.Util.wixext -d Version=0.1.0 -d BinDir=<folder with loded.exe and lode.exe>
+      -o lode-server-0.1.0-x64.msi
+  Installs loded.exe and lode.exe in Program Files\Lode and adds that folder to PATH. At the
+  end it offers to set up the server: lode-server-setup.cmd asks for administrator rights,
+  runs `loded setup` and `loded service install`, and starts the service. The Start menu has
+  the same step. Uninstalling stops and removes the service and keeps the data directory
+  (C:\ProgramData\Lode). An upgrade stops the service, replaces the files and starts it again.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Lode Server"
+           Manufacturer="SimpleDevOps"
+           Version="$(var.Version)"
+           UpgradeCode="6E0C5B8A-3B5E-4C55-9B57-0D7A1C4E2F11"
+           Scope="perMachine"
+           Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer Lode Server is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPHELPLINK" Value="https://github.com/hutler/simpledevops" />
+    <Property Id="ARPCOMMENTS" Value="Lode version control server. Uninstalling keeps C:\ProgramData\Lode." />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Lode" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="MenuFolder" Name="Lode" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+      <Component Id="Loded">
+        <File Id="loded.exe" Source="$(var.BinDir)\loded.exe" KeyPath="yes" />
+        <!-- The service is created by `loded service install`, not by this package; stop it
+             before files are replaced or removed. -->
+        <ServiceControl Id="StopLoded" Name="loded" Stop="both" Wait="yes" />
+      </Component>
+      <Component Id="Lode">
+        <File Id="lode.exe" Source="$(var.BinDir)\lode.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="SetupScript">
+        <File Id="lode_server_setup.cmd" Source="$(sys.SOURCEFILEDIR)lode-server-setup.cmd" KeyPath="yes" />
+      </Component>
+      <Component Id="License">
+        <File Id="LICENSE.txt" Source="$(sys.SOURCEFILEDIR)..\..\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="Path" Guid="A3E7F0D2-6C1B-4E0A-8F5D-2B9C7E4A1D63">
+        <CreateFolder />
+        <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last"
+                     Action="set" System="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Menu" Directory="MenuFolder">
+      <Component Id="SetupShortcut">
+        <Shortcut Id="SetupShortcut" Name="Lode server setup"
+                  Description="Set up the Lode server and start its Windows service"
+                  Target="[System64Folder]cmd.exe"
+                  Arguments="/c &quot;[INSTALLFOLDER]lode-server-setup.cmd&quot;"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\SimpleDevOps\Lode Server" Name="MenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="Lode Server">
+      <ComponentGroupRef Id="Files" />
+      <ComponentGroupRef Id="Menu" />
+    </Feature>
+
+    <!-- Uninstall (not an upgrade): remove the service; the data directory stays. -->
+    <SetProperty Id="RemoveService" Value="&quot;[INSTALLFOLDER]loded.exe&quot; service uninstall"
+                 Before="RemoveService" Sequence="execute" />
+    <CustomAction Id="RemoveService" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <!-- Install or upgrade: start the service again if it exists (ignored when it does not). -->
+    <SetProperty Id="StartService" Value="&quot;[INSTALLFOLDER]loded.exe&quot; service start"
+                 Before="StartService" Sequence="execute" />
+    <CustomAction Id="StartService" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveService" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="StartService" Before="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+
+    <!-- The last page offers the setup; it runs after the installer closes. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Set up the Lode server now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction Id="LaunchSetup" Directory="INSTALLFOLDER" Return="asyncNoWait"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /c &quot;[INSTALLFOLDER]lode-server-setup.cmd&quot;" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)license.rtf" />
+    <UI>
+      <ui:WixUI Id="WixUI_Minimal" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchSetup"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
+  </Package>
+</Wix>

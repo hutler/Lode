@@ -1,7 +1,8 @@
 name: lode-release
 
-# Builds `lode` and `loded` for every supported platform, with checksums, and publishes them
-# as a GitHub release when a tag `lode-v<version>` is pushed. A manual run builds the same
+# Builds `lode` and `loded` for every supported platform, with checksums, plus the server
+# packages (.deb and .rpm for Linux, an MSI for Windows; each is installed, started and removed
+# here first), and publishes them as a GitHub release when a tag `lode-v<version>` is pushed. A manual run builds the same
 # archives and keeps them as workflow artifacts without releasing anything.
 
 on:
@@ -80,17 +81,93 @@ jobs:
             shasum -a 256 "$archive" > "$archive.sha256"
           fi
           cat "$archive.sha256"
+      - uses: actions/setup-go@v5
+        if: contains(matrix.target, 'linux')
+        with:
+          go-version: stable
+          cache: false
+      - name: Linux packages (.deb, .rpm)
+        if: contains(matrix.target, 'linux')
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0
+          cargo_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+          else
+            version="$cargo_version-dev.${GITHUB_SHA::7}"
+          fi
+          case "${{ matrix.target }}" in
+            x86_64-*) deb_arch=amd64; rpm_arch=x86_64 ;;
+            aarch64-*) deb_arch=arm64; rpm_arch=aarch64 ;;
+          esac
+          export VERSION="$version" BIN="target/${{ matrix.target }}/release"
+          for p in lode-server lode; do
+            ARCH=$deb_arch "$(go env GOPATH)/bin/nfpm" package -f "packaging/linux/$p.yaml" -p deb \
+              -t "dist/${p}_${version}_${deb_arch}.deb"
+            ARCH=$deb_arch "$(go env GOPATH)/bin/nfpm" package -f "packaging/linux/$p.yaml" -p rpm \
+              -t "dist/${p}-${version}.${rpm_arch}.rpm"
+          done
+          cd dist
+          for f in *.deb *.rpm; do sha256sum "$f" > "$f.sha256"; done
+      - name: Windows installer (.msi)
+        if: contains(matrix.target, 'windows')
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          wix extension add --global WixToolset.UI.wixext/5.0.2
+          wix extension add --global WixToolset.Util.wixext/5.0.2
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          # MSI versions are numbers only: the Cargo version.
+          msi_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          msi="dist/lode-server-$version-x64.msi"
+          wix build packaging/windows/lode-server.wxs -arch x64 \
+            -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext \
+            -d Version="$msi_version" -d BinDir="target/${{ matrix.target }}/release" -o "$msi"
+          rm -f dist/*.wixpdb
+          (cd dist && sha256sum "$(basename "$msi")" > "$(basename "$msi").sha256")
+      - name: Install, start and uninstall the MSI
+        if: contains(matrix.target, 'windows')
+        shell: pwsh
+        run: ./packaging/windows/test-msi.ps1 (Get-ChildItem dist/*.msi).FullName
       - uses: actions/upload-artifact@v4
         with:
           name: lode-${{ matrix.target }}
           path: |
             lode/dist/*.tar.gz
             lode/dist/*.zip
+            lode/dist/*.deb
+            lode/dist/*.rpm
+            lode/dist/*.msi
             lode/dist/*.sha256
           if-no-files-found: error
 
-  release:
+  packages:
+    name: packages on ${{ matrix.image }}
     needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:bookworm", "ubuntu:24.04", "rockylinux:9", "fedora:41"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lode-x86_64-unknown-linux-musl
+          path: lode/dist
+      - name: Install, start and remove the .deb or .rpm
+        working-directory: lode
+        run: |
+          cat dist/*.sha256 | sed 's/ \*/  /' > dist/SHA256SUMS
+          docker run --rm -v "$PWD:/src" -w /src "${{ matrix.image }}" \
+            packaging/linux/test-package.sh dist
+
+  release:
+    needs: [build, packages]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -115,7 +192,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Lode ${GITHUB_REF_NAME#lode-v}" --generate-notes \
-            ./*.tar.gz ./*.zip SHA256SUMS
+            ./*.tar.gz ./*.zip ./*.deb ./*.rpm ./*.msi SHA256SUMS
 
   image:
     needs: build

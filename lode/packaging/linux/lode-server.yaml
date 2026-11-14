@@ -1,0 +1,50 @@
+# nfpm configuration of the lode-server package (.deb and .rpm), built by the release
+# workflow:  VERSION=0.1.0 ARCH=amd64 BIN=target/x86_64-unknown-linux-musl/release \
+#            nfpm package -f packaging/linux/lode-server.yaml -p deb
+# It installs loded and its systemd unit, and creates the `lode` user and /var/lib/lode.
+# Removing the package keeps the data directory and the user.
+name: lode-server
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: devel
+priority: optional
+maintainer: Lode maintainers <noreply@users.noreply.github.com>
+description: |
+  Lode version control server (loded).
+  A self-hosted version control server for large binary files and code.
+  After installing, run `sudo -u lode loded setup` and then
+  `sudo systemctl enable --now loded`.
+vendor: SimpleDevOps
+homepage: https://github.com/hutler/simpledevops
+license: Apache-2.0
+recommends:
+  - lode
+contents:
+  - src: ${BIN}/loded
+    expand: true
+    dst: /usr/bin/loded
+    file_info:
+      mode: 0755
+  - src: packaging/systemd/loded.service
+    dst: /usr/lib/systemd/system/loded.service
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/doc/lode-server/LICENSE
+    file_info:
+      mode: 0644
+scripts:
+  preinstall: packaging/linux/scripts/preinstall.sh
+  postinstall: packaging/linux/scripts/postinstall.sh
+  preremove: packaging/linux/scripts/preremove.sh
+  postremove: packaging/linux/scripts/postremove.sh
+overrides:
+  deb:
+    depends:
+      - passwd
+  rpm:
+    depends:
+      - shadow-utils
+rpm:
+  group: Development/Tools

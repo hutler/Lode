@@ -57,4 +57,23 @@ got=$(lode_sh "mkdir -p /tmp/again && cd /tmp/again \
     && lode checkout http://127.0.0.1:7480/smoke . >/dev/null && cat hello.txt")
 [ "$got" = "hello from the smoke test" ] || { echo "smoke: got '$got'" >&2; exit 1; }
 lode_sh "loded fsck --config /var/lib/lode/loded.toml"
+cleanup
+cid=""
+
+# Second start, the way compose.yaml does it but without a domain: `loded setup` with an
+# admin password from a secret file.
+secret="$(mktemp)"
+trap 'cleanup; rm -f "$secret"' EXIT
+printf 'smoke-password-123\n' > "$secret"
+chmod 0644 "$secret"
+docker volume create "$vol" >/dev/null
+cid=$(docker run -d -v "$vol:/var/lib/lode" -v "$secret:/run/secrets/pw:ro" \
+    -e LODED_ADMIN_PASSWORD_FILE=/run/secrets/pw "$image")
+wait_listening
+docker exec -e HOME=/tmp "$cid" sh -c \
+    "lode login http://127.0.0.1:7480 --name admin --password-stdin < /run/secrets/pw >/dev/null \
+     && lode --json whoami" | grep -q '"admin"' \
+    || { docker logs "$cid"; echo "smoke: cannot sign in with the password" >&2; exit 1; }
+docker exec "$cid" test -d /var/lib/lode/backups \
+    || { echo "smoke: no backup directory" >&2; exit 1; }
 echo "smoke: ok"
