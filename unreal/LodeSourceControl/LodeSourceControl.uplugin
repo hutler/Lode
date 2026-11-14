@@ -1,0 +1,28 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Lode",
+	"Description": "Lode revision control: lock, sync, submit and shelve from the editor.",
+	"Category": "Source Control",
+	"CreatedBy": "SimpleDevOps",
+	"CreatedByURL": "https://github.com/hutler/Lode",
+	"DocsURL": "https://github.com/hutler/Lode/blob/main/unreal/docs/guide.md",
+	"SupportURL": "https://github.com/hutler/Lode/issues",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "LodeSourceControl",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64",
+				"Linux",
+				"Mac"
+			]
+		}
+	]
+}
