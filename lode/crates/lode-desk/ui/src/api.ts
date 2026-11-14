@@ -143,6 +143,13 @@ export interface FileDiff {
   patch?: string;
 }
 
+/** One changelist of `lode changelist list --json`; `default` holds files in none. */
+export interface ChangelistInfo {
+  name: string;
+  description: string;
+  files: string[];
+}
+
 /** One lock of `lode locks --json`. */
 export interface LockInfo {
   path: string;
@@ -191,6 +198,15 @@ export interface Backend {
   diff(workspace: string, path: string): Promise<FileDiff | null>;
   /** A file as revision `rev` changed it. */
   diffRevision(workspace: string, rev: number, path: string): Promise<FileDiff>;
+  /** Commits exactly the files of changelist `name`; its description when `message` is null. */
+  commitChangelist(workspace: string, name: string, message: string | null): Promise<CommitResult>;
+  /** The changelists, `default` first, with their changed files. */
+  changelists(workspace: string): Promise<{ changelists: ChangelistInfo[] }>;
+  changelistNew(workspace: string, name: string, description: string): Promise<void>;
+  /** Puts tracked files into `name`; `default` takes them out of any. */
+  changelistMove(workspace: string, name: string, paths: string[]): Promise<void>;
+  /** Deletes a changelist; its files return to `default`. */
+  changelistDelete(workspace: string, name: string): Promise<void>;
   /** Locks `paths` (depot paths), all or none. */
   lock(workspace: string, paths: string[], comment: string | null): Promise<{ locked: string[] }>;
   /** Releases locks; `force` breaks other people's (depot admin). */
@@ -248,6 +264,17 @@ async function tauriBackend(): Promise<Backend> {
     blame: (workspace, path, rev) => invoke("blame", { workspace, path, rev }),
     diff: (workspace, path) => invoke("diff", { workspace, path }),
     diffRevision: (workspace, rev, path) => invoke("diff_revision", { workspace, rev, path }),
+    commitChangelist: (workspace, name, message) => invoke("commit_changelist", { workspace, name, message }),
+    changelists: (workspace) => invoke("changelists", { workspace }),
+    changelistNew: async (workspace, name, description) => {
+      await invoke("changelist_new", { workspace, name, description });
+    },
+    changelistMove: async (workspace, name, paths) => {
+      await invoke("changelist_move", { workspace, name, paths });
+    },
+    changelistDelete: async (workspace, name) => {
+      await invoke("changelist_delete", { workspace, name });
+    },
     lock: (workspace, paths, comment) => invoke("lock", { workspace, paths, comment }),
     unlock: (workspace, paths, force) => invoke("unlock", { workspace, paths, force }),
     locks: (workspace, mine) => invoke("locks", { workspace, mine }),

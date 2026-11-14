@@ -574,6 +574,11 @@ input {
   padding: 4px 12px;
 }
 
+/* Buttons side by side at the end of the header stay together. */
+.changes-head .refresh + .refresh {
+  margin-left: 0;
+}
+
 .check {
   display: flex;
 }
@@ -1466,4 +1471,59 @@ button.danger {
 
 .holders .tag {
   margin-left: 6px;
+}
+
+/* Changelists */
+
+.group.drop {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+.group-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.group-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+.group-actions button.link {
+  font-size: 12px;
+}
+
+.group-empty {
+  margin: 0;
+  padding: 6px 16px 10px 46px;
+}
+
+.menu-label {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+.file[draggable="true"] {
+  cursor: grab;
 }

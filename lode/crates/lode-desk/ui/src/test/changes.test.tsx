@@ -66,7 +66,7 @@ describe("grouping", () => {
 describe("picking and committing", () => {
   it("picks a whole group, counts it on the button and needs a message", async () => {
     const { user } = await openSkyfall();
-    const commit = screen.getByRole("button", { name: /^Commit/ });
+    const commit = screen.getByRole("button", { name: /^Commit \d+ file/ });
     expect(commit).toHaveTextContent("Commit 0 files");
     expect(commit).toBeDisabled();
     await user.click(screen.getByRole("checkbox", { name: "Pick all of Changes" }));

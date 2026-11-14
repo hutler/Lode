@@ -152,6 +152,50 @@ async fn diff_revision(
 }
 
 #[tauri::command]
+async fn commit_changelist(
+    desk: State<'_, Desk>,
+    workspace: String,
+    name: String,
+    message: Option<String>,
+) -> Result<Value, ErrorView> {
+    desk.commit_changelist(workspace, name, message).await
+}
+
+#[tauri::command]
+async fn changelists(desk: State<'_, Desk>, workspace: String) -> Result<Value, ErrorView> {
+    desk.changelists(workspace).await
+}
+
+#[tauri::command]
+async fn changelist_new(
+    desk: State<'_, Desk>,
+    workspace: String,
+    name: String,
+    description: String,
+) -> Result<Value, ErrorView> {
+    desk.changelist_new(workspace, name, description).await
+}
+
+#[tauri::command]
+async fn changelist_move(
+    desk: State<'_, Desk>,
+    workspace: String,
+    name: String,
+    paths: Vec<String>,
+) -> Result<Value, ErrorView> {
+    desk.changelist_move(workspace, name, paths).await
+}
+
+#[tauri::command]
+async fn changelist_delete(
+    desk: State<'_, Desk>,
+    workspace: String,
+    name: String,
+) -> Result<Value, ErrorView> {
+    desk.changelist_delete(workspace, name).await
+}
+
+#[tauri::command]
 async fn lock(
     desk: State<'_, Desk>,
     workspace: String,
@@ -226,6 +270,11 @@ pub fn run() -> Result<(), tauri::Error> {
             blame,
             diff,
             diff_revision,
+            commit_changelist,
+            changelists,
+            changelist_new,
+            changelist_move,
+            changelist_delete,
             lock,
             unlock,
             locks,

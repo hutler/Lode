@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import {
   asOpError,
   backend,
+  type ChangelistInfo,
   type OpError,
   type ProgressEvent,
   type StatusFile,
@@ -10,6 +11,7 @@ import {
   type WorkspaceInfo,
 } from "../api";
 import { ErrorBanner } from "./ErrorBanner";
+import { ChangelistDialogs, type ChangelistAsk } from "./ChangelistDialogs";
 import { LockDialog } from "./LockDialog";
 import { Modal } from "./Modal";
 import { ProgressBar } from "./ProgressBar";
@@ -33,6 +35,9 @@ export interface Group {
   key: string;
   title: string;
   files: StatusFile[];
+  /** The changelist files dropped here go to (`default` for plain changes); null for new files. */
+  changelist: string | null;
+  description?: string;
 }
 
 const LETTER: Record<StatusFile["status"], string> = {
@@ -56,23 +61,34 @@ const STATUS_TEXT: Record<StatusFile["status"], string> = {
 };
 
 /** Files grouped as `lode status` lists them: changes outside changelists first, then each
- * changelist by name, then files that are not added yet. */
-export function groupFiles(files: StatusFile[]): Group[] {
+ * changelist by name, then files that are not added yet. With `lists`, empty changelists show
+ * too, and so does an empty "Changes" group when there are named changelists, as places to
+ * move files to. */
+export function groupFiles(files: StatusFile[], lists: ChangelistInfo[] = []): Group[] {
   const main: StatusFile[] = [];
-  const lists = new Map<string, StatusFile[]>();
+  const byList = new Map<string, StatusFile[]>();
   const fresh: StatusFile[] = [];
   for (const f of files) {
     if (f.status === "unchanged") continue;
     if (f.status === "untracked") fresh.push(f);
-    else if (f.changelist) lists.set(f.changelist, [...(lists.get(f.changelist) ?? []), f]);
+    else if (f.changelist) byList.set(f.changelist, [...(byList.get(f.changelist) ?? []), f]);
     else main.push(f);
   }
+  const named = lists.filter((l) => l.name !== "default");
+  for (const l of named) if (!byList.has(l.name)) byList.set(l.name, []);
+  const describe = new Map(named.map((l) => [l.name, l.description]));
   const groups: Group[] = [];
-  if (main.length) groups.push({ key: "", title: "Changes", files: main });
-  for (const name of [...lists.keys()].sort()) {
-    groups.push({ key: `cl:${name}`, title: `Changelist ${name}`, files: lists.get(name) ?? [] });
+  if (main.length || named.length) groups.push({ key: "", title: "Changes", files: main, changelist: "default" });
+  for (const name of [...byList.keys()].sort()) {
+    groups.push({
+      key: `cl:${name}`,
+      title: `Changelist ${name}`,
+      files: byList.get(name) ?? [],
+      changelist: name,
+      description: describe.get(name) || undefined,
+    });
   }
-  if (fresh.length) groups.push({ key: "new", title: "Not added yet", files: fresh });
+  if (fresh.length) groups.push({ key: "new", title: "Not added yet", files: fresh, changelist: null });
   return groups;
 }
 
@@ -100,6 +116,11 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   const [menu, setMenu] = useState<Menu | null>(null);
   const [confirmRevert, setConfirmRevert] = useState<string[] | null>(null);
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
+  const [lists, setLists] = useState<ChangelistInfo[]>([]);
+  const [listAsk, setListAsk] = useState<ChangelistAsk | null>(null);
+  // Files being dragged, and the group under the pointer.
+  const dragged = useRef<string[]>([]);
+  const [dropOn, setDropOn] = useState<string | null>(null);
   const root = info.root;
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
@@ -109,8 +130,9 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   const refresh = useCallback(async () => {
     try {
       const b = await backend();
-      const st = await b.status(root);
+      const [st, cl] = await Promise.all([b.status(root), b.changelists(root)]);
       setStatus(st);
+      setLists(cl.changelists);
       onStatusRef.current(st);
       const present = new Set(st.files.map((f) => f.path));
       setPicked((p) => new Set([...p].filter((x) => present.has(x))));
@@ -160,7 +182,7 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
     };
   }, [menu]);
 
-  const groups = useMemo(() => groupFiles(status?.files ?? []), [status]);
+  const groups = useMemo(() => groupFiles(status?.files ?? [], lists), [status, lists]);
   const all = groups.flatMap((g) => g.files.map((f) => f.path));
   const byPath = new Map((status?.files ?? []).map((f) => [f.path, f]));
   const pickedFiles = [...picked].filter((p) => byPath.has(p));
@@ -197,6 +219,9 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   // The right-clicked file, or every picked file when it is one of them.
   const targets = (f: StatusFile) => (picked.has(f.path) && pickedFiles.length > 1 ? pickedFiles : [f.path]);
   const lockable = (f: StatusFile | undefined) => !!f && f.status !== "untracked" && f.status !== "added";
+  const moveTo = (name: string, paths: string[]) =>
+    run("Moving", async () => (await backend()).changelistMove(root, name, paths));
+  const listOf = (f: StatusFile) => f.changelist ?? "default";
 
   const commit = async (e: FormEvent) => {
     e.preventDefault();
@@ -248,6 +273,13 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
           </label>
           <h1>Changes</h1>
           <span className="muted">{all.length === 0 ? "" : `${pickedFiles.length} of ${all.length} picked`}</span>
+          <button
+            className="refresh"
+            onClick={() => setListAsk({ kind: "new", picked: pickedFiles.filter((p) => byPath.get(p)?.status !== "untracked") })}
+            disabled={!!busy}
+          >
+            New changelist…
+          </button>
           <button className="refresh" onClick={() => void refresh()} disabled={!!busy}>
             Refresh
           </button>
@@ -261,7 +293,29 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
             const paths = g.files.map((f) => f.path);
             const allOn = paths.every((p) => picked.has(p));
             return (
-              <div key={g.key} className="group" role="group" aria-label={g.title}>
+              <div
+                key={g.key}
+                className={`group ${dropOn === g.key ? "drop" : ""}`}
+                role="group"
+                aria-label={g.title}
+                onDragOver={(e) => {
+                  if (g.changelist === null || dragged.current.length === 0) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDropOn(g.key);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropOn(null);
+                  const target = g.changelist;
+                  const paths = dragged.current.filter((p) => byPath.get(p) && listOf(byPath.get(p)!) !== target);
+                  dragged.current = [];
+                  if (target && paths.length) void moveTo(target, paths);
+                }}
+              >
                 <div className="group-head">
                   <input
                     type="checkbox"
@@ -271,7 +325,33 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                   />
                   <span className="group-title">{g.title}</span>
                   <span className="group-count">{g.files.length}</span>
+                  {g.description && (
+                    <span className="group-desc" title={g.description}>
+                      {g.description}
+                    </span>
+                  )}
+                  {g.changelist && g.changelist !== "default" && (
+                    <span className="group-actions">
+                      <button
+                        className="link"
+                        disabled={!!busy || g.files.length === 0}
+                        onClick={() => setListAsk({ kind: "commit", name: g.changelist!, description: g.description ?? "", files: g.files.length })}
+                        aria-label={`Commit changelist ${g.changelist}`}
+                      >
+                        Commit…
+                      </button>
+                      <button
+                        className="link"
+                        disabled={!!busy}
+                        onClick={() => setListAsk({ kind: "delete", name: g.changelist!, files: g.files.length })}
+                        aria-label={`Delete changelist ${g.changelist}`}
+                      >
+                        Delete…
+                      </button>
+                    </span>
+                  )}
                 </div>
+                {g.files.length === 0 && <p className="group-empty muted small">Drag files here, or right-click a file and move it.</p>}
                 <ul>
                   {g.files.map((f) => {
                     const [dir, name] = splitPath(f.path);
@@ -282,6 +362,16 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                         onClick={() => setSelected(f.path)}
                         onDoubleClick={() => f.status !== "untracked" && onDiff?.(f.path)}
                         onContextMenu={(e) => openMenu(e, f)}
+                        draggable={f.status !== "untracked"}
+                        onDragStart={(e) => {
+                          dragged.current = targets(f).filter((p) => byPath.get(p)?.status !== "untracked");
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", dragged.current.join("\n"));
+                        }}
+                        onDragEnd={() => {
+                          dragged.current = [];
+                          setDropOn(null);
+                        }}
                       >
                         <input
                           type="checkbox"
@@ -483,10 +573,39 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                 </>
               );
             })()}
+          {menu.file.status !== "untracked" &&
+            (() => {
+              const t = targets(menu.file).filter((p) => byPath.get(p)?.status !== "untracked");
+              const others = lists.map((l) => l.name).filter((n) => t.some((p) => listOf(byPath.get(p)!) !== n));
+              if (others.length === 0) return null;
+              return (
+                <>
+                  <div className="menu-label">Move{t.length > 1 ? ` ${t.length} files` : ""} to</div>
+                  {others.map((n) => (
+                    <button key={n} role="menuitem" onClick={() => void moveTo(n, t)}>
+                      {n === "default" ? "Changes (no changelist)" : n}
+                    </button>
+                  ))}
+                  <div className="menu-sep" />
+                </>
+              );
+            })()}
           <button role="menuitem" onClick={() => toggle([menu.file.path], !picked.has(menu.file.path))}>
             {picked.has(menu.file.path) ? "Unpick" : "Pick"}
           </button>
         </div>
+      )}
+
+      {listAsk && (
+        <ChangelistDialogs
+          workspace={root}
+          ask={listAsk}
+          onClose={() => setListAsk(null)}
+          onDone={(msg) => {
+            if (msg) setDone(msg);
+            void refresh();
+          }}
+        />
       )}
 
       {lockPaths && (

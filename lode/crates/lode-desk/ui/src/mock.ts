@@ -3,6 +3,7 @@
 
 import type {
   Backend,
+  ChangelistInfo,
   LockInfo,
   LogPage,
   CheckoutResult,
@@ -207,6 +208,46 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     return st;
   };
   const emit = (e: ProgressEvent) => listeners.forEach((l) => l(e));
+  const commitFiles = async (workspace: string, picked: StatusFile[], message: string): Promise<CommitResult> => {
+    const st = statusFor(workspace);
+    if (opts.refuseCommit) throw opts.refuseCommit;
+    if (!message.trim()) fail("aborted", "empty commit message; nothing was committed");
+    if (picked.length === 0) fail("nothing_to_commit", "nothing to commit in the given paths");
+    const needLock = picked.filter((f) => f.needs_lock).map((f) => f.path);
+    if (needLock.length > 0) {
+      const e: OpError = {
+        code: "lock_required",
+        message: `these files need a lock: ${needLock.join(", ")}; run \`lode lock <path>\` first`,
+        details: { paths: needLock },
+      };
+      throw e;
+    }
+    for (let i = 1; i <= picked.length; i++) {
+      await pause();
+      emit({ label: "Uploading", done: i, total: picked.length, bytes: i * 1_200_000, finished: false });
+    }
+    emit({ label: "Uploading", done: picked.length, total: picked.length, bytes: picked.length * 1_200_000, finished: true });
+    st.rev += 1;
+    st.files = st.files.filter((f) => !picked.includes(f));
+    const info = workspaces.get(workspace);
+    if (info) info.rev = st.rev;
+    return { rev: st.rev, branch: st.branch, files: picked.length };
+  };
+  // Changelists per workspace (names and descriptions; files come from the status).
+  const lists = new Map<string, ChangelistInfo[]>();
+  const listsFor = (workspace: string): ChangelistInfo[] => {
+    let l = lists.get(workspace);
+    if (!l) {
+      const named = [...new Set(statusFor(workspace).files.map((f) => f.changelist).filter((c): c is string => !!c))].sort();
+      l = named.map((name) => ({
+        name,
+        description: name === "sails" ? "Sail rigging: flap harder when the wind turns" : "",
+        files: [],
+      }));
+      lists.set(workspace, l);
+    }
+    return l;
+  };
   // Locks per depot and branch; `workspace` names the holder's workspace root.
   const lockTables = new Map<string, LockInfo[]>();
   const locksOf = (workspace: string): LockInfo[] => {
@@ -292,29 +333,55 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     },
     commit: async (workspace, paths, message): Promise<CommitResult> => {
       const st = statusFor(workspace);
-      if (opts.refuseCommit) throw opts.refuseCommit;
-      if (!message.trim()) fail("aborted", "empty commit message; nothing was committed");
-      const picked = st.files.filter((f) => paths.includes(f.path) && f.status !== "untracked");
-      if (picked.length === 0) fail("nothing_to_commit", "nothing to commit in the given paths");
-      const needLock = picked.filter((f) => f.needs_lock).map((f) => f.path);
-      if (needLock.length > 0) {
-        const e: OpError = {
-          code: "lock_required",
-          message: `these files need a lock: ${needLock.join(", ")}; run \`lode lock <path>\` first`,
-          details: { paths: needLock },
-        };
-        throw e;
+      return commitFiles(
+        workspace,
+        st.files.filter((f) => paths.includes(f.path) && f.status !== "untracked"),
+        message,
+      );
+    },
+    commitChangelist: async (workspace, name, message) => {
+      const st = statusFor(workspace);
+      const list = listsFor(workspace).find((l) => l.name === name);
+      if (name !== "default" && !list) fail("not_found", `no changelist \`${name}\``);
+      const files = st.files.filter((f) => (f.changelist ?? "default") === name && f.status !== "untracked");
+      const r = await commitFiles(workspace, files, message ?? list?.description ?? "");
+      if (list && !st.files.some((f) => f.changelist === name)) {
+        lists.set(workspace, listsFor(workspace).filter((l) => l !== list));
       }
-      for (let i = 1; i <= picked.length; i++) {
-        await pause();
-        emit({ label: "Uploading", done: i, total: picked.length, bytes: i * 1_200_000, finished: false });
+      return r;
+    },
+    changelists: async (workspace) => {
+      const st = statusFor(workspace);
+      const filesOf = (name: string) =>
+        st.files.filter((f) => f.status !== "untracked" && (f.changelist ?? "default") === name).map((f) => f.path);
+      return {
+        changelists: [
+          { name: "default", description: "", files: filesOf("default") },
+          ...listsFor(workspace).map((l) => ({ ...l, files: filesOf(l.name) })),
+        ],
+      };
+    },
+    changelistNew: async (workspace, name, description) => {
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) {
+        fail("usage", `invalid changelist name \`${name}\`: use 1 to 64 letters, digits, \`.\`, \`_\` or \`-\``);
       }
-      emit({ label: "Uploading", done: picked.length, total: picked.length, bytes: picked.length * 1_200_000, finished: true });
-      st.rev += 1;
-      st.files = st.files.filter((f) => !picked.includes(f));
-      const info = workspaces.get(workspace);
-      if (info) info.rev = st.rev;
-      return { rev: st.rev, branch: st.branch, files: picked.length };
+      if (name === "default") fail("usage", "`default` always exists");
+      if (listsFor(workspace).some((l) => l.name === name)) fail("conflict", `changelist \`${name}\` already exists`);
+      listsFor(workspace).push({ name, description: description.trim(), files: [] });
+    },
+    changelistMove: async (workspace, name, paths) => {
+      const st = statusFor(workspace);
+      if (name !== "default" && !listsFor(workspace).some((l) => l.name === name)) {
+        fail("not_found", `no changelist \`${name}\``);
+      }
+      const untracked = st.files.filter((f) => paths.includes(f.path) && f.status === "untracked");
+      if (untracked.length) fail("usage", `${untracked[0]!.path} is not tracked: add it first`);
+      for (const f of st.files) if (paths.includes(f.path)) f.changelist = name === "default" ? null : name;
+    },
+    changelistDelete: async (workspace, name) => {
+      if (!listsFor(workspace).some((l) => l.name === name)) fail("not_found", `no changelist \`${name}\``);
+      for (const f of statusFor(workspace).files) if (f.changelist === name) f.changelist = null;
+      lists.set(workspace, listsFor(workspace).filter((l) => l.name !== name));
     },
     log: async (workspace, path, before, max): Promise<LogPage> => {
       const info = workspaces.get(workspace);

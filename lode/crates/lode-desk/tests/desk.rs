@@ -586,3 +586,74 @@ async fn locks_are_taken_listed_refused_and_released() {
     let mine = s.desk.locks(root, true).await.unwrap();
     assert!(mine["locks"].as_array().unwrap().is_empty(), "{mine}");
 }
+
+#[tokio::test]
+async fn changelists_group_and_commit_one_group() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    std::fs::write(dir.join("a.txt"), "apricot\n").unwrap();
+    std::fs::write(dir.join("b.txt"), "blueberry\n").unwrap();
+    std::fs::write(dir.join("d/c.txt"), "cranberry\n").unwrap();
+
+    s.desk
+        .changelist_new(root.clone(), "fruit".into(), "More fruit".into())
+        .await
+        .unwrap();
+    s.desk
+        .changelist_new(root.clone(), "later".into(), String::new())
+        .await
+        .unwrap();
+    let err = s
+        .desk
+        .changelist_new(root.clone(), "bad name".into(), String::new())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "usage", "{err:?}");
+    let moved = s
+        .desk
+        .changelist_move(
+            root.clone(),
+            "fruit".into(),
+            vec!["a.txt".into(), "b.txt".into()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(moved["moved"].as_array().unwrap().len(), 2, "{moved}");
+
+    let lists = s.desk.changelists(root.clone()).await.unwrap();
+    let names: Vec<&str> = lists["changelists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["default", "fruit", "later"], "{lists}");
+    assert_eq!(
+        lists["changelists"][0]["files"],
+        serde_json::json!(["d/c.txt"])
+    );
+    assert_eq!(lists["changelists"][1]["description"], "More fruit");
+
+    // Committing the changelist takes its description and only its files.
+    let r = s
+        .desk
+        .commit_changelist(root.clone(), "fruit".into(), None)
+        .await
+        .unwrap();
+    assert_eq!(r["files"], 2, "{r}");
+    let log = s.desk.log(root.clone(), None, None, 1).await.unwrap();
+    assert_eq!(log["revisions"][0]["message"], "More fruit");
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert_eq!(paths(&st), [("d/c.txt".to_owned(), "modified".to_owned())]);
+
+    // The emptied list is gone; deleting the other returns nothing to move.
+    let lists = s.desk.changelists(root.clone()).await.unwrap();
+    assert_eq!(lists["changelists"].as_array().unwrap().len(), 2, "{lists}");
+    let del = s
+        .desk
+        .changelist_delete(root.clone(), "later".into())
+        .await
+        .unwrap();
+    assert_eq!(del["files"], 0, "{del}");
+}

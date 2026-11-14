@@ -152,6 +152,24 @@ const scenes = {
     await d.getByRole("button", { name: "Lock" }).click();
     await d.getByRole("list", { name: "Held by others" }).waitFor();
   },
+  async changelists(page) {
+    await scenes.workspace(page);
+    const pending = page.getByRole("region", { name: "Pending changes" });
+    await pending.getByRole("checkbox", { name: "Pick Source/Skyfall/Boat.cpp" }).click();
+    await pending.getByRole("button", { name: "New changelist…" }).click();
+    const d = page.getByRole("dialog");
+    await d.getByLabel(/^Name/).fill("buoyancy");
+    await d.getByLabel("Description").fill("Rough water: boats roll and pitch with the waves");
+    await d.getByRole("button", { name: "Create" }).click();
+    await pending.getByRole("group", { name: "Changelist buoyancy" }).waitFor();
+    await pending.getByText("Harbor.umap").click({ button: "right" });
+    await page.getByRole("menu").waitFor();
+  },
+  async "commit-changelist"(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: "Commit changelist sails" }).click();
+    await page.getByRole("dialog").waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

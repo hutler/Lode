@@ -7,7 +7,9 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lode_ops::cmd::{checkout, commit, diff, files, history, info, locks, login, revert, status};
+use lode_ops::cmd::{
+    changelist, checkout, commit, diff, files, history, info, locks, login, revert, status,
+};
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
 use lode_ops::output::Ui;
@@ -443,6 +445,87 @@ impl Desk {
             .await
         })
         .await
+    }
+
+    /// `lode commit -c NAME`: exactly the files of one changelist (`default` for files in
+    /// none), with the changelist's description when `message` is None.
+    pub async fn commit_changelist(
+        &self,
+        workspace: String,
+        name: String,
+        message: Option<String>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            commit::commit(
+                &ctx,
+                commit::CommitArgs {
+                    changelist: Some(name),
+                    message: message.filter(|m| !m.trim().is_empty()),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode changelist list|new|move|delete` in `workspace`.
+    async fn changelist(
+        &self,
+        workspace: String,
+        command: changelist::ChangelistCommand,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            changelist::changelist(&ctx, changelist::ChangelistArgs { command }).await
+        })
+        .await
+    }
+
+    /// The workspace's changelists with their changed files, `default` first.
+    pub async fn changelists(&self, workspace: String) -> Result<Value, ErrorView> {
+        self.changelist(workspace, changelist::ChangelistCommand::List)
+            .await
+    }
+
+    /// Creates a changelist.
+    pub async fn changelist_new(
+        &self,
+        workspace: String,
+        name: String,
+        description: String,
+    ) -> Result<Value, ErrorView> {
+        self.changelist(
+            workspace,
+            changelist::ChangelistCommand::New { name, description },
+        )
+        .await
+    }
+
+    /// Puts files (depot paths) into a changelist; `default` takes them out of any.
+    pub async fn changelist_move(
+        &self,
+        workspace: String,
+        name: String,
+        paths: Vec<String>,
+    ) -> Result<Value, ErrorView> {
+        let paths = paths.into_iter().map(PathBuf::from).collect();
+        self.changelist(
+            workspace,
+            changelist::ChangelistCommand::Move { name, paths },
+        )
+        .await
+    }
+
+    /// Deletes a changelist; its files return to `default`.
+    pub async fn changelist_delete(
+        &self,
+        workspace: String,
+        name: String,
+    ) -> Result<Value, ErrorView> {
+        self.changelist(workspace, changelist::ChangelistCommand::Delete { name })
+            .await
     }
 
     /// `lode lock` of `paths` (depot paths) in `workspace`, all or none.
