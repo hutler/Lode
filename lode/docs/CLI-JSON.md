@@ -369,6 +369,9 @@ over the workspace's base, so the file shows as modified (or deleted).
 
 `{ "depot", "branch", "revisions": [revision], "more": bool }`
 
+`more` is true when older revisions exist; `--before REV` lists only revisions older than
+`REV`, so passing the last `rev` of one page gets the next.
+
 Each revision is the server's revision object: `rev`, `branch`, `parent`, `author` and
 `submitter` (`{ "name", "kind" }`), `created_at` (RFC 3339, UTC), `message`, `root_tree`,
 `provenance`, `merged_from`, and with `-v` `changes` (`[{ "path", "action":

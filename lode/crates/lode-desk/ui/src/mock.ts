@@ -3,6 +3,7 @@
 
 import type {
   Backend,
+  LogPage,
   CheckoutResult,
   CommitResult,
   OpError,
@@ -13,6 +14,7 @@ import type {
   WhoAmI,
   WorkspaceInfo,
 } from "./api";
+import { demoBlame, demoHead, demoLog, demoRevision } from "./mockHistory";
 
 export interface MockOptions {
   /** Workspaces listed on the welcome page. */
@@ -131,7 +133,7 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       server: r.server,
       depot: r.depot,
       branch: r.branch,
-      rev: DEPOTS[r.depot]?.rev ?? 1,
+      rev: (r.depot === "skyfall" ? demoHead(r.branch) : null) ?? DEPOTS[r.depot]?.rev ?? 1,
     });
   }
 
@@ -255,6 +257,24 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const info = workspaces.get(workspace);
       if (info) info.rev = st.rev;
       return { rev: st.rev, branch: st.branch, files: picked.length };
+    },
+    log: async (workspace, path, before, max): Promise<LogPage> => {
+      const info = workspaces.get(workspace);
+      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+      await pause();
+      return { depot: info.depot, branch: info.branch, ...demoLog(info.branch, path, before, max) };
+    },
+    revision: async (workspace, rev) => {
+      const info = workspaces.get(workspace);
+      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+      const r = demoRevision(info.branch, rev);
+      if (!r) fail("not_found", `revision ${rev} not found on ${info.branch}`);
+      return r;
+    },
+    blame: async (workspace, path, rev) => {
+      const info = workspaces.get(workspace);
+      if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+      return demoBlame(info.branch, path, rev);
     },
     watch: async () => {},
     unwatch: async () => {},

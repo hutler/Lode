@@ -1,7 +1,9 @@
 import { useState } from "react";
 
 import type { OpError, StatusResult, WorkspaceInfo } from "../api";
+import { BlameView } from "./BlameView";
 import { ChangesView } from "./ChangesView";
+import { HistoryView } from "./HistoryView";
 
 interface Props {
   info: WorkspaceInfo;
@@ -17,13 +19,28 @@ function hostOf(server: string): string {
 }
 
 const SECTIONS = ["Changes", "History", "Locks", "Shelves"] as const;
+type Section = (typeof SECTIONS)[number];
+
+/** What the main area shows. */
+type View =
+  | { kind: "changes" }
+  | { kind: "history"; path: string | null; rev: number | null }
+  | { kind: "blame"; path: string; rev: number | null };
+
+function sectionOf(v: View): Section {
+  return v.kind === "changes" ? "Changes" : "History";
+}
 
 /** One open workspace: the sidebar and the section it shows. */
 export function WorkspaceView({ info, onError }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
+  const [view, setView] = useState<View>({ kind: "changes" });
 
   const changed = status?.files.filter((f) => f.status !== "unchanged").length ?? 0;
   const locked = status?.files.filter((f) => f.locked).length ?? 0;
+  const active = sectionOf(view);
+  const history = (path: string | null, rev: number | null = null) => setView({ kind: "history", path, rev });
+  const blame = (path: string, rev: number | null) => setView({ kind: "blame", path, rev });
 
   return (
     <div className="workspace">
@@ -40,8 +57,14 @@ export function WorkspaceView({ info, onError }: Props) {
           <span className="rev">r{status?.rev ?? info.rev}</span>
         </div>
         <nav className="sidebar-nav">
-          {SECTIONS.map((s, i) => (
-            <button key={s} className={i === 0 ? "active" : ""} disabled={i !== 0}>
+          {SECTIONS.map((s) => (
+            <button
+              key={s}
+              className={s === active ? "active" : ""}
+              aria-current={s === active ? "page" : undefined}
+              disabled={s !== "Changes" && s !== "History"}
+              onClick={() => setView(s === "Changes" ? { kind: "changes" } : { kind: "history", path: null, rev: null })}
+            >
               {s}
               {s === "Changes" && changed > 0 && <span className="count">{changed}</span>}
               {s === "Locks" && locked > 0 && <span className="count">{locked}</span>}
@@ -49,7 +72,39 @@ export function WorkspaceView({ info, onError }: Props) {
           ))}
         </nav>
       </aside>
-      <ChangesView info={info} onStatus={setStatus} onError={onError} />
+      {/* Kept mounted while hidden, so the picked files and the message stay. */}
+      <div className="section" hidden={view.kind !== "changes"}>
+        <ChangesView
+          info={info}
+          onStatus={setStatus}
+          onError={onError}
+          onHistory={(path) => history(path)}
+          onBlame={(path) => blame(path, null)}
+        />
+      </div>
+      {view.kind === "history" && (
+        <div className="section">
+          <HistoryView
+            key={`${view.path ?? ""}@${view.rev ?? ""}`}
+            info={info}
+            path={view.path}
+            initialRev={view.rev}
+            onPath={(path) => history(path)}
+            onBlame={blame}
+          />
+        </div>
+      )}
+      {view.kind === "blame" && (
+        <div className="section">
+          <BlameView
+            info={info}
+            path={view.path}
+            rev={view.rev}
+            onRevision={(rev) => history(null, rev)}
+            onHistory={(path) => history(path)}
+          />
+        </div>
+      )}
     </div>
   );
 }

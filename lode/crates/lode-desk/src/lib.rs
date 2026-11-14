@@ -111,6 +111,32 @@ async fn commit(
 }
 
 #[tauri::command]
+async fn log(
+    desk: State<'_, Desk>,
+    workspace: String,
+    path: Option<String>,
+    before: Option<u64>,
+    max: u32,
+) -> Result<Value, ErrorView> {
+    desk.log(workspace, path, before, max).await
+}
+
+#[tauri::command]
+async fn revision(desk: State<'_, Desk>, workspace: String, rev: u64) -> Result<Value, ErrorView> {
+    desk.revision(workspace, rev).await
+}
+
+#[tauri::command]
+async fn blame(
+    desk: State<'_, Desk>,
+    workspace: String,
+    path: String,
+    rev: Option<u64>,
+) -> Result<Value, ErrorView> {
+    desk.blame(workspace, path, rev).await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -155,6 +181,9 @@ pub fn run() -> Result<(), tauri::Error> {
             add,
             revert,
             commit,
+            log,
+            revision,
+            blame,
             watch,
             unwatch,
         ])

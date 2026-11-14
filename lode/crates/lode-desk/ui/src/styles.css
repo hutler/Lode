@@ -876,3 +876,276 @@ button.danger {
 .tile.warn .tile-label {
   color: inherit;
 }
+
+/* Sections of a workspace */
+
+[hidden] {
+  display: none !important;
+}
+
+.section {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.details-actions button + button {
+  margin-left: 0;
+}
+
+/* History */
+
+.history {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-height: 0;
+  height: 100%;
+}
+
+.history-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+
+.rev-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: var(--surface);
+  outline: none;
+}
+
+.rev-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: auto 58px minmax(0, 1fr) auto 96px 172px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 0 6px;
+  font-size: 13px;
+  cursor: default;
+}
+
+.rev-row:hover {
+  background: var(--surface-2);
+}
+
+.rev-row.selected {
+  background: var(--accent-soft);
+}
+
+.rev-row.inherited .rev-summary,
+.rev-row.inherited .rev-num {
+  color: var(--muted);
+}
+
+.graph {
+  display: block;
+}
+
+.rev-num {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rev-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rev-summary .tag {
+  margin-right: 8px;
+}
+
+.rev-badges {
+  display: flex;
+  gap: 6px;
+}
+
+.rev-badges.block {
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+
+.rev-badges.block:empty {
+  display: none;
+}
+
+.rev-author,
+.rev-date {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rev-date {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rev-loading {
+  padding: 8px 16px;
+}
+
+.tag.agent {
+  background: #efe7fb;
+  color: #6534b0;
+}
+
+.tag.merge {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.tag.branch {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+.tag.branch.inherited {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.rev-message {
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.rev-body {
+  white-space: pre-wrap;
+  color: var(--muted);
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.fact-pair {
+  display: contents;
+}
+
+.details-sub {
+  font-size: 13px;
+  margin: 0 0 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.details-sub .group-count {
+  color: var(--muted);
+}
+
+.rev-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.rev-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.rev-files .file-path {
+  flex: 1;
+}
+
+.rev-file-actions {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+}
+
+/* Blame */
+
+.blame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.blame-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.blame-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+
+.blame-table tr.run-start td {
+  border-top: 1px solid var(--border);
+}
+
+.blame-table tr.shade .blame-who {
+  background: var(--surface-2);
+}
+
+.blame-who {
+  width: 340px;
+  max-width: 340px;
+  padding: 0 10px;
+  vertical-align: top;
+}
+
+.blame-rev {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.blame-author {
+  color: var(--text);
+  flex: none;
+}
+
+.blame-summary {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blame-num {
+  width: 1%;
+  padding: 0 10px;
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+
+.blame-text {
+  padding: 0 12px;
+  white-space: pre;
+  line-height: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tag.agent {
+    background: #2e2346;
+    color: #c9a9f5;
+  }
+}

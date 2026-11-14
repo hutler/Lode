@@ -42,6 +42,9 @@ pub struct LogArgs {
     /// List the changed paths of each revision.
     #[arg(long, short = 'v')]
     pub verbose: bool,
+    /// Only revisions older than REV: pass the last revision of one page to get the next.
+    #[arg(long, value_name = "REV")]
+    pub before: Option<u64>,
     #[command(flatten)]
     pub source: Source,
 }
@@ -54,6 +57,7 @@ impl Default for LogArgs {
             max: 50,
             follow: false,
             verbose: false,
+            before: None,
             source: Source::default(),
         }
     }
@@ -319,7 +323,7 @@ pub async fn log(ctx: &Ctx, args: LogArgs) -> OpResult<Value> {
         return Err(OpError::usage("--follow needs a path"));
     }
     let mut out: Vec<RevisionView> = Vec::new();
-    let mut before = None;
+    let mut before = args.before;
     let mut more = true;
     while more && (args.max == 0 || out.len() < args.max as usize) {
         let want = if args.max == 0 {

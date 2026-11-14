@@ -69,6 +69,65 @@ export interface CommitResult {
   files: number;
 }
 
+/** Who did something. */
+export interface PrincipalRef {
+  name: string;
+  kind: "user" | "agent";
+}
+
+/** A merge recorded by a revision. */
+export interface MergedFrom {
+  branch: string;
+  from_rev: number;
+  to_rev: number;
+}
+
+/** One changed path of a revision (`lode log -v`). */
+export interface ChangeView {
+  path: string;
+  action: "add" | "modify" | "delete";
+  kind?: string;
+  size?: number;
+  copy_from?: { path: string; rev: number } | null;
+}
+
+/** A revision as the server describes it (`lode log --json`). */
+export interface Revision {
+  rev: number;
+  branch: string;
+  parent: number | null;
+  author: PrincipalRef;
+  submitter: PrincipalRef;
+  created_at: string;
+  message: string;
+  provenance?: {
+    client?: string;
+    agent?: Record<string, string>;
+    imported?: { system: string; id: string; author?: string; date?: string };
+    submitted_shelf?: number;
+  } | null;
+  merged_from: MergedFrom[];
+  changes?: ChangeView[];
+  changes_truncated?: boolean;
+}
+
+/** One page of `lode log --json`. */
+export interface LogPage {
+  depot: string;
+  branch: string;
+  revisions: Revision[];
+  more: boolean;
+}
+
+/** `lode blame --json`. */
+export interface BlameResult {
+  path: string;
+  rev: number;
+  lines: { rev: number; text: string }[];
+  revisions: { rev: number; branch: string; author: PrincipalRef; created_at: string; summary: string }[];
+  truncated?: boolean;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -94,6 +153,13 @@ export interface Backend {
   revert(workspace: string, paths: string[]): Promise<void>;
   /** Commits the changes to `paths`; untracked ones must be added first. */
   commit(workspace: string, paths: string[], message: string): Promise<CommitResult>;
+  /** Up to `max` revisions older than `before` (newest first); with `path`, that file's
+   * history followed through renames. */
+  log(workspace: string, path: string | null, before: number | null, max: number): Promise<LogPage>;
+  /** One revision with its changed files. */
+  revision(workspace: string, rev: number): Promise<Revision>;
+  /** Who last changed each line of `path`, as of `rev` (default: the workspace's). */
+  blame(workspace: string, path: string, rev: number | null): Promise<BlameResult>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
   watch(workspace: string): Promise<void>;
   unwatch(workspace: string): Promise<void>;
@@ -140,6 +206,9 @@ async function tauriBackend(): Promise<Backend> {
       await invoke("revert", { workspace, paths });
     },
     commit: (workspace, paths, message) => invoke("commit", { workspace, paths, message }),
+    log: (workspace, path, before, max) => invoke("log", { workspace, path, before, max }),
+    revision: (workspace, rev) => invoke("revision", { workspace, rev }),
+    blame: (workspace, path, rev) => invoke("blame", { workspace, path, rev }),
     watch: (workspace) => invoke("watch", { workspace }),
     unwatch: (workspace) => invoke("unwatch", { workspace }),
     onChanged: (listener) => subscribe<string>("lode://changed", listener),

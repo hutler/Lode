@@ -84,6 +84,37 @@ const scenes = {
     await page.getByRole("button", { name: "Commit 3 files" }).click();
     await page.getByRole("form", { name: "Commit" }).getByRole("alert").waitFor();
   },
+  async history(page) {
+    // main's history with the merge from feature/harbor-night selected.
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByRole("option", { name: /^r1478 / }).click();
+    await page.getByRole("list", { name: "Changed files" }).waitFor();
+  },
+  async "history-release"(page) {
+    // A release branch: its own revisions, then main's below the branch point.
+    await page.getByText("D:\\Work\\Skyfall-release", { exact: true }).click();
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    const list = page.getByRole("listbox", { name: "Revisions" });
+    await list.getByRole("option").first().waitFor();
+    await list.evaluate((el) => {
+      el.scrollTop = 6 * 40;
+    });
+    await page.getByRole("option", { name: /^r1390 / }).click();
+    await page.getByRole("list", { name: "Changed files" }).waitFor();
+  },
+  async "file-history"(page) {
+    await scenes.history(page);
+    await page.getByRole("button", { name: /^History of Source\// }).first().click();
+    await page.getByRole("heading", { name: /^History of / }).waitFor();
+    await page.getByRole("list", { name: "Changed files" }).waitFor();
+  },
+  async blame(page) {
+    await scenes.workspace(page);
+    await page.getByRole("region", { name: "Pending changes" }).getByText("Boat.cpp").click();
+    await page.getByRole("complementary", { name: "Details" }).getByRole("button", { name: "Blame" }).click();
+    await page.getByText(/ABoat::Tick/).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

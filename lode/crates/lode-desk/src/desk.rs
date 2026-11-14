@@ -7,7 +7,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lode_ops::cmd::{checkout, commit, files, info, login, revert, status};
+use lode_ops::cmd::{checkout, commit, files, history, info, login, revert, status};
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
 use lode_ops::output::Ui;
@@ -291,6 +291,84 @@ impl Desk {
                 commit::CommitArgs {
                     paths: paths.into_iter().map(PathBuf::from).collect(),
                     message: Some(message),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// One page of `lode log` in `workspace`: up to `max` revisions older than `before`
+    /// (newest first when `before` is none), of the branch or, with `path`, of one file
+    /// followed through renames.
+    pub async fn log(
+        &self,
+        workspace: String,
+        path: Option<String>,
+        before: Option<u64>,
+        max: u32,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            history::log(
+                &ctx,
+                history::LogArgs {
+                    follow: path.is_some(),
+                    path,
+                    before,
+                    max: max.clamp(1, 1000),
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// One revision with its changed files (`lode log -v` of that revision alone).
+    pub async fn revision(&self, workspace: String, rev: u64) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        let v = run_op(move || async move {
+            history::log(
+                &ctx,
+                history::LogArgs {
+                    before: Some(rev.saturating_add(1)),
+                    max: 1,
+                    verbose: true,
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await?;
+        match v["revisions"].get(0) {
+            Some(r) if r["rev"].as_u64() == Some(rev) => Ok(r.clone()),
+            _ => Err(ErrorView {
+                code: "not_found".into(),
+                message: format!("r{rev} is not in this branch's history"),
+                details: Value::Null,
+            }),
+        }
+    }
+
+    /// `lode blame path[@rev]` in `workspace`.
+    pub async fn blame(
+        &self,
+        workspace: String,
+        path: String,
+        rev: Option<u64>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        let spec = match rev {
+            Some(r) => format!("{path}@{r}"),
+            None => path,
+        };
+        run_op(move || async move {
+            history::blame(
+                &ctx,
+                history::BlameArgs {
+                    path: spec,
                     ..Default::default()
                 },
             )

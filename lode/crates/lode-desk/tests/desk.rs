@@ -335,3 +335,73 @@ async fn watching_reports_changes_once_per_burst() {
     tokio::time::sleep(std::time::Duration::from_millis(900)).await;
     assert!(rx.try_recv().is_err(), "no calls after unwatch");
 }
+
+#[tokio::test]
+async fn history_pages_revisions_files_and_blame() {
+    let s = setup().await;
+    for i in 0..5 {
+        let text = format!("apple\nline {i}\n");
+        s.server
+            .commit_files("game", "main", &[("a.txt", text.as_bytes())])
+            .await;
+    }
+    let root = checked_out(&s).await;
+
+    let first = s.desk.log(root.clone(), None, None, 3).await.unwrap();
+    let revs: Vec<u64> = first["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["rev"].as_u64().unwrap())
+        .collect();
+    assert_eq!(revs.len(), 3);
+    assert!(
+        revs.windows(2).all(|w| w[0] > w[1]),
+        "newest first: {revs:?}"
+    );
+    assert_eq!(first["more"], true);
+    let second = s
+        .desk
+        .log(root.clone(), None, Some(revs[2]), 3)
+        .await
+        .unwrap();
+    let older = second["revisions"][0]["rev"].as_u64().unwrap();
+    assert_eq!(
+        older,
+        revs[2] - 1,
+        "the next page starts below the last one"
+    );
+
+    // One revision with its changes.
+    let one = s.desk.revision(root.clone(), revs[0]).await.unwrap();
+    assert_eq!(one["rev"], revs[0]);
+    assert_eq!(one["changes"][0]["path"], "a.txt");
+    assert_eq!(one["changes"][0]["action"], "modify");
+    let err = s.desk.revision(root.clone(), 9999).await.unwrap_err();
+    assert_eq!(err.code, "not_found", "{err:?}");
+
+    // File history: only revisions that changed b.txt.
+    let fh = s
+        .desk
+        .log(root.clone(), Some("b.txt".into()), None, 50)
+        .await
+        .unwrap();
+    assert_eq!(fh["revisions"].as_array().unwrap().len(), 1, "{fh}");
+
+    // Blame names the revision of each line.
+    let b = s
+        .desk
+        .blame(root.clone(), "a.txt".into(), None)
+        .await
+        .unwrap();
+    let lines = b["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1]["text"], "line 4");
+    assert_eq!(lines[1]["rev"].as_u64(), Some(revs[0]));
+    let old = s
+        .desk
+        .blame(root, "a.txt".into(), Some(revs[2]))
+        .await
+        .unwrap();
+    assert_eq!(old["lines"][1]["text"], "line 2");
+}

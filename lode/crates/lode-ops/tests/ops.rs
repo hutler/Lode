@@ -184,6 +184,30 @@ async fn status_commit_and_log_without_the_binary() {
     assert_eq!(revs[0]["rev"], s.base + 1);
     assert_eq!(revs[0]["message"], "Fruit");
     assert_eq!(revs[1]["rev"], s.base);
+
+    // Paging: one revision at a time, older each time.
+    let page = history::log(
+        &ctx,
+        history::LogArgs {
+            max: 1,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(page["revisions"][0]["rev"], s.base + 1);
+    assert_eq!(page["more"], true);
+    let next = history::log(
+        &ctx,
+        history::LogArgs {
+            max: 1,
+            before: page["revisions"][0]["rev"].as_u64(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(next["revisions"][0]["rev"], s.base);
 }
 
 #[tokio::test]

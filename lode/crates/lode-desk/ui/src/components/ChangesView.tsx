@@ -17,6 +17,10 @@ interface Props {
   info: WorkspaceInfo;
   onStatus: (s: StatusResult) => void;
   onError: (e: OpError) => void;
+  /** Opens a file's history. */
+  onHistory?: (path: string) => void;
+  /** Opens a file's blame. */
+  onBlame?: (path: string) => void;
 }
 
 /** One group of the list: the default changes, a named changelist, or new files. */
@@ -79,7 +83,7 @@ interface Menu {
 }
 
 /** The pending changes of a workspace, with picking, committing, adding and reverting. */
-export function ChangesView({ info, onStatus, onError }: Props) {
+export function ChangesView({ info, onStatus, onError, onHistory, onBlame }: Props) {
   const [status, setStatus] = useState<StatusResult | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
@@ -378,6 +382,12 @@ export function ChangesView({ info, onStatus, onError }: Props) {
                 <button onClick={() => setConfirmRevert([sel.path])} disabled={!!busy}>
                   Revert…
                 </button>
+              )}
+              {sel.status !== "untracked" && sel.status !== "added" && (
+                <>
+                  {onHistory && <button onClick={() => onHistory(sel.path)}>History</button>}
+                  {onBlame && sel.status !== "deleted" && <button onClick={() => onBlame(sel.path)}>Blame</button>}
+                </>
               )}
             </div>
           </>

@@ -318,6 +318,7 @@ impl Worker {
                     max: i.limit.unwrap_or(20).clamp(1, 1000),
                     follow: i.follow,
                     verbose: i.verbose,
+                    before: None,
                     source: no_source(),
                 };
                 cmd::history::log(&ctx, args).await
