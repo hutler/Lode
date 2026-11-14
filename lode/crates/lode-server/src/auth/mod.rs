@@ -12,10 +12,13 @@ mod token;
 pub(crate) use caller::authenticate;
 pub use caller::{Caller, ADMIN_USER};
 pub use handlers::routes;
+pub(crate) use handlers::{check_password_sign_in, issue_token, would_be_server_admin, ClientAddr};
 pub use password::{hash_password, verify_password, MIN_PASSWORD_LEN};
 pub use ratelimit::{LoginLimiter, LoginPolicy};
 pub use scopes::{ScopeRegistry, CORE_SCOPES, SCOPE_ADMIN, SCOPE_READ, SCOPE_WRITE};
 pub use sso::Sso;
+pub(crate) use sso::{finish_admin, random_verifier, start_admin, ADMIN_SSO_DONE};
+pub(crate) use token::ct_eq;
 pub use token::{generate_token, hash_token, TOKEN_PREFIX};
 
 /// Converts stored milliseconds to a timestamp.

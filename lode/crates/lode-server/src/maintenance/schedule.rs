@@ -101,6 +101,13 @@ fn list(dir: &Path) -> Result<(Complete, Vec<PathBuf>), BackupError> {
     Ok((complete, partial))
 }
 
+/// The newest complete backup in `dir`, with its time.
+pub fn newest_backup(dir: &Path) -> Option<(OffsetDateTime, PathBuf)> {
+    list(dir)
+        .ok()
+        .and_then(|(complete, _)| complete.into_iter().last())
+}
+
 /// Makes a backup if one is due by the server clock, then removes backups beyond `keep`.
 pub async fn backup_tick(
     state: &AppState,
@@ -164,6 +171,10 @@ pub async fn run_backups(state: AppState, schedule: BackupSchedule, mut stop: St
                 report,
                 removed,
             }) => {
+                state.record_backup(crate::state::BackupRun {
+                    at: state.clock().now_ms(),
+                    outcome: Ok(report.bytes),
+                });
                 tracing::info!(
                     path = %path.display(),
                     objects = report.objects,
@@ -175,6 +186,10 @@ pub async fn run_backups(state: AppState, schedule: BackupSchedule, mut stop: St
                 schedule.every
             }
             Err(e) => {
+                state.record_backup(crate::state::BackupRun {
+                    at: state.clock().now_ms(),
+                    outcome: Err(e.to_string()),
+                });
                 tracing::error!(error = %e, dir = %schedule.dir.display(), "scheduled backup failed");
                 schedule.every
             }

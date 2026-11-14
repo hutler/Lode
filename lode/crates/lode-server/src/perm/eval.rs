@@ -251,10 +251,73 @@ impl DepotAccess {
         self.bypass || self.rules.iter().any(|r| r.allow)
     }
 
+    /// The level on one path of one branch, and the rules behind it (T142: `acl check`).
+    pub fn explain(&self, branch: &str, path: &DepotPath) -> Explained {
+        if self.bypass {
+            let rule = self
+                .rules
+                .iter()
+                .find(|r| r.allow && r.level == Level::Admin)
+                .map(|r| r.id.0);
+            return Explained {
+                level: Level::Admin,
+                depot_admin: true,
+                matched: Vec::new(),
+                decided_by: rule,
+            };
+        }
+        let mut matched = Vec::new();
+        let (mut allow, mut allow_rule) = (Level::None, None);
+        let (mut cap, mut cap_rule) = (Level::Admin, None);
+        for r in self.rules.iter().filter(|r| r.branch.matches_str(branch)) {
+            let hit =
+                PathGlobSet::new([r.path.as_str()]).is_ok_and(|g| g.matches_str(path.as_str()));
+            if !hit {
+                continue;
+            }
+            matched.push(r.id.0);
+            if r.allow {
+                if r.level > allow {
+                    allow = r.level;
+                    allow_rule = Some(r.id.0);
+                }
+            } else if r.level.below() < cap {
+                cap = r.level.below();
+                cap_rule = Some(r.id.0);
+            }
+        }
+        let decided_by = if allow == Level::None {
+            None
+        } else if cap < allow {
+            cap_rule
+        } else {
+            allow_rule
+        };
+        Explained {
+            level: allow.min(cap),
+            depot_admin: false,
+            matched,
+            decided_by,
+        }
+    }
+
     /// The ids of the rules that apply, for diagnostics.
     pub fn rule_ids(&self) -> Vec<i64> {
         self.rules.iter().map(|r| r.id.0).collect()
     }
+}
+
+/// A level with the rules behind it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Explained {
+    /// The level.
+    pub level: Level,
+    /// An administrator of the depot, which passes over path rules.
+    pub depot_admin: bool,
+    /// Ids of the rules that apply to the path, in evaluation order.
+    pub matched: Vec<i64>,
+    /// The rule that decided the level.
+    pub decided_by: Option<i64>,
 }
 
 /// The rules that apply to one caller on one branch, ready for bulk checks.

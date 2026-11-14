@@ -751,6 +751,26 @@ pub trait Reads {
         collect(rows)
     }
 
+    /// The last garbage collection and consistency checks of every depot.
+    fn maintenance_runs(&self) -> Result<Vec<MaintenanceRunRow>> {
+        let mut st = self.db().prepare(
+            "SELECT depot_id, kind, at, objects_checked, objects_affected, bytes_affected, \
+             problems FROM maintenance_run ORDER BY depot_id, kind",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(MaintenanceRunRow {
+                depot_id: DepotId(r.get(0)?),
+                kind: r.get(1)?,
+                at: r.get(2)?,
+                objects_checked: get_u64(r, 3)?,
+                objects_affected: get_u64(r, 4)?,
+                bytes_affected: get_u64(r, 5)?,
+                problems: get_u64(r, 6)?,
+            })
+        })?;
+        collect(rows)
+    }
+
     /// Every change to `path`, or to any path under it when `subtree` is set, on every
     /// branch, oldest first.
     fn changes_at_path(&self, depot: DepotId, path: &str, subtree: bool) -> Result<Vec<RevChange>> {
@@ -1220,6 +1240,29 @@ impl WriteTx<'_> {
         } else {
             Ok(())
         }
+    }
+
+    /// Records a finished garbage collection or consistency check, replacing the depot's
+    /// previous one of that kind.
+    pub fn record_maintenance_run(&self, row: &MaintenanceRunRow) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO maintenance_run (depot_id, kind, at, objects_checked, \
+             objects_affected, bytes_affected, problems) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT (depot_id, kind) DO UPDATE SET at = excluded.at, \
+             objects_checked = excluded.objects_checked, \
+             objects_affected = excluded.objects_affected, \
+             bytes_affected = excluded.bytes_affected, problems = excluded.problems",
+            params![
+                row.depot_id.0,
+                row.kind,
+                row.at,
+                to_i64(row.objects_checked)?,
+                to_i64(row.objects_affected)?,
+                to_i64(row.bytes_affected)?,
+                to_i64(row.problems)?
+            ],
+        )?;
+        Ok(())
     }
 
     /// Records obliterated content. Recording the same id again keeps the first record.

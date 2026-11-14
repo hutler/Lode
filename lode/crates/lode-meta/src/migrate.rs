@@ -49,6 +49,11 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             name: "sso",
             sql: include_str!("../migrations/core/0004_sso.sql"),
         },
+        Migration {
+            version: 5,
+            name: "maintenance_runs",
+            sql: include_str!("../migrations/core/0005_maintenance_runs.sql"),
+        },
     ],
 };
 

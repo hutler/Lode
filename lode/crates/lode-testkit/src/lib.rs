@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 pub mod oidc;
+pub mod web;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -445,6 +446,7 @@ async fn try_launch(
     let bound = BoundServer::bind(config, app)
         .await
         .map_err(|e| format!("bind: {e}"))?;
+    state.set_listening(bound.local_addr());
     let url = format!("{}://{}", bound.scheme(), bound.local_addr());
     let (tx, rx) = oneshot::channel::<()>();
     let task = tokio::spawn(bound.run(async {

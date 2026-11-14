@@ -47,6 +47,8 @@ pub fn finish(routes: Router<AppState>, state: AppState) -> Router {
             app = app.merge(r);
         }
     }
+    // The admin web UI sends its actions to the API router built so far.
+    let app = app.clone().merge(crate::admin::routes(state.clone(), app));
     app.fallback(fallback)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(limit))

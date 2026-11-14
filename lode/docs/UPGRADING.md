@@ -99,3 +99,9 @@ First release.
   (see the user guide, "Keeping content in S3"). With S3 storage, `loded backup` and
   scheduled backups copy only the database and `loded.toml`; use the bucket's versioning or
   replication for the content.
+- New admin web UI at `/admin/` (M14), on by default for server administrators. Its new
+  `[admin_ui]` table has one key, `enabled`; set it to `false` if nobody will use the pages.
+  Serve it only over HTTPS. The database gains `maintenance_run` (core schema 5), which
+  records the last garbage collection and check per depot, added on the first start.
+  `GET /admin/acl/check` (`lode admin acl check --json`) gains the optional fields
+  `depot_admin`, `matched` and `decided_by`; older clients ignore them.

@@ -45,6 +45,9 @@
   .toc > ol > li { font-weight: 600; margin-top: 10pt; }
   .toc ol ol { font-weight: 400; padding-left: 14pt; margin-top: 3pt; columns: 2; column-gap: 18pt; }
   .toc a { color: inherit; text-decoration: none; }
+  figure { margin: 4pt 0 12pt; break-inside: avoid; }
+  figure img { display: block; max-width: 100%; max-height: 150mm; border: 1px solid var(--rule); border-radius: 3pt; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 3pt; }
 </style>
 </head>
 <body>
@@ -55,7 +58,7 @@
   <p class="meta">
     Version 0.1 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes Lode 0.1 with the integration release (webhooks, checks).
+    Describes Lode 0.1 with the integration release (webhooks, checks) and the admin web UI.
   </p>
 </section>
 
@@ -79,7 +82,7 @@
         <li>TLS</li><li>Running as a service</li><li>Depots</li>
         <li>Users, groups and tokens</li><li>Permissions</li><li>Agents</li>
         <li>Lock rules</li><li>Modules</li><li>The MCP endpoint</li>
-        <li>Backup and restore</li><li>Maintenance</li><li>Upgrading</li>
+        <li>Backup and restore</li><li>Maintenance</li><li>The admin web UI</li><li>Upgrading</li>
         <li>Security checklist</li><li>Troubleshooting</li>
       </ol></li>
   </ol>
@@ -927,7 +930,32 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 <h3>Logs</h3>
 <p>The server writes its log to standard error (the journal under systemd, <code>docker logs</code> in a container). Each request has an id, also returned to the client, which you can use to find the matching log line when a user reports an error. Tokens, passwords and file content are never logged.</p>
 
-<h1>15. Upgrading</h1>
+<h1>15. The admin web UI</h1>
+<p>The server has web pages for administrators at <code>/admin/</code>, for example <code>https://lode.example.com/admin/</code>. They show how the server is doing and do the everyday administration that the <code>lode admin</code> commands do: depots, maintenance, people, tokens, access rules and webhooks. Every page works without JavaScript and at phone width, and follows the system's light or dark setting.</p>
+<figure><img src="admin-guide/overview-light.png" alt="The overview page: server facts, counts, backups, maintenance per depot and recent commits"><figcaption>The overview refreshes itself every 30 seconds while it is open.</figcaption></figure>
+<h3>Signing in</h3>
+<p>Only server administrators get in: <code>admin</code>, and anyone with an access rule that allows <code>admin</code> on every depot. Sign in with a name and password, or with single sign-on when <code>[oidc]</code> is configured. A session lasts 8 hours, ends when you sign out, and ends at once when the account is disabled or its rights are taken away.</p>
+<p>A session is an ordinary token named <code>web admin</code>, listed with the account's other tokens and revocable like them. Its cookie cannot be read by scripts, is sent only to <code>/admin/</code> on this server, and is sent only over HTTPS when the server itself speaks TLS. Every form carries a token tied to the session, so another site cannot submit forms on your behalf.</p>
+<div class="warn">Use the pages over HTTPS only. Behind a TLS proxy, make sure the proxy passes <code>/admin/</code> through; served over plain HTTP, passwords and the session cookie cross the network readable.</div>
+<h3>What the pages do</h3>
+<table>
+  <tr><th style="width:18%">Page</th><th>Shows and does</th></tr>
+  <tr><td>Overview</td><td>Version, uptime, listen address, TLS and certificate expiry, storage and database size, modules; counts of depots, users, agents and tokens; the last and next backup; the last garbage collection and check per depot; recent commits.</td></tr>
+  <tr><td>Depots</td><td>Every depot with its size and newest revision; create a depot. A depot's page lists branches, recent revisions and locks (with Break), runs garbage collection (dry run first) and checks, and obliterates content (dry run first, listing every use).</td></tr>
+  <tr><td>People</td><td>Users, agents and groups; add them, disable or enable, set a password, link a single sign-on identity, add or remove group members. A person's page lists their tokens, creates one (shown once, with a Copy button) and revokes them.</td></tr>
+  <tr><td>Access</td><td>The rules in the order they are read; add and remove rules; check what someone gets on a path, with the rule that decided it highlighted.</td></tr>
+  <tr><td>Webhooks</td><td>Only with the <code>webhooks</code> module on. Every depot's hooks; add one (the secret is shown once), send a test, remove; a hook's page lists recent deliveries and their answers.</td></tr>
+  <tr><td>Settings</td><td>The configuration the server runs with, defaults included, with secrets shown as <code>***</code>. To change a setting, edit <code>loded.toml</code> and restart.</td></tr>
+</table>
+<figure><img src="admin-guide/depot-light.png" alt="A depot's page with branches, revisions, locks, maintenance and obliterate"><figcaption>A depot. Garbage collection and obliterate always start with a dry run; the report holds the button that does the work.</figcaption></figure>
+<figure><img src="admin-guide/access-check-light.png" alt="The access page with a check result and the deciding rule highlighted"><figcaption>Checking access: the rule that decided is highlighted, and other rules that apply are shaded.</figcaption></figure>
+<p>The pages act through the same API as <code>lode admin</code>, so the same checks and error messages apply, and every change is recorded the same way.</p>
+<h3>Turning it off</h3>
+<p>When nobody uses the pages, turn them off; <code>/admin/</code> then answers 404 like any unknown address:</p>
+<pre><code>[admin_ui]
+enabled = false</code></pre>
+
+<h1>16. Upgrading</h1>
 <ol>
   <li>Take a backup (<code>loded backup</code>).</li>
   <li>Stop the server (<code>loded service stop</code>), replace the <code>loded</code> executable, start it (<code>loded service start</code>). The database is upgraded automatically on start.</li>
@@ -935,7 +963,7 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 </ol>
 <p>Clients and servers of the same major version work together. Upgrade the server first, then clients. <code>docs/UPGRADING.md</code> in the source tree has the details and what changed between releases.</p>
 
-<h1>16. Security checklist</h1>
+<h1>17. Security checklist</h1>
 <ul>
   <li>Serve only over TLS, either built in or through a reverse proxy (chapter 4).</li>
   <li>Keep the admin token in a password manager. Create a personal administrator account for daily use and keep <code>admin</code> for emergencies.</li>
@@ -946,9 +974,11 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
   <li>Disable accounts promptly when people leave; this also disables their agents.</li>
   <li>Back up daily, keep copies off the server, and rehearse a restore.</li>
   <li>Keep the data directory readable only by the server's account.</li>
+  <li>Open the admin web UI only over HTTPS, and turn it off (<code>[admin_ui] enabled = false</code>) if nobody uses it (chapter 15).</li>
+  <li>Sign out of the admin web UI on shared computers; revoke a lost session's <code>web admin</code> token from the account's page.</li>
 </ul>
 
-<h1>17. Troubleshooting</h1>
+<h1>18. Troubleshooting</h1>
 <table>
   <tr><th style="width:34%">Symptom</th><th>Likely cause and remedy</th></tr>
   <tr><td>Server will not start: "is not initialized (no meta.db)"</td><td>Wrong <code>data_dir</code>, or <code>loded init</code> was never run there.</td></tr>
@@ -960,6 +990,9 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
   <tr><td>A file stays locked</td><td>The holder has not committed. Ask them, or release it with <code>lode unlock --force</code>.</td></tr>
   <tr><td>Disk filling up</td><td>Run garbage collection. If history itself is the cause, add disk; version 1 cannot remove history.</td></tr>
   <tr><td>Uploads fail after a minute without progress</td><td>The request body stalled for <code>body_idle_seconds</code>. Check the network or the proxy; raise the limit for very slow links.</td></tr>
+  <tr><td><code>/admin/</code> answers "Not found"</td><td>The admin web UI is turned off: <code>[admin_ui] enabled = false</code>.</td></tr>
+  <tr><td>Admin sign-in says the account is not a server administrator</td><td>Only <code>admin</code> and accounts allowed <code>admin</code> on every depot get in. Add that rule, or sign in as <code>admin</code>.</td></tr>
+  <tr><td>An admin page says the form has expired</td><td>The session ended or the page came from an older session. Reload the page and submit again.</td></tr>
   <tr><td>Lost admin token</td><td>Stop the server and run <code>loded reset-admin --config /var/lib/lode/loded.toml</code> on the server machine to issue a new one.</td></tr>
 </table>
 

@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod acme;
+pub mod admin;
 pub mod auth;
 pub mod blobs;
 pub mod branches;
@@ -31,9 +32,9 @@ pub mod tls;
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
-    AcmeConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, Limits, ModulesConfig,
-    OidcConfig, PasswordLogin, S3Settings, ServerConfig, StorageConfig, StorageKind, TlsConfig,
-    WebhooksConfig,
+    AcmeConfig, AdminUiConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, Limits,
+    ModulesConfig, OidcConfig, PasswordLogin, S3Settings, ServerConfig, StorageConfig, StorageKind,
+    TlsConfig, WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};
@@ -43,4 +44,4 @@ pub use server::{
     init, open_blob_store, open_state, reset_admin, set_admin_password, shutdown_signal,
     BoundServer, ClientInfo, InitReport, ServerError,
 };
-pub use state::AppState;
+pub use state::{AppState, BackupRun};

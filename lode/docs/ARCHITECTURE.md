@@ -199,6 +199,8 @@ outbox     (id INTEGER PK AUTOINCREMENT, depot_id, kind TEXT, payload TEXT /*jso
 outbox_cursor (subscriber TEXT PK, last_id INT)
 counter    (name TEXT PK, value INT)   -- 'access_epoch' (§6), raised with every acl or grp_member change
 obliterated (depot_id, id BLOB, size, path, reason, by_id, at, PRIMARY KEY (depot_id, id))  -- §11
+maintenance_run (depot_id, kind TEXT /*gc|fsck|fsck-full*/, at, objects_checked, objects_affected,
+            bytes_affected, problems, PRIMARY KEY (depot_id, kind))   -- §11, schema 5
 ```
 
 `rev_change` is the per-path history index (drives `log <path>`, `blame`, rename following).
@@ -308,7 +310,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/tree?rev=&path=` | List one directory |
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision of a text file: `{path, rev, id, lines: [{rev, text}], revisions: [{rev, branch, author, created_at, summary}], truncated?}`. Walks `rev_change` for the path along the branch chain and through `copy_from`, diffing successive versions line by line (Myers, 2 s per pair before settling for a less minimal diff). At most 1000 versions and 1 MiB per version; history the caller cannot read ends the walk. Either sets `truncated`, and the oldest version looked at takes the remaining lines. Binary or symlink is `invalid_request`, over 1 MiB `too_large`. Results are cached in memory (64 entries) by depot, path and the revision of the newest version, which fixes the history walked; walks cut short by access are not cached |
-| `GET /admin/acl/check?principal=&depot=&branch=&path=` | The level the rules give a principal there, `{principal, depot, branch, path, level: read|write|admin|null}`, evaluated as for a token with every scope. Server admin only |
+| `GET /admin/acl/check?principal=&depot=&branch=&path=` | The level the rules give a principal there, `{principal, depot, branch, path, level: read|write|admin|null, depot_admin?, matched?, decided_by?}`, evaluated as for a token with every scope; `matched` are the ids of the rules that apply and `decided_by` the one that set the level (T142). Server admin only |
 | `…/admin/principals[/{name}]` (`GET`/`POST` with optional `sso`; `PATCH` `{disabled?, password?, sso?}`, an empty `sso` removes the link), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
@@ -337,6 +339,40 @@ Modules may define further codes for their own rejections; the checks module add
 `checks_required` 409.
 
 Limits (configurable): request JSON 64 MiB, single blob 64 GiB, changes per commit 500,000.
+
+### 6.1 Admin web UI (M14)
+
+`lode-server/src/admin/` serves HTML pages for server administrators under `/admin/`, merged
+into the same router after the API and module routes; `[admin_ui] enabled = false` leaves
+them out, so `/admin/…` falls through to the API's 404.
+
+- **Rendering.** Pages are built in Rust with the `html!` macro (`admin/html.rs`): a format
+  string whose every argument is escaped unless it is already `Html`. No template crate and
+  no client-side build. One stylesheet and one small script are compiled in and served from
+  `/admin/static/`; every admin response carries a content security policy with no inline
+  script or style, `X-Frame-Options: DENY`, `nosniff` and `Cache-Control: no-store`. Pages
+  work without the script, which adds confirmations, copy buttons and live refresh (it
+  fetches the page and swaps `<main>`).
+- **Actions.** A page acts by sending an ordinary API request, with the session's token, to
+  the API router in process (`tower::ServiceExt::oneshot`, `admin/api.rs`), so permissions,
+  validation, events and errors are the API's. The overview also reads what has no API:
+  uptime, the bound address, database and storage sizes (cached 10 minutes), the last
+  scheduled backup (kept in memory) and `maintenance_run` (written by every GC and fsck).
+- **Sessions.** Signing in (password through the API's own check and rate limit, or single
+  sign-on with a `Back::Admin` flow whose result is a one-time code redeemed only by
+  `/admin/sign-in/sso-done`) creates a token named `web admin` with every registered scope
+  and an 8-hour expiry. The cookie `lode_admin` holds that token: `HttpOnly`,
+  `SameSite=Strict`, `Path=/admin`, `Secure` when `[tls]` is set. Each request resolves it
+  like a bearer token and requires server-admin standing, so disabling the user, revoking
+  the token or removing the rule ends the session. Sign-out deletes the token.
+- **CSRF.** Every signed-in form carries `csrf`, the first 16 bytes of
+  SHA-256(`"lode admin csrf\n"` + token) in hex, compared in constant time before the handler
+  runs. The sign-in form uses a double-submit value in a short-lived `lode_admin_signin`
+  cookie, which is also the PKCE verifier of an admin single sign-on.
+- **Tests.** `lode-testkit/tests/admin_ui.rs` drives a real server with
+  `lode_testkit::web::Browser` (cookies, no redirect following, `submit` sends a form as it
+  stands) and parses pages as XML. `cargo run -p lode-testkit --example admin_demo` starts a
+  server with sample data; `docs/admin-guide/shoot.mjs` takes the guide's screenshots.
 
 ## 7. Security
 

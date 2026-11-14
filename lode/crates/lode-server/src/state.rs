@@ -44,6 +44,18 @@ struct Inner {
     obliterated: Mutex<HashMap<DepotId, Arc<HashSet<ObjectId>>>>,
     failpoints: Arc<Failpoints>,
     sso: Option<Sso>,
+    started_at: i64,
+    last_backup: Mutex<Option<BackupRun>>,
+    listening: std::sync::OnceLock<std::net::SocketAddr>,
+}
+
+/// The outcome of the last scheduled backup this server made (T140).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupRun {
+    /// When it finished, in milliseconds.
+    pub at: i64,
+    /// The bytes it copied, or why it failed.
+    pub outcome: Result<u64, String>,
 }
 
 /// Serializes commits to one branch.
@@ -69,6 +81,7 @@ impl AppState {
             scopes.extend_defs(m.scopes());
         }
         let module_names = modules.iter().map(|m| m.name().to_owned()).collect();
+        let started_at = crate::clock::Clock::now_ms(&*clock);
         let state = Self {
             inner: Arc::new(Inner {
                 meta,
@@ -91,6 +104,9 @@ impl AppState {
                 gc_running: tokio::sync::Mutex::new(()),
                 obliterated: Mutex::new(HashMap::new()),
                 failpoints: Arc::default(),
+                started_at,
+                last_backup: Mutex::new(None),
+                listening: std::sync::OnceLock::new(),
             }),
         };
         let mut tools = ToolRegistry::default();
@@ -256,6 +272,44 @@ impl AppState {
         if let Ok(mut map) = self.inner.obliterated.lock() {
             map.remove(&depot);
         }
+    }
+
+    /// When this state was built, which is when the server started, in milliseconds.
+    pub fn started_at(&self) -> i64 {
+        self.inner.started_at
+    }
+
+    /// Records the address the server is bound to, once it is (the configured one can have
+    /// port 0).
+    pub fn set_listening(&self, addr: std::net::SocketAddr) {
+        let _ = self.inner.listening.set(addr);
+    }
+
+    /// The address the server listens on: the bound one when known, else the configured one.
+    pub fn listening(&self) -> std::net::SocketAddr {
+        self.inner
+            .listening
+            .get()
+            .copied()
+            .unwrap_or(self.inner.config.listen)
+    }
+
+    /// The last scheduled backup since the server started.
+    pub fn last_backup(&self) -> Option<BackupRun> {
+        self.inner
+            .last_backup
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
+    /// Records a scheduled backup's outcome.
+    pub fn record_backup(&self, run: BackupRun) {
+        *self
+            .inner
+            .last_backup
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(run);
     }
 
     /// Failpoints tests can arm (see [`crate::failpoint`]).

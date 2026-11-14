@@ -145,8 +145,21 @@ impl Mark {
     }
 }
 
-/// Collects garbage in `depot`. One collection runs at a time per server.
+/// Collects garbage in `depot`. One collection runs at a time per server. A collection that
+/// is not a dry run is recorded as the depot's last one.
 pub async fn collect_garbage(
+    state: &AppState,
+    depot: DepotId,
+    opts: GcOptions,
+) -> ApiResult<MaintenanceReport> {
+    let report = collect(state, depot, opts).await?;
+    if !opts.dry_run {
+        super::record_run(state, depot, "gc", &report).await;
+    }
+    Ok(report)
+}
+
+async fn collect(
     state: &AppState,
     depot: DepotId,
     opts: GcOptions,

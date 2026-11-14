@@ -7,6 +7,10 @@
 //! the server trades the code for an ID token, checks it, finds the Lode user and sends the
 //! browser to the client's loopback address with a one-time code. The client trades that code
 //! and its PKCE verifier for an ordinary Lode token at `POST /auth/sso/token`.
+//!
+//! The admin web UI (T140) signs in the same way, with itself in the client's place: its
+//! sign-in cookie is the PKCE verifier, and the provider's answer leads back to
+//! `/admin/sign-in/sso-done` instead of a loopback address.
 
 mod jwt;
 mod provider;
@@ -61,10 +65,23 @@ impl std::fmt::Debug for Sso {
     }
 }
 
+/// Where a sign-in goes back to once the provider answers.
+enum Back {
+    /// A Lode program's loopback address, with the program's state.
+    Client {
+        redirect: reqwest::Url,
+        state: String,
+    },
+    /// The admin web UI.
+    Admin,
+}
+
+/// Where the admin web UI finishes a single sign-on.
+pub(crate) const ADMIN_SSO_DONE: &str = "/admin/sign-in/sso-done";
+
 /// A sign-in sent to the provider, keyed by the server's state.
 struct Pending {
-    client_redirect: reqwest::Url,
-    client_state: String,
+    back: Back,
     client_challenge: String,
     token_name: Option<String>,
     nonce: String,
@@ -76,6 +93,7 @@ struct Pending {
 /// A one-time code handed to a client, keyed by the code.
 struct Issued {
     principal: PrincipalId,
+    admin: bool,
     client_challenge: String,
     token_name: Option<String>,
     expires: i64,
@@ -199,14 +217,20 @@ fn back_to_client(url: &reqwest::Url, pairs: &[(&str, &str)]) -> Response {
 }
 
 fn refuse(p: &Pending, message: &str) -> Response {
-    back_to_client(
-        &p.client_redirect,
-        &[
-            ("error", "access_denied"),
-            ("error_description", message),
-            ("state", &p.client_state),
-        ],
-    )
+    match &p.back {
+        Back::Client { redirect, state } => back_to_client(
+            redirect,
+            &[
+                ("error", "access_denied"),
+                ("error_description", message),
+                ("state", state),
+            ],
+        ),
+        Back::Admin => page(
+            StatusCode::FORBIDDEN,
+            &format!("The sign-in was refused: {message}. Start again from the admin page."),
+        ),
+    }
 }
 
 /// The client's redirect address: `http` to a loopback host with a port.
@@ -304,22 +328,74 @@ async fn start(
     if token_name.as_ref().is_some_and(|n| n.len() > MAX_LABEL_LEN) {
         return bad("token name is too long");
     }
-    let Some(callback) = callback_url(&state, &sso.cfg, &headers) else {
-        return bad("the server cannot tell its own address; set [oidc] public_url");
+    let back = Back::Client {
+        redirect: redirect.clone(),
+        state: q.state.clone(),
+    };
+    match to_provider(&state, sso, &headers, back, q.code_challenge, token_name).await {
+        Ok(r) => r,
+        Err(message) => bad(&message),
+    }
+}
+
+/// Starts a sign-in of the admin web UI: `verifier` is its sign-in cookie, which must come
+/// back with the one-time code.
+pub(crate) async fn start_admin(state: &AppState, headers: &HeaderMap, verifier: &str) -> Response {
+    let Ok(sso) = sso(state) else {
+        return page(
+            StatusCode::NOT_FOUND,
+            "Single sign-on is not set up on this server.",
+        );
+    };
+    let challenge = s256(verifier);
+    match to_provider(state, sso, headers, Back::Admin, challenge, None).await {
+        Ok(r) => r,
+        Err(message) => page(
+            StatusCode::BAD_GATEWAY,
+            &format!("Single sign-on cannot start: {message}."),
+        ),
+    }
+}
+
+/// The one-time code of an admin web UI sign-in, checked against its sign-in cookie: the
+/// user it signed in.
+pub(crate) fn finish_admin(state: &AppState, code: &str, verifier: &str) -> Option<PrincipalId> {
+    let sso = state.sso()?;
+    let issued = sso.take_code(code, state.clock().now_ms())?;
+    (issued.admin && pkce_text(verifier, 43, 128) && s256(verifier) == issued.client_challenge)
+        .then_some(issued.principal)
+}
+
+/// A fresh random text: a sign-in cookie for the admin web UI.
+pub(crate) fn random_verifier() -> String {
+    random()
+}
+
+/// Records a pending sign-in and sends the browser to the provider.
+async fn to_provider(
+    state: &AppState,
+    sso: &Sso,
+    headers: &HeaderMap,
+    back: Back,
+    client_challenge: String,
+    token_name: Option<String>,
+) -> Result<Response, String> {
+    let Some(callback) = callback_url(state, &sso.cfg, headers) else {
+        return Err("the server cannot tell its own address; set [oidc] public_url".into());
     };
     let now = state.clock().now_ms();
     let disc = match sso.provider.discovery(now).await {
         Ok(d) => d,
         Err(e) => {
             tracing::warn!(error = %e, "single sign-on: discovery failed");
-            return bad(&e.0);
+            return Err(e.0);
         }
     };
     let key = random();
     let nonce = random();
     let verifier = random();
     let Ok(mut authorize) = reqwest::Url::parse(&disc.authorization_endpoint) else {
-        return bad("the identity provider's authorization endpoint is not a URL");
+        return Err("the identity provider's authorization endpoint is not a URL".into());
     };
     authorize
         .query_pairs_mut()
@@ -334,9 +410,8 @@ async fn start(
     sso.add_pending(
         key,
         Pending {
-            client_redirect: redirect,
-            client_state: q.state,
-            client_challenge: q.code_challenge,
+            back,
+            client_challenge,
             token_name,
             nonce,
             verifier,
@@ -345,7 +420,7 @@ async fn start(
         },
         now,
     );
-    Redirect::to(authorize.as_str()).into_response()
+    Ok(Redirect::to(authorize.as_str()).into_response())
 }
 
 #[derive(Debug, Deserialize)]
@@ -401,20 +476,28 @@ async fn callback(
     match sign_in(&state, sso, &pending, &code, now).await {
         Ok(principal) => {
             let one_time = random();
+            let admin = matches!(pending.back, Back::Admin);
             sso.add_code(
                 one_time.clone(),
                 Issued {
                     principal,
+                    admin,
                     client_challenge: pending.client_challenge.clone(),
                     token_name: pending.token_name.clone(),
                     expires: now + CODE_MS,
                 },
                 now,
             );
-            back_to_client(
-                &pending.client_redirect,
-                &[("code", &one_time), ("state", &pending.client_state)],
-            )
+            match &pending.back {
+                Back::Client { redirect, state } => {
+                    back_to_client(redirect, &[("code", &one_time), ("state", state)])
+                }
+                Back::Admin => Redirect::to(&format!(
+                    "{ADMIN_SSO_DONE}?code={}",
+                    crate::admin::html::encode(&one_time)
+                ))
+                .into_response(),
+            }
         }
         Err(message) => {
             tracing::info!(reason = %message, "single sign-on refused");
@@ -609,7 +692,10 @@ async fn token(
             "this sign-in code is not valid or has expired; sign in again",
         )
     };
-    let issued = sso.take_code(&req.code, now).ok_or_else(invalid)?;
+    let issued = sso
+        .take_code(&req.code, now)
+        .filter(|i| !i.admin)
+        .ok_or_else(invalid)?;
     if !pkce_text(&req.code_verifier, 43, 128)
         || s256(&req.code_verifier) != issued.client_challenge
     {

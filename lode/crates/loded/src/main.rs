@@ -274,8 +274,9 @@ pub(crate) async fn serve(
             stop.clone(),
         )));
     }
-    let router = lode_server::router(state);
+    let router = lode_server::router(state.clone());
     let server = BoundServer::bind(&cfg, router).await?;
+    state.set_listening(server.local_addr());
     // Tests and wrapper scripts read this line to find the port.
     println!(
         "loded listening on {}://{}",

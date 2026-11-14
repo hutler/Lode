@@ -464,7 +464,7 @@ may also manage that agent's tokens).
 | `acl list` | `{ "rules": [rule] }` in evaluation order |
 | `acl add <allow|deny> <read|write|admin> <subject> [--depot D] [--branch G] [--path G] [--check P B PATH]` | the rule, plus `"check"` with `--check` |
 | `acl remove <id>` | `{ "removed": id }` |
-| `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null }` |
+| `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null, "depot_admin"?, "matched"?, "decided_by"? }`: `depot_admin` (only when true) means an admin rule on the depot passes over path rules; `matched` lists the ids of the rules that apply, in order; `decided_by` is the rule that set the level, absent when none did or for the built-in `admin` |
 | `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
 | `obliterate <depot> <path[@rev]>… --reason R [--dry-run] [--yes]` | `{ "dry_run", "objects": [ { "id", "size", "uses": [ { "rev", "branch", "path" } ] } ], "bytes", "in_use"? }`; `in_use` (`[ { "branch", "path", "id" } ]`) only on a dry run, otherwise it is a `conflict` with `details.in_use` |
 | `obliterated <depot>` | `{ "obliterated": [ { "id", "size", "path", "reason", "by", "at" } ] }`, oldest first |

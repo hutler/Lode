@@ -383,6 +383,22 @@ fn retry_delay(failures: u32) -> Duration {
     RETRY_FIRST.saturating_mul(factor).min(RETRY_MAX)
 }
 
+/// When the first certificate in a PEM file expires, as Unix seconds (T140: shown on the
+/// admin overview).
+pub(crate) fn pem_expiry(pem: &[u8]) -> Option<i64> {
+    let leaf = CertificateDer::pem_slice_iter(pem).next()?.ok()?;
+    validity(&leaf).map(|(_, not_after)| not_after)
+}
+
+/// Where the certificate obtained for `config` is cached under `data_dir`.
+pub(crate) fn cached_cert_path(config: &AcmeConfig, data_dir: &Path) -> PathBuf {
+    let id = blake3::hash(config.directory.as_bytes()).to_hex();
+    data_dir
+        .join("acme")
+        .join(&id.as_str()[..16])
+        .join(format!("{}.crt.pem", config.domain))
+}
+
 /// The validity period of a DER certificate, as Unix seconds.
 fn validity(der: &[u8]) -> Option<(i64, i64)> {
     let (tag, cert, _) = tlv(der)?;

@@ -4,5 +4,5 @@
 mod eval;
 mod handlers;
 
-pub use eval::{BranchAccess, DepotAccess, Level, Permissions};
+pub use eval::{BranchAccess, DepotAccess, Explained, Level, Permissions};
 pub use handlers::routes;

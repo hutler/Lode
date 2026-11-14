@@ -217,15 +217,18 @@ async fn check(
         groups,
         via: lode_proto::commit::Via::Api,
     };
-    let level = state
-        .permissions()
-        .depot(&subject, depot_row.id)
-        .level(&branch, &path);
+    let access = state.permissions().depot(&subject, depot_row.id);
+    let explained = access.explain(&branch, &path);
+    let level = access.level(&branch, &path);
+    debug_assert_eq!(level, explained.level);
     Ok(Json(AccessCheck {
         principal: name,
         depot,
         branch,
         path,
+        depot_admin: explained.depot_admin,
+        matched: explained.matched,
+        decided_by: explained.decided_by,
         level: match level {
             Level::None => None,
             Level::Read => Some(AccessLevel::Read),

@@ -166,6 +166,17 @@ pub struct AccessCheck {
     pub path: lode_core::DepotPath,
     /// The level granted; `None` when the path is invisible.
     pub level: Option<AccessLevel>,
+    /// The principal administers the depot, which passes over path rules.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub depot_admin: bool,
+    /// The ids of the rules that apply to this path, in evaluation order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matched: Vec<i64>,
+    /// The rule that decided the level: the deny that capped it, or the allow that granted
+    /// it (for a depot administrator, the rule that made them one). Absent when no rule
+    /// grants anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decided_by: Option<i64>,
 }
 
 /// One thing to obliterate: every version of `path` (or of every file under it) on every

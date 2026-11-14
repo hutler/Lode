@@ -352,6 +352,25 @@ pub struct ObliteratedRow {
     pub at: Millis,
 }
 
+/// The last garbage collection or consistency check of a depot (T140).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaintenanceRunRow {
+    /// Depot.
+    pub depot_id: DepotId,
+    /// `gc`, `fsck` or `fsck-full`.
+    pub kind: String,
+    /// When it finished.
+    pub at: Millis,
+    /// Objects examined.
+    pub objects_checked: u64,
+    /// Objects removed (gc) or found damaged or missing (fsck).
+    pub objects_affected: u64,
+    /// Bytes removed.
+    pub bytes_affected: u64,
+    /// Problems found.
+    pub problems: u64,
+}
+
 /// A change together with its revision and that revision's branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevChange {

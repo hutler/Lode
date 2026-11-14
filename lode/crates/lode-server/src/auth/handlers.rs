@@ -150,7 +150,7 @@ fn client_ip(info: Option<&ConnectInfo<ClientInfo>>) -> Option<IpAddr> {
 }
 
 /// Optional client address: present when the server runs with connection info.
-struct ClientAddr(Option<IpAddr>);
+pub(crate) struct ClientAddr(pub(crate) Option<IpAddr>);
 
 impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClientAddr {
     type Rejection = std::convert::Infallible;
@@ -166,7 +166,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClientAddr {
 }
 
 /// Creates and stores a token, returning its secret once.
-pub(super) async fn issue_token(
+pub(crate) async fn issue_token(
     state: &AppState,
     principal: PrincipalId,
     name: String,
@@ -200,54 +200,7 @@ async fn login(
     ClientAddr(addr): ClientAddr,
     ApiJson(req): ApiJson<LoginRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
-    let now = state.clock().now_ms();
-    let limiter = state.login_limiter();
-    if let Some(ms) = limiter.locked_for(&req.name, addr, now) {
-        return Err(ApiError::new(
-            ErrorCode::Unauthenticated,
-            "too many failed sign-in attempts; try again later",
-        )
-        .with_details(serde_json::json!({ "retry_after_seconds": (ms + 999) / 1000 })));
-    }
-    let name = req.name.clone();
-    let principal = state
-        .meta()
-        .read(move |tx| tx.principal_by_name(&name))
-        .await?;
-    // Agents and disabled accounts cannot sign in with a password; they still pay for one
-    // hash so the answer does not reveal which case applied.
-    let stored = principal
-        .as_ref()
-        .filter(|p| p.kind == PrincipalKind::User && !p.disabled)
-        .and_then(|p| p.password_hash.clone());
-    let password = req.password;
-    let ok = tokio::task::spawn_blocking(move || verify_password(&password, stored.as_deref()))
-        .await
-        .map_err(|_| ApiError::internal())?;
-    let principal = match (ok, principal) {
-        (true, Some(p)) => p,
-        _ => {
-            limiter.record_failure(&req.name, addr, now);
-            return Err(ApiError::new(
-                ErrorCode::Unauthenticated,
-                "wrong name or password",
-            ));
-        }
-    };
-    limiter.record_success(&req.name);
-    if state
-        .config()
-        .oidc
-        .as_ref()
-        .is_some_and(|o| o.password_login == PasswordLogin::Admins)
-        && !would_be_server_admin(&state, &principal).await?
-    {
-        return Err(ApiError::new(
-            ErrorCode::Unauthenticated,
-            "password sign-in is turned off on this server except for server administrators; \
-             sign in with single sign-on (lode login URL --sso)",
-        ));
-    }
+    let principal = check_password_sign_in(&state, addr, &req.name, req.password).await?;
     let label = req
         .token_name
         .filter(|n| !n.trim().is_empty())
@@ -263,8 +216,70 @@ async fn login(
     }))
 }
 
+/// Checks a sign-in with a name and password: the failed-attempt limit, the password, and
+/// `[oidc] password_login`. `POST /auth/login` and the admin web UI both sign in through
+/// this.
+pub(crate) async fn check_password_sign_in(
+    state: &AppState,
+    addr: Option<IpAddr>,
+    name: &str,
+    password: String,
+) -> ApiResult<PrincipalRow> {
+    let now = state.clock().now_ms();
+    let limiter = state.login_limiter();
+    if let Some(ms) = limiter.locked_for(name, addr, now) {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "too many failed sign-in attempts; try again later",
+        )
+        .with_details(serde_json::json!({ "retry_after_seconds": (ms + 999) / 1000 })));
+    }
+    let lookup = name.to_owned();
+    let principal = state
+        .meta()
+        .read(move |tx| tx.principal_by_name(&lookup))
+        .await?;
+    // Agents and disabled accounts cannot sign in with a password; they still pay for one
+    // hash so the answer does not reveal which case applied.
+    let stored = principal
+        .as_ref()
+        .filter(|p| p.kind == PrincipalKind::User && !p.disabled)
+        .and_then(|p| p.password_hash.clone());
+    let ok = tokio::task::spawn_blocking(move || verify_password(&password, stored.as_deref()))
+        .await
+        .map_err(|_| ApiError::internal())?;
+    let principal = match (ok, principal) {
+        (true, Some(p)) => p,
+        _ => {
+            limiter.record_failure(name, addr, now);
+            return Err(ApiError::new(
+                ErrorCode::Unauthenticated,
+                "wrong name or password",
+            ));
+        }
+    };
+    limiter.record_success(name);
+    if state
+        .config()
+        .oidc
+        .as_ref()
+        .is_some_and(|o| o.password_login == PasswordLogin::Admins)
+        && !would_be_server_admin(state, &principal).await?
+    {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "password sign-in is turned off on this server except for server administrators; \
+             sign in with single sign-on (lode login URL --sso)",
+        ));
+    }
+    Ok(principal)
+}
+
 /// Whether `principal`, signed in with every scope, would be a server administrator.
-async fn would_be_server_admin(state: &AppState, principal: &PrincipalRow) -> ApiResult<bool> {
+pub(crate) async fn would_be_server_admin(
+    state: &AppState,
+    principal: &PrincipalRow,
+) -> ApiResult<bool> {
     let id = principal.id;
     let groups = state.meta().read(move |tx| tx.groups_of(id)).await?;
     let caller = Caller {

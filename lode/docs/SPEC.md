@@ -180,6 +180,24 @@ caches on people's computers, and webhook payloads already sent.
   `GET /info` names single sign-on.
 - Not in 0.2: SAML, group sync from the provider, SCIM.
 
+### 5.10 Admin web UI (0.2)
+
+- `loded` serves web pages for server administrators at `/admin/` on its own listener and
+  TLS; nothing else to install. `[admin_ui] enabled = false` turns them off (404).
+- Sign-in with a password or single sign-on; only server administrators get in. A session
+  lasts 8 hours and is an ordinary `web admin` token, so revoking it, disabling the user or
+  removing their admin rule ends it. Every form is protected against cross-site requests.
+- Pages: an overview of the server's health (version, uptime, TLS and certificate expiry,
+  storage and database size, counts, backups, last maintenance per depot, recent commits);
+  depots with branches, revisions, locks, garbage collection, checks and obliterate (dry run
+  first); users, agents, groups and tokens (a new token's value shown once); access rules
+  with a check that names the deciding rule; webhooks and their deliveries (with the
+  module); the effective settings with secrets hidden.
+- Every action goes through the API, so permissions, validation and errors match
+  `lode admin`. Pages work without JavaScript, follow the system light or dark theme, and
+  fit a phone.
+- Not in 0.2: browsing file contents, a web UI for people who are not administrators.
+
 ## 6. Default modules
 
 ### 6.1 Locks

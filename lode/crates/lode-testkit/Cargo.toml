@@ -24,6 +24,7 @@ lode-mod-webhooks.workspace = true
 lode-mod-shelves.workspace = true
 lode-proto.workspace = true
 lode-server.workspace = true
+quick-xml.workspace = true
 reqwest.workspace = true
 ring.workspace = true
 serde_json.workspace = true
@@ -33,4 +34,5 @@ tokio.workspace = true
 
 [dev-dependencies]
 futures.workspace = true
+rcgen.workspace = true
 zstd.workspace = true

@@ -170,8 +170,19 @@ impl Fsck<'_> {
 }
 
 /// Checks `depot`. Problems are listed in the report; an empty list means the depot is
-/// consistent.
+/// consistent. The check is recorded as the depot's last one.
 pub async fn fsck(
+    state: &AppState,
+    depot: DepotId,
+    opts: FsckOptions,
+) -> ApiResult<MaintenanceReport> {
+    let report = check(state, depot, opts).await?;
+    let kind = if opts.full { "fsck-full" } else { "fsck" };
+    super::record_run(state, depot, kind, &report).await;
+    Ok(report)
+}
+
+async fn check(
     state: &AppState,
     depot: DepotId,
     opts: FsckOptions,

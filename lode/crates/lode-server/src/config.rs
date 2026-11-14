@@ -105,6 +105,12 @@ grace_seconds = 86400
 # access_key_id = "AKIA..."             # with the secret's file; leave both out to use
 # secret_access_key_file = "s3-secret.txt"   # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
 
+# The admin web UI at <server>/admin/ for server administrators: depots, maintenance, people,
+# access rules and settings in a browser. Put the server behind TLS before using it from
+# another machine; turn it off if nobody uses it.
+[admin_ui]
+enabled = true
+
 # Webhooks module, when enabled in [modules].
 [webhooks]
 # Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
@@ -169,6 +175,23 @@ pub struct ServerConfig {
     /// Where object content is kept.
     #[serde(default)]
     pub storage: StorageConfig,
+    /// The admin web UI.
+    #[serde(default)]
+    pub admin_ui: AdminUiConfig,
+}
+
+/// The `[admin_ui]` table (T140).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct AdminUiConfig {
+    /// Serve the admin web UI at `/admin/`. On by default; off answers 404 there.
+    pub enabled: bool,
+}
+
+impl Default for AdminUiConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 /// The `[storage]` table: where object content is kept (T123).
@@ -715,6 +738,17 @@ impl TryFrom<RawBackup> for BackupConfig {
     }
 }
 
+/// An interval as `[backup] every` takes it: `7d`, `24h`, `30m` or `90s`.
+fn interval_text(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    match secs {
+        s if s > 0 && s % 86_400 == 0 => format!("{}d", s / 86_400),
+        s if s > 0 && s % 3600 == 0 => format!("{}h", s / 3600),
+        s if s > 0 && s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
 /// `"90s"`, `"30m"`, `"24h"` or `"7d"`; at least one minute.
 pub fn parse_interval(text: &str) -> Result<std::time::Duration, String> {
     let bad = || format!("{text:?} is not an interval such as \"24h\" (s, m, h or d)");
@@ -1004,6 +1038,146 @@ impl ServerConfig {
         Self::parse(&text, base, path)
     }
 
+    /// The configuration as the server uses it, as `loded.toml` text: every setting with its
+    /// effective value, paths resolved, and secrets shown as `***` (T143: the admin web
+    /// UI's settings page).
+    pub fn effective_toml(&self) -> String {
+        use toml::{Table, Value};
+        fn s(v: impl Into<String>) -> Value {
+            Value::String(v.into())
+        }
+        fn p(v: &Path) -> Value {
+            Value::String(v.display().to_string())
+        }
+        fn n(v: impl TryInto<i64>) -> Value {
+            Value::Integer(v.try_into().unwrap_or(i64::MAX))
+        }
+        fn list(v: &[String]) -> Value {
+            Value::Array(v.iter().cloned().map(Value::String).collect())
+        }
+        const HIDDEN: &str = "***";
+        let mut root = Table::new();
+        root.insert("listen".into(), s(self.listen.to_string()));
+        root.insert("data_dir".into(), p(&self.data_dir));
+        match &self.tls {
+            Some(TlsConfig::Files { cert, key }) => {
+                let mut t = Table::new();
+                t.insert("cert".into(), p(cert));
+                t.insert("key".into(), p(key));
+                root.insert("tls".into(), Value::Table(t));
+            }
+            Some(TlsConfig::Acme(a)) => {
+                let mut t = Table::new();
+                t.insert("acme_domain".into(), s(&a.domain));
+                if let Some(e) = &a.email {
+                    t.insert("acme_email".into(), s(e));
+                }
+                t.insert("acme_directory".into(), s(&a.directory));
+                if let Some(ca) = &a.ca {
+                    t.insert("acme_ca".into(), p(ca));
+                }
+                root.insert("tls".into(), Value::Table(t));
+            }
+            None => {}
+        }
+        let c = &self.connections;
+        let mut t = Table::new();
+        t.insert("header_timeout_seconds".into(), n(c.header_timeout_seconds));
+        t.insert("max_per_address".into(), n(c.max_per_address));
+        root.insert("connections".into(), Value::Table(t));
+        let l = &self.limits;
+        let mut t = Table::new();
+        t.insert("max_request_json".into(), n(l.max_request_json));
+        t.insert("max_blob_size".into(), n(l.max_blob_size));
+        t.insert("max_changes_per_commit".into(), n(l.max_changes_per_commit));
+        t.insert("max_changes_listed".into(), n(l.max_changes_listed));
+        t.insert("mcp_max_edits".into(), n(l.mcp_max_edits));
+        t.insert("mcp_max_inline_bytes".into(), n(l.mcp_max_inline_bytes));
+        t.insert("body_idle_seconds".into(), n(l.body_idle_seconds));
+        root.insert("limits".into(), Value::Table(t));
+        let m = &self.modules;
+        let mut t = Table::new();
+        for (name, on) in [
+            ("locks", m.locks),
+            ("shelves", m.shelves),
+            ("mcp", m.mcp),
+            ("webhooks", m.webhooks),
+            ("checks", m.checks),
+        ] {
+            t.insert(name.into(), Value::Boolean(on));
+        }
+        root.insert("modules".into(), Value::Table(t));
+        let mut t = Table::new();
+        t.insert("grace_seconds".into(), n(self.gc.grace_seconds));
+        root.insert("gc".into(), Value::Table(t));
+        let mut t = Table::new();
+        if let Some(every) = self.backup.every {
+            t.insert("every".into(), s(interval_text(every)));
+        }
+        t.insert("keep".into(), n(self.backup.keep));
+        t.insert("dir".into(), p(&self.backup.dir));
+        root.insert("backup".into(), Value::Table(t));
+        if let Some(o) = &self.oidc {
+            let mut t = Table::new();
+            t.insert("issuer".into(), s(&o.issuer));
+            t.insert("client_id".into(), s(&o.client_id));
+            if o.client_secret.is_some() {
+                t.insert("client_secret".into(), s(HIDDEN));
+            }
+            if let Some(f) = &o.client_secret_file {
+                t.insert("client_secret_file".into(), p(f));
+            }
+            if let Some(u) = &o.public_url {
+                t.insert("public_url".into(), s(u));
+            }
+            t.insert("scopes".into(), list(&o.scopes));
+            t.insert("user_claim".into(), s(&o.user_claim));
+            t.insert("allowed_domains".into(), list(&o.allowed_domains));
+            t.insert("auto_create".into(), Value::Boolean(o.auto_create));
+            t.insert("label".into(), s(&o.label));
+            let login = match o.password_login {
+                PasswordLogin::Everyone => "everyone",
+                PasswordLogin::Admins => "admins",
+            };
+            t.insert("password_login".into(), s(login));
+            root.insert("oidc".into(), Value::Table(t));
+        }
+        let mut t = Table::new();
+        let kind = match self.storage.kind {
+            StorageKind::Fs => "fs",
+            StorageKind::S3 => "s3",
+        };
+        t.insert("kind".into(), s(kind));
+        if let Some(s3) = &self.storage.s3 {
+            t.insert("bucket".into(), s(&s3.bucket));
+            t.insert("prefix".into(), s(&s3.prefix));
+            if let Some(r) = &s3.region {
+                t.insert("region".into(), s(r));
+            }
+            if let Some(e) = &s3.endpoint {
+                t.insert("endpoint".into(), s(e));
+            }
+            t.insert("path_style".into(), Value::Boolean(s3.path_style));
+            if s3.access_key_id.is_some() {
+                t.insert("access_key_id".into(), s(HIDDEN));
+            }
+            if let Some(f) = &s3.secret_access_key_file {
+                t.insert("secret_access_key_file".into(), p(f));
+            }
+        }
+        root.insert("storage".into(), Value::Table(t));
+        let mut t = Table::new();
+        t.insert(
+            "allow_http".into(),
+            Value::Boolean(self.webhooks.allow_http),
+        );
+        root.insert("webhooks".into(), Value::Table(t));
+        let mut t = Table::new();
+        t.insert("enabled".into(), Value::Boolean(self.admin_ui.enabled));
+        root.insert("admin_ui".into(), Value::Table(t));
+        root.to_string()
+    }
+
     /// A configuration with defaults for everything but the data directory. For tests and
     /// embedding.
     pub fn with_data_dir(data_dir: impl Into<PathBuf>) -> Self {
@@ -1019,6 +1193,7 @@ impl ServerConfig {
             webhooks: WebhooksConfig::default(),
             oidc: None,
             storage: StorageConfig::default(),
+            admin_ui: AdminUiConfig::default(),
         }
     }
 }
@@ -1047,6 +1222,48 @@ mod tests {
         assert!(cfg.modules.locks && cfg.modules.shelves && cfg.modules.mcp);
         assert!(!cfg.modules.webhooks && !cfg.modules.checks);
         assert!(!cfg.webhooks.allow_http);
+        assert!(cfg.admin_ui.enabled);
+    }
+
+    #[test]
+    fn the_effective_settings_hide_secrets_and_parse_back() {
+        let text = "data_dir = 'd'\n[backup]\nevery = '24h'\n[oidc]\nissuer = 'https://id.example.com'\n\
+                    client_id = 'lode'\nclient_secret = 'oidc-secret-value'\n[storage]\nbucket = 'lode-content'\n\
+                    access_key_id = 'AKIAEXAMPLE'\nsecret_access_key_file = 'k.txt'\n";
+        let cfg = ServerConfig::parse(text, Path::new("/srv"), Path::new("x")).unwrap();
+        let shown = cfg.effective_toml();
+        assert!(!shown.contains("oidc-secret-value"), "{shown}");
+        assert!(!shown.contains("AKIAEXAMPLE"), "{shown}");
+        assert!(shown.contains("client_secret = \"***\""), "{shown}");
+        assert!(shown.contains("every = \"1d\""), "{shown}");
+        // Apart from the hidden values, the text is a configuration the server reads.
+        let back = ServerConfig::parse(
+            &shown.replace("\"***\"", "\"x\""),
+            Path::new("/"),
+            Path::new("x"),
+        )
+        .unwrap();
+        assert_eq!(back.backup.every, cfg.backup.every);
+        assert_eq!(back.data_dir, cfg.data_dir);
+        let plain = ServerConfig::parse(DEFAULT_CONFIG, Path::new("/srv"), Path::new("x")).unwrap();
+        ServerConfig::parse(&plain.effective_toml(), Path::new("/"), Path::new("x")).unwrap();
+    }
+
+    #[test]
+    fn the_admin_ui_can_be_turned_off() {
+        let cfg = ServerConfig::parse(
+            "data_dir = '.'\n[admin_ui]\nenabled = false",
+            Path::new("/srv"),
+            Path::new("x"),
+        )
+        .unwrap();
+        assert!(!cfg.admin_ui.enabled);
+        assert!(ServerConfig::parse(
+            "data_dir = '.'\n[admin_ui]\nport = 1",
+            Path::new("/srv"),
+            Path::new("x")
+        )
+        .is_err());
     }
 
     #[test]
