@@ -1,0 +1,126 @@
+// Updates of the app (T135): the banner that offers a new version, and the setting and
+// "Check for updates now" on Home. The checks run in src/update.rs.
+
+import { Button, Palette } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Muted, Check } from "parts.slint";
+
+/// A newer version on offer.
+export struct UpdateOffer {
+    shown: bool,
+    version: string,
+    current: string,
+    notes: string,
+    /// Downloading and checking the package.
+    busy: bool,
+    error: ErrorInfo,
+}
+
+/// The update setting and the result of the last check asked for.
+export struct UpdateSettings {
+    check: bool,
+    checking: bool,
+    result: string,
+    error: ErrorInfo,
+}
+
+export global Updates {
+    in-out property <UpdateOffer> offer;
+    in-out property <UpdateSettings> settings: { check: true };
+    in-out property <bool> notes-open;
+    callback install();
+    callback later();
+    callback set-check(bool);
+    callback check-now();
+}
+
+/// Across the top of the window while a new version is on offer.
+export component UpdateBanner inherits Rectangle {
+    background: Palette.accent-background.transparentize(0.85);
+    height: col.preferred-height;
+    accessible-role: groupbox;
+    accessible-label: "Update";
+    col := VerticalLayout {
+        padding: 10px;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: "Lode Desk " + Updates.offer.version + " is available.";
+                font-weight: 600;
+                vertical-alignment: center;
+                color: Palette.foreground;
+            }
+            Muted { text: "You have " + Updates.offer.current + "."; vertical-alignment: center; }
+            if Updates.offer.notes != "": Button {
+                text: Updates.notes-open ? "Hide what's new" : "What's new";
+                clicked => { Updates.notes-open = !Updates.notes-open; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Later"; enabled: !Updates.offer.busy; clicked => { Updates.later(); } }
+            Button {
+                text: Updates.offer.busy ? "Installing…" : "Install and restart";
+                primary: true;
+                enabled: !Updates.offer.busy;
+                clicked => { Updates.install(); }
+            }
+        }
+        if Updates.notes-open && Updates.offer.notes != "": Text {
+            text: Updates.offer.notes;
+            wrap: word-wrap;
+            color: Palette.foreground;
+            accessible-role: text;
+            accessible-label: "What's new";
+            accessible-value: self.text;
+        }
+        if Updates.offer.error.shown: ErrorBanner {
+            error: Updates.offer.error;
+            dismissable: true;
+            dismissed => {
+                Updates.offer.error.shown = false;
+            }
+        }
+    }
+}
+
+/// The setting and "Check for updates now", on Home.
+export component UpdateSettingsPanel inherits VerticalLayout {
+    spacing: 8px;
+    HorizontalLayout {
+        spacing: 8px;
+        Check {
+            y: (parent.height - self.height) / 2;
+            checked: Updates.settings.check;
+            accessible-label: "Check for updates automatically";
+            toggled => { Updates.set-check(!Updates.settings.check); }
+        }
+        Text {
+            text: "Check for updates automatically";
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+    }
+    Button {
+        text: Updates.settings.checking ? "Checking…" : "Check for updates now";
+        enabled: !Updates.settings.checking;
+        clicked => { Updates.check-now(); }
+    }
+    if Updates.settings.result != "": Muted {
+        text: Updates.settings.result;
+        wrap: word-wrap;
+        accessible-role: text;
+        accessible-label: "Update check";
+        accessible-value: self.text;
+    }
+    if Updates.settings.error.shown: ErrorBanner {
+        error: Updates.settings.error;
+        dismissable: true;
+        dismissed => {
+            Updates.settings.error.shown = false;
+        }
+    }
+}

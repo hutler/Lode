@@ -1,7 +1,7 @@
 //! The diff of one file for the Slint window (T132): the patch of `lode diff --json` turned
 //! into rows for the unified and the side-by-side layouts, with the words that differ between
 //! a removed line and the added line it pairs with marked, and the facts shown for a binary
-//! file. The same rules as the Tauri window's `ui/src/diff.ts`.
+//! file.
 
 use serde_json::Value;
 use slint::{ModelRc, SharedString, VecModel};

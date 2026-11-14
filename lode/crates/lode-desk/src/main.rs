@@ -5,10 +5,8 @@
 #![forbid(unsafe_code)]
 
 fn main() -> std::process::ExitCode {
-    #[cfg(feature = "web")]
-    let result = lode_desk::web::run().map_err(|e| e.to_string());
-    #[cfg(not(feature = "web"))]
-    let result = lode_desk::app::run();
+    let link = lode_desk::links::from_args(std::env::args().skip(1));
+    let result = lode_desk::app::run(link);
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {

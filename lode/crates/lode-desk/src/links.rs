@@ -8,8 +8,8 @@
 //!
 //! The server is `https://HOST[:PORT]`, or `http://` with `?http=1`. Path segments and the
 //! branch are percent-encoded. Parsing is strict: anything that is not exactly one of these
-//! forms is refused, and a refused link is never acted on. The window has the same rules in
-//! `ui/src/links.ts`; both are tested against `ui/src/linkCases.json`.
+//! forms is refused, and a refused link is never acted on. `tests/link_cases.json` lists the
+//! cases.
 
 use serde::{Deserialize, Serialize};
 

@@ -1,6 +1,6 @@
-//! What the app does, without Tauri: each method runs one `lode-ops` operation and returns
-//! its JSON document. The Tauri commands in `lib.rs` are thin wrappers around these, so the
-//! tests drive this type directly against a test server.
+//! What the app does, apart from its window: each method runs one `lode-ops` operation and
+//! returns its JSON document. The window in `app` calls these, and the tests drive this type
+//! directly against a test server.
 
 use std::collections::HashMap;
 use std::future::Future;

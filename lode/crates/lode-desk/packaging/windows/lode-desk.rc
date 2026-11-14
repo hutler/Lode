@@ -1,0 +1,4 @@
+// The program's icon and manifest, embedded by build.rs.
+#define RT_MANIFEST 24
+1 ICON "../../icons/icon.ico"
+1 RT_MANIFEST "lode-desk.manifest"

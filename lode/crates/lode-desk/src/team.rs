@@ -1,6 +1,5 @@
 //! Locks, shelves and checks for the Slint window (T133): the rows of the locks and shelves
-//! views, one shelf's details and diff, and the badges and lists of check results. The same
-//! rules as the Tauri window's `LocksView`, `ShelvesView`, `Checks` and `checks.ts`.
+//! views, one shelf's details and diff, and the badges and lists of check results.
 
 use serde_json::Value;
 use slint::SharedString;

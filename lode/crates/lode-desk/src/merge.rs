@@ -1,5 +1,4 @@
 //! Reading and editing a file with conflict markers, and marking what each side changed (T134).
-//! The rules of the Tauri window's `merge.ts`.
 
 use std::collections::BTreeSet;
 

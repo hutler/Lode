@@ -1,6 +1,5 @@
 //! Branches, switches, merges and the view for the Slint window (T134): the branch list's rows,
-//! revision fields, and what an update, switch or merge did. The same rules as the Tauri
-//! window's `BranchPicker`, `MergeDialog` and `ViewEditor`.
+//! revision fields, and what an update, switch or merge did.
 
 use serde_json::Value;
 use slint::SharedString;

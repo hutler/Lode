@@ -229,8 +229,9 @@ jobs:
             ./*.tar.gz ./*.zip ./*.deb ./*.rpm ./*.msi \
             ./lode-*-unknown-linux-musl ./lode-*-apple-darwin ./lode-*-pc-windows-msvc.exe SHA256SUMS
 
-  # Lode Desk: every bundle built on its own system, the Linux ones installed here, the update
-  # feed written and checked, and (for a tag) all of it attached to the release.
+  # Lode Desk: every installer built on its own system by cargo-packager, the Linux ones
+  # installed here, the update feed written and checked, and (for a tag) all of it attached to
+  # the release.
   desk:
     name: Lode Desk on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -242,15 +243,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, bundles: "deb,rpm,appimage", platform: linux-x86_64 }
-          - { os: windows-latest, bundles: "msi,nsis", platform: windows-x86_64 }
-          - { os: macos-latest, bundles: "app,dmg", platform: macos-universal, args: "--target universal-apple-darwin" }
+          - { os: ubuntu-22.04, formats: "deb,appimage", platform: linux-x86_64 }
+          - { os: windows-latest, formats: "wix,nsis", platform: windows-x86_64 }
+          - { os: macos-latest, formats: "app,dmg", platform: macos-universal }
     env:
-      # The update key: the private half is a secret, the public half a repository variable.
-      # Without them the bundles are built unsigned and the app never offers updates.
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.LODE_DESK_UPDATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.LODE_DESK_UPDATE_KEY_PASSWORD }}
-      UPDATE_PUBKEY: ${{ vars.LODE_DESK_UPDATE_PUBKEY }}
+      # The update key: the private half is a secret, the public half a repository variable
+      # that the build puts into the app. Without them the installers are not signed for
+      # updates and the app never offers one.
+      CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.LODE_DESK_UPDATE_KEY }}
+      CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.LODE_DESK_UPDATE_KEY_PASSWORD }}
+      LODE_DESK_UPDATE_PUBKEY: ${{ vars.LODE_DESK_UPDATE_PUBKEY }}
       HAS_WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
       HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
@@ -258,22 +260,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      - uses: actions/setup-node@v4
+      - uses: taiki-e/install-action@v2
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: lode/crates/lode-desk/ui/package-lock.json
-      - name: Install the system web view (Linux)
+          tool: cargo-packager@0.11.8
+      - name: System libraries (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libsoup-3.0-dev rpm
-      - run: npm ci
-        working-directory: lode/crates/lode-desk/ui
-      - name: Feed script tests
-        if: runner.os == 'Linux'
-        run: node --test packaging/feed.test.mjs
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+      - name: Version and update key
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#lode-v}"
+          else
+            version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          # The package's own version (the first `version =`), and its entry in the lock file.
+          perl -0pi -e 's/^version = "[^"]*"/version = "'"$version"'"/m' Cargo.toml
+          perl -0pi -e 's/(name = "lode-desk"\nversion = )"[^"]*"/$1"'"$version"'"/' Cargo.lock
+          if [ -n "$CARGO_PACKAGER_SIGN_PRIVATE_KEY" ]; then
+            if [ -z "$LODE_DESK_UPDATE_PUBKEY" ]; then
+              echo "::error::LODE_DESK_UPDATE_KEY is set but the LODE_DESK_UPDATE_PUBKEY variable is not"
+              exit 1
+            fi
+          else
+            echo "::warning::No update key: the installers are not signed for updates and never offer one"
+            echo "LODE_DESK_UPDATE_PUBKEY=" >> "$GITHUB_ENV"
+          fi
       # Code signing is wired but off until the project has certificates: each part runs only
       # when its secrets are set.
       - name: Windows code signing certificate
@@ -287,64 +301,59 @@ jobs:
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
-          "WINDOWS_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "`n[package.metadata.packager.windows]`ncertificate-thumbprint = `"$($cert.Thumbprint)`"`ntimestamp-url = `"http://timestamp.digicert.com`"" | Add-Content Cargo.toml
       - name: macOS code signing and notarization
         if: runner.os == 'macOS' && env.HAS_APPLE_CERTIFICATE == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           {
             echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}"
             echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
-            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}"
             echo "APPLE_ID=${{ secrets.APPLE_ID }}"
             echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}"
             echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}"
           } >> "$GITHUB_ENV"
-      - name: Build the bundles
+          perl -0pi -e 's/(\[package\.metadata\.packager\.macos\]\n)/$1signing-identity = "$ENV{APPLE_SIGNING_IDENTITY}"\n/' Cargo.toml
+      - name: Build the app
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            version="${GITHUB_REF_NAME#lode-v}"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # One program for Intel and Apple silicon.
+            cargo build --release --locked --target aarch64-apple-darwin
+            cargo build --release --locked --target x86_64-apple-darwin
+            mkdir -p target/universal/release
+            lipo -create -output target/universal/release/lode-desk \
+              target/aarch64-apple-darwin/release/lode-desk target/x86_64-apple-darwin/release/lode-desk
+            echo "BINARIES=target/universal/release" >> "$GITHUB_ENV"
           else
-            version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+            cargo build --release --locked
+            echo "BINARIES=target/release" >> "$GITHUB_ENV"
           fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          config=$(jq -nc --arg v "$version" '{version: $v}')
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            if [ -z "$UPDATE_PUBKEY" ]; then
-              echo "::error::LODE_DESK_UPDATE_KEY is set but the LODE_DESK_UPDATE_PUBKEY variable is not"
-              exit 1
-            fi
-            config=$(jq -c --arg k "$UPDATE_PUBKEY" \
-              '.bundle.createUpdaterArtifacts = true | .plugins.updater.pubkey = $k' <<< "$config")
-          else
-            echo "::warning::No update key: the bundles are not signed for updates and never offer one"
-            unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-          fi
-          if [ -n "${WINDOWS_THUMBPRINT:-}" ]; then
-            config=$(jq -c --arg t "$WINDOWS_THUMBPRINT" '.bundle.windows.certificateThumbprint = $t' <<< "$config")
-          fi
-          ./ui/node_modules/.bin/tauri build --ci --features web --bundles ${{ matrix.bundles }} ${{ matrix.args }} --config "$config"
-      - name: Collect the bundles
+      - name: Installers
+        run: |
+          cargo packager --release --formats ${{ matrix.formats }} \
+            --binaries-dir "$BINARIES" --out-dir target/packages
+          ls -l target/packages
+      - name: Collect the installers
         run: |
           mkdir -p dist
-          out=target/release/bundle
-          [ -d target/universal-apple-darwin ] && out=target/universal-apple-darwin/release/bundle
           name="lode-desk-$VERSION-${{ matrix.platform }}"
-          take() { # take SOURCE_GLOB TARGET_NAME: copies one bundle and its signature, if any
+          take() { # take SOURCE_GLOB TARGET_NAME: copies one installer and its signature, if any
             for f in $1; do
               [ -f "$f" ] || continue
               cp "$f" "dist/$2"
               [ -f "$f.sig" ] && cp "$f.sig" "dist/$2.sig"
             done
           }
-          take "$out/appimage/*.AppImage" "$name.AppImage"
-          take "$out/deb/*.deb" "$name.deb"
-          take "$out/rpm/*.rpm" "$name.rpm"
-          take "$out/msi/*.msi" "$name.msi"
-          take "$out/nsis/*-setup.exe" "$name-setup.exe"
-          take "$out/dmg/*.dmg" "$name.dmg"
-          take "$out/macos/*.app.tar.gz" "$name.app.tar.gz"
+          out=target/packages
+          take "$out/*.AppImage" "$name.AppImage"
+          take "$out/*.deb" "$name.deb"
+          take "$out/*.msi" "$name.msi"
+          take "$out/*-setup.exe" "$name-setup.exe"
+          take "$out/*.dmg" "$name.dmg"
+          take "$out/*.app.tar.gz" "$name.app.tar.gz"
           ls -l dist
-          [ -n "$(ls dist)" ] || { echo "::error::no bundles were built"; exit 1; }
+          [ -n "$(ls dist)" ] || { echo "::error::no installers were built"; exit 1; }
       - name: Install the .deb and check it
         if: runner.os == 'Linux'
         run: |
@@ -354,14 +363,6 @@ jobs:
           bin=$(dpkg -L lode-desk | grep '/bin/' | head -n 1)
           ! ldd "$bin" | grep 'not found'
           sudo apt-get remove -y lode-desk
-      - name: Install the .rpm on Fedora and check it
-        if: runner.os == 'Linux'
-        run: |
-          docker run --rm -v "$PWD/dist:/dist" fedora:41 sh -euc '
-            dnf install -y /dist/lode-desk-*.rpm
-            grep -q "x-scheme-handler/lode" "$(rpm -ql lode-desk | grep "\.desktop$")"
-            ! ldd $(rpm -ql lode-desk | grep "/bin/" | head -n 1) | grep "not found"
-            dnf remove -y lode-desk'
       - name: Check the AppImage
         if: runner.os == 'Linux'
         run: |
@@ -369,6 +370,18 @@ jobs:
           chmod +x "$appimage"
           (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/lode/crates/lode-desk/$appimage" --appimage-extract > /dev/null)
           grep -q 'x-scheme-handler/lode' "$RUNNER_TEMP"/squashfs-root/*.desktop
+      - name: Install the MSI and check that it registers lode links
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist/*.msi).FullName
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "msiexec exited with $($p.ExitCode)" }
+          $cmd = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\lode\shell\open\command").'(default)'
+          Write-Output "lode:// opens: $cmd"
+          if ($cmd -notmatch 'lode-desk\.exe') { throw "the lode scheme is not registered" }
+          $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall exited with $($p.ExitCode)" }
       - uses: actions/upload-artifact@v4
         with:
           name: lode-desk-${{ matrix.platform }}
@@ -382,6 +395,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The feed is written by the app's own code (`examples/feed.rs`), which links the window.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
       - uses: actions/download-artifact@v4
         with:
           pattern: lode-desk-*
@@ -405,7 +424,8 @@ jobs:
           fi
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
           if ls desk/*.sig > /dev/null 2>&1; then
-            node lode/crates/lode-desk/packaging/feed.mjs desk "$version" "$base" notes.md > desk/latest.json
+            (cd lode/crates/lode-desk && cargo run --quiet --locked --example feed -- \
+              "$GITHUB_WORKSPACE/desk" "$version" "$base" "$GITHUB_WORKSPACE/notes.md") > desk/latest.json
             pipx run check-jsonschema --schemafile lode/crates/lode-desk/packaging/feed.schema.json desk/latest.json
             cat desk/latest.json
           else

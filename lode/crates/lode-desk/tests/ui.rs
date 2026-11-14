@@ -13,10 +13,12 @@ use std::time::Duration;
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
 use lode_desk::app::{
     self, AppWindow, BlameLine, BranchRow, Branching, ChangeRow, CheckRow, Dialog, DiffRow,
-    FolderRow, LockRow, Options, Pane, Reading, RevRow, ShelfRow, Span, Team,
+    FolderRow, Links, LockRow, Options, Pane, Reading, RevRow, ShelfRow, Span, Team, Updates,
 };
 use lode_desk::changes::{self, FileEntry, Pending};
 use lode_desk::desk::Desk;
+use lode_desk::links::{self, Link};
+use lode_desk::update::Updater;
 use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
 use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
@@ -125,8 +127,22 @@ impl Home {
 
     /// The window, with the folder picker answering `picked` and the browser played by the test.
     fn window(&self, world: &World, picked: Option<PathBuf>) -> AppWindow {
+        // A build without an update key: it never looks for updates.
+        let updater = Updater {
+            pubkey: String::new(),
+            feed: String::new(),
+            current: "0.1.0".into(),
+            platforms: Vec::new(),
+            settings_file: self.path().join("app/settings.json"),
+        };
+        self.window_with(world, picked, updater)
+    }
+
+    /// The window, looking for updates as `updater` says.
+    fn window_with(&self, world: &World, picked: Option<PathBuf>, updater: Updater) -> AppWindow {
         let rt = world.rt.clone();
         let w = app::build(Options {
+            updater,
             home: self.path().to_path_buf(),
             data_dir: self.path().join("app"),
             config_dir: Some(self.path().join("config")),
@@ -1730,6 +1746,246 @@ async fn branches_merges_and_views(world: &World) {
     println!("branches, merges and views ... ok");
 }
 
+/// Alice's app with workspaces of `depots` (checked out outside the window), in folders
+/// named after them.
+async fn with_workspaces(world: &World, home: &Home, folders: &[(&str, &str)]) -> Vec<String> {
+    let desk = Desk::new(
+        home.path().to_path_buf(),
+        &home.path().join("app"),
+        Arc::new(Quiet),
+    )
+    .with_config_dir(home.path().join("config"));
+    desk.sign_in(world.url.clone(), "alice".into(), "correct horse".into())
+        .await
+        .unwrap();
+    let mut roots = Vec::new();
+    for (depot, folder) in folders {
+        let dir = home.path().join(folder);
+        let done = desk
+            .checkout(
+                format!("{}/{depot}", world.url),
+                dir.display().to_string(),
+                "main".into(),
+            )
+            .await
+            .unwrap();
+        roots.push(done["workspace"].as_str().unwrap().to_owned());
+    }
+    roots
+}
+
+fn link_to(world: &World, link: impl FnOnce(String) -> Link) -> String {
+    links::build(&link(world.url.clone())).unwrap()
+}
+
+async fn links_handed_to_the_app(world: &World) {
+    let s = &world.story;
+    let home = Home::new();
+    let roots = with_workspaces(world, &home, &[("story", "story")]).await;
+    let w = home.window(world, None);
+    let r = w.global::<Reading>();
+    let l = w.global::<Links>();
+
+    // A link that is not one of the forms is refused, and nothing opens.
+    w.invoke_link_arrived("lode://lode.example.com/story".into());
+    assert_eq!(w.get_dialog(), Dialog::LinkRefused);
+    assert_eq!(
+        value(&w, "Why"),
+        "The link names nothing to open. Nothing was opened."
+    );
+    click(&w, "OK");
+    assert_eq!(w.get_dialog(), Dialog::None);
+    assert_eq!(w.get_workspaces().row_count(), 0);
+
+    // A revision link opens the only workspace of its depot on that revision, even one that
+    // is not on the first page of the history.
+    let link = link_to(world, |server| Link::Revision {
+        server,
+        depot: "story".into(),
+        rev: s.first,
+    });
+    w.invoke_link_arrived(link.as_str().into());
+    until("the workspace opens on the revision", || {
+        r.get_pane() == Pane::History && r.get_detail().rev == i32::try_from(s.first).unwrap()
+    })
+    .await;
+    assert_eq!(w.get_current_tab(), 1);
+    assert_eq!(w.get_workspaces().row_data(0).unwrap().root, roots[0]);
+    assert_eq!(r.get_detail().title, format!("r{}", s.first));
+
+    // Its "Copy link" gives the same link back.
+    click(&w, &format!("Copy link to r{}", s.first));
+    assert_eq!(l.get_copied_link(), link);
+    assert_eq!(l.get_copied(), format!("r{}", s.first));
+
+    // A file link for another branch shows the file's history here, and says so.
+    let link = link_to(world, |server| Link::File {
+        server,
+        depot: "story".into(),
+        path: "notes.txt".into(),
+        rev: None,
+        branch: Some("dev".into()),
+    });
+    w.invoke_link_arrived(link.as_str().into());
+    until("the file's history", || {
+        r.get_history().path == "notes.txt" && !r.get_history().loading
+    })
+    .await;
+    assert_eq!(
+        value(&w, "Note"),
+        "The link is for notes.txt on dev, and this workspace is on main, so its history on main is shown."
+    );
+    click(&w, "Dismiss");
+    assert_eq!(l.get_notice(), "");
+    until("its newest revision", || r.get_detail().shown).await;
+    click(&w, &format!("Copy link to notes.txt at r{}", s.head));
+    assert_eq!(
+        l.get_copied_link(),
+        link_to(world, |server| Link::File {
+            server,
+            depot: "story".into(),
+            path: "notes.txt".into(),
+            rev: Some(s.head),
+            branch: None,
+        })
+    );
+    w.hide().unwrap();
+
+    // With two workspaces of the depot, the app asks which one.
+    let home = Home::new();
+    let roots = with_workspaces(world, &home, &[("story", "one"), ("story", "two")]).await;
+    let w = home.window(world, None);
+    let r = w.global::<Reading>();
+    let link = link_to(world, |server| Link::Revision {
+        server,
+        depot: "story".into(),
+        rev: s.head,
+    });
+    w.invoke_link_arrived(link.into());
+    assert_eq!(w.get_dialog(), Dialog::LinkChoose);
+    assert_eq!(w.global::<Links>().get_choices().row_count(), 2);
+    click(&w, &format!("Open in {}", roots[1]));
+    until("the chosen workspace opens", || {
+        r.get_pane() == Pane::History && r.get_detail().shown
+    })
+    .await;
+    assert_eq!(w.get_workspaces().row_data(0).unwrap().root, roots[1]);
+
+    // A link that arrives while a dialog is open waits for it to close.
+    click(&w, "Home");
+    click(&w, "About Lode Desk");
+    click(&w, "Close");
+    click(&w, "Sign in to a server…");
+    let link = link_to(world, |server| Link::Revision {
+        server,
+        depot: "harbor".into(),
+        rev: 1,
+    });
+    w.invoke_link_arrived(link.into());
+    assert_eq!(w.get_dialog(), Dialog::SignIn);
+    press(&w, &[], Key::Escape);
+
+    // No workspace of that depot: the app offers to check it out, with the link's server.
+    assert_eq!(w.get_dialog(), Dialog::LinkNone);
+    click(&w, "Check out harbor…");
+    assert_eq!(w.get_dialog(), Dialog::CheckOut);
+    assert_eq!(value(&w, "Depot"), format!("{}/harbor", world.url));
+    w.hide().unwrap();
+    println!("links handed to the app ... ok");
+}
+
+const PACKAGE: &[u8] = b"the next Lode Desk";
+
+/// Serves a feed offering 99.0.0 for `windows-x86_64`, signed with `sk`.
+fn serve_feed(sk: &minisign::SecretKey) -> String {
+    use base64::Engine;
+    use std::io::{Read, Write};
+    let b64 = |t: String| base64::engine::general_purpose::STANDARD.encode(t);
+    let sig = minisign::sign(None, sk, PACKAGE, None, None).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let feed = json!({
+        "version": "99.0.0",
+        "notes": "Faster history.",
+        "pub_date": "2026-11-20T10:00:00Z",
+        "platforms": {
+            "windows-x86_64": { "signature": b64(sig.into_string()), "url": format!("{base}/package") }
+        }
+    })
+    .to_string();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                feed.len()
+            );
+            let _ = s.write_all(head.as_bytes());
+            let _ = s.write_all(feed.as_bytes());
+        }
+    });
+    format!("{base}/latest.json")
+}
+
+async fn updates_of_the_app(world: &World) {
+    use base64::Engine;
+    let kp = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
+    let pubkey =
+        base64::engine::general_purpose::STANDARD.encode(kp.pk.to_box().unwrap().into_string());
+    let feed = serve_feed(&kp.sk);
+    let home = Home::new();
+    let updater = || Updater {
+        pubkey: pubkey.clone(),
+        feed: feed.clone(),
+        current: "0.1.0".into(),
+        platforms: vec!["windows-x86_64-msi".into(), "windows-x86_64".into()],
+        settings_file: home.path().join("app/settings.json"),
+    };
+    let w = home.window_with(world, None, updater());
+    let u = w.global::<Updates>();
+
+    // The check a moment after start finds the new version and offers it.
+    until("the update is offered", || u.get_offer().shown).await;
+    let offer = u.get_offer();
+    assert_eq!(offer.version, "99.0.0");
+    assert_eq!(offer.current, "0.1.0");
+    click(&w, "What's new");
+    assert_eq!(value(&w, "What's new"), "Faster history.");
+
+    // "Later" puts it away; "Check for updates now" brings it back and says what it found.
+    click(&w, "Later");
+    assert!(!u.get_offer().shown);
+    click(&w, "Check for updates now");
+    until("the check ends", || !u.get_settings().checking).await;
+    assert_eq!(value(&w, "Update check"), "Lode Desk 99.0.0 is available.");
+    assert!(u.get_offer().shown);
+
+    // Turning automatic checks off is kept in the settings, and the next start does not check.
+    assert!(u.get_settings().check);
+    click(&w, "Check for updates automatically");
+    assert!(!u.get_settings().check);
+    let saved = lode_desk::update::load_settings(&home.path().join("app/settings.json"));
+    assert!(!saved.check_updates);
+    w.hide().unwrap();
+
+    let w = home.window_with(world, None, updater());
+    let u = w.global::<Updates>();
+    assert!(!u.get_settings().check);
+    sleep(4000).await;
+    assert!(
+        !u.get_offer().shown,
+        "no check at start with the setting off"
+    );
+    // Asking still checks.
+    click(&w, "Check for updates now");
+    until("the check ends", || !u.get_settings().checking).await;
+    assert!(u.get_offer().shown);
+    w.hide().unwrap();
+    println!("updates of the app ... ok");
+}
+
 fn main() -> std::process::ExitCode {
     i_slint_backend_testing::init_integration_test_with_system_time();
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -1749,6 +2005,8 @@ fn main() -> std::process::ExitCode {
         history_blame_and_diffs(&world).await;
         locks_shelves_and_checks(&world).await;
         branches_merges_and_views(&world).await;
+        links_handed_to_the_app(&world).await;
+        updates_of_the_app(&world).await;
         let _ = slint::quit_event_loop();
     })
     .unwrap();

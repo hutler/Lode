@@ -5,8 +5,8 @@ branches and view, and runs the same operations as the `lode` command, so the tw
 side by side on the same workspace. This guide follows a working day from installing the app
 to merging a branch. Each part says what to click and what you should see.
 
-The pictures come from `npm run guide-screens` in `crates/lode-desk/ui`, against the app's
-demo data (a depot called `skyfall` on `lode.example.com`).
+The pictures are the light screens of `cargo run --example screenshots` in `crates/lode-desk`,
+with sample data (a depot called `game` on `lode.example.com`).
 
 Contents: [Install](#install) · [Sign in](#sign-in) · [Check out](#check-out-a-depot) ·
 [The daily loop](#the-daily-loop) · [History, blame and diffs](#history-blame-and-diffs) ·
@@ -23,7 +23,6 @@ Download the file for your system from the project's release page (tags `lode-v<
 | Windows 10 and 11 | `lode-desk-<version>-windows-x86_64-setup.exe`, or the `.msi` | The setup installs for you alone and needs no administrator; the MSI installs for everyone. |
 | macOS 11 or newer | `lode-desk-<version>-macos-universal.dmg` | Open it and drag Lode Desk to Applications. |
 | Debian, Ubuntu | `lode-desk-<version>-linux-x86_64.deb` | `sudo apt install ./lode-desk-….deb` |
-| Fedora, RHEL | `lode-desk-<version>-linux-x86_64.rpm` | `sudo dnf install ./lode-desk-….rpm` |
 | Any Linux | `lode-desk-<version>-linux-x86_64.AppImage` | Make it executable and run it. |
 
 Until the project signs its installers, Windows may show "Windows protected your PC": choose
@@ -69,7 +68,7 @@ open workspace has a tab; the sidebar shows its depot, server, branch and revisi
 (D), files not added yet (?), and files in conflict (C). The list follows the disk: save a
 file in your editor and it shows up within a moment.
 
-![Picking files to commit](desk-guide/changes-picked-light.png)
+![Picking files to commit](desk-guide/changes-light.png)
 
 - **Pick** files with their check boxes (or a whole group with the group's box), write a
   message and **Commit**. Only the picked files go in; the rest stay as they are. Files not
@@ -80,7 +79,7 @@ file in your editor and it shows up within a moment.
   (the branch button, then **Update to r…**; see [Branches](#branches-and-merges)) and commit
   again.
 
-![A refused commit names the files](desk-guide/commit-refused-light.png)
+![A refused commit names the files](desk-guide/changes-refused-light.png)
 
 ### Locks
 
@@ -94,8 +93,6 @@ commits.
 When someone else holds the lock, the lock is refused and says who. Only a depot admin can
 break another person's lock.
 
-![A lock held by someone else](desk-guide/lock-refused-light.png)
-
 ### Changelists
 
 **New changelist…** groups changes you want to commit separately, such as a fix you are not
@@ -103,7 +100,7 @@ ready to send. Right-click files and choose a changelist under **Move to**. A ch
 its own **Commit…**, which uses its description as the message, plus **Shelve…** and
 **Delete…** (deleting a changelist sends its files back to Changes; no change is lost).
 
-![Changelists](desk-guide/changelists-light.png)
+![Changelists](desk-guide/changelist-new-light.png)
 
 ## History, blame and diffs
 
@@ -118,8 +115,6 @@ file at that revision.
 
 **History** on a file shows only the revisions that changed it, following renames.
 
-![A file's history](desk-guide/file-history-light.png)
-
 **Blame** shows, for each line, the revision that last changed it. Click a revision number to
 open that revision.
 
@@ -128,7 +123,7 @@ open that revision.
 **Show diff** compares your file with the revision you have, or a file in a revision with the
 one before. Switch between unified and side by side; the choice is remembered.
 
-![A diff](desk-guide/diff-light.png)
+![A diff](desk-guide/diff-split-light.png)
 
 Images are shown side by side, as a swipe or as an onion skin.
 
@@ -140,8 +135,6 @@ A shelf keeps changes on the server without committing them: to ask for a review
 work to another computer, or to put something aside. Pick files in Changes and choose
 **Shelve…**. By default the shelved files are reverted here; tick **Keep my changes in the
 workspace** to keep them.
-
-![Shelving](desk-guide/shelve-light.png)
 
 **Shelves** lists open, submitted and deleted shelves, yours or everyone's. A shelf shows its
 description, files, diff and checks.
@@ -155,11 +148,11 @@ description, files, diff and checks.
   the refusal lists the checks still missing.
 - **Delete…** removes your own shelf. **Copy link** copies a link to it, for a review request.
 
-![A shelf with its checks](desk-guide/shelf-checks-light.png)
+![A shelf with its checks](desk-guide/shelf-submit-blocked-light.png)
 
 ## Branches and merges
 
-The branch button at the top of the sidebar opens **Branches**: every branch with its head and
+**Branches…** in the sidebar opens the branch list: every branch with its head and
 where it started. From there:
 
 - With your own branch selected, **Update to r…** brings the workspace to the head of its
@@ -174,18 +167,14 @@ where it started. From there:
 
 ![Branches](desk-guide/branches-light.png)
 
-![A new branch](desk-guide/new-branch-light.png)
-
 After a switch or update, a summary says what came and what stayed. If it stopped half way,
 for example because the connection dropped, an error offers **Finish the update**.
-
-![After a switch](desk-guide/switched-light.png)
 
 A merge applies the other branch's changes to your files and tells you what happened to each:
 applied, merged, conflicted or unchanged. Changes then shows the merge in progress. **Commit
 merge** commits everything together; **Abandon merge…** forgets the merge and keeps the files.
 
-![The result of a merge](desk-guide/merged-light.png)
+![The result of a merge](desk-guide/merge-result-light.png)
 
 ## Conflicts
 
@@ -195,14 +184,14 @@ theirs above, and the result below. Each conflict has **Use mine**, **Use theirs
 both**, and the result can also be edited by hand; **Take mine** and **Take theirs** settle the
 whole file at once. **Save and mark resolved** saves the result once no conflict is left.
 
-![The three-way conflict view](desk-guide/three-way-light.png)
+![The three-way conflict view](desk-guide/conflict-light.png)
 
 For a file that is not text, such as an image, choose **Keep mine** or **Take theirs**. Theirs
 is also saved beside the file (`name.theirs-r<rev>`) so you can open it in its own tool first.
 
 ## The workspace view
 
-A depot can be larger than you need. **Workspace** in the sidebar says how much of the depot
+A depot can be larger than you need. **View** in the sidebar says how much of the depot
 is in your view and on disk, and lets you choose which folders come to disk: tick a folder to
 bring it, untick it to leave it out. The ticks become include and exclude patterns, which you
 can also edit as text (`*` stays within a folder, `**` goes into subfolders; excludes win).
@@ -220,14 +209,17 @@ second confirmation.
 you can paste into chat, a ticket or a review:
 
 ```
-lode://lode.example.com/skyfall/r1482
-lode://lode.example.com/skyfall/Source/Skyfall/Boat.cpp@1477
-lode://lode.example.com/skyfall/shelf/44
+lode://lode.example.com/game/r1482
+lode://lode.example.com/game/Source/Game/Boat.cpp@1477
+lode://lode.example.com/game/shelf/44
 ```
 
-Clicking one opens it in Lode Desk (starting the app if needed). The app picks a workspace of
+Clicking one opens it in Lode Desk (starting the app if needed; when it already runs, the
+running window takes the link, so there is never a second one). On macOS the app starts or
+comes forward but does not open the link's target yet. The app picks a workspace of
 the same server and depot from your open tabs and Home's list. When several fit, it asks which
-one; when none does, it offers to check the depot out and then shows the link.
+one; when none does, it offers to check the depot out and then shows the link. A link that
+arrives while a dialog is open waits until you close it.
 
 ![Choosing a workspace for a link](desk-guide/link-choose-light.png)
 
@@ -240,9 +232,12 @@ opened. Links never carry user names or passwords.
 
 ## Updates
 
-The app looks for a new version when it starts and once a day. When there is one, a bar at the
+The app looks for a new version shortly after it starts and once a day. When there is one, a bar at the
 top shows it, with **What's new**, **Install and restart** and **Later**. An update is
-installed only when it is signed with the project's key; anything else is refused.
+installed only when it is signed with the project's key; anything else is refused. Install and
+restart runs the MSI or setup program (Windows asks for permission for the MSI), replaces the
+AppImage or the app in Applications, or installs the `.deb` after asking for your password, and
+then starts the new version.
 
 ![A new version](desk-guide/update-light.png)
 

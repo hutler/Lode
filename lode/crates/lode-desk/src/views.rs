@@ -1,6 +1,6 @@
 //! The workspace view's patterns for the view editor (T134): whether a folder is in the view,
 //! and the patterns after ticking a folder in or out. Patterns match the way the server
-//! matches them (`lode_core`'s globs); the rules of the Tauri window's `viewPatterns.ts`.
+//! matches them (`lode_core`'s globs).
 
 use lode_core::PathGlobSet;
 

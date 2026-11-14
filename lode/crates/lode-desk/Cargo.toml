@@ -9,7 +9,47 @@ rust-version = "1.92"
 repository = "https://github.com/hutler/Lode"
 publish = false
 
-# Its own workspace: building the CLI and server never needs the system web view libraries.
+# The installers, made by cargo-packager (T135): `cargo build --release`, then
+# `cargo packager --release` in this folder. The names, identifier and install folders are the
+# ones the Tauri bundles had (T114). The release workflow sets the version, picks the formats
+# and, when the project has one, passes the update signing key.
+[package.metadata.packager]
+product-name = "Lode Desk"
+identifier = "dev.simpledevops.lode-desk"
+description = "The Lode version control desktop client"
+long-description = "Lode Desk shows a Lode workspace's changes, history, locks, shelves, branches and view, and runs the same operations as the lode command."
+homepage = "https://github.com/hutler/Lode"
+publisher = "SimpleDevOps"
+authors = ["The SimpleDevOps contributors"]
+copyright = "Copyright the SimpleDevOps contributors"
+license-file = "../../LICENSE"
+category = "DeveloperTool"
+binaries = [{ path = "lode-desk", main = true }]
+icons = ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.icns", "icons/icon.ico"]
+formats = ["deb", "appimage", "wix", "nsis", "app", "dmg"]
+
+# `lode://` links: registered by every installer (T113).
+[[package.metadata.packager.deep-link-protocols]]
+schemes = ["lode"]
+name = "Lode link"
+
+[package.metadata.packager.deb]
+section = "vcs"
+# Linked (fontconfig) or loaded when the window opens (xkbcommon); X11 and Wayland come with
+# any desktop.
+depends = ["libfontconfig1", "libxkbcommon0", "libxkbcommon-x11-0"]
+desktop-template = "packaging/lode-desk.desktop"
+
+[package.metadata.packager.wix]
+languages = ["en-US"]
+
+[package.metadata.packager.nsis]
+installer-mode = "currentUser"
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+# Its own workspace: building the CLI and server never needs the window system libraries.
 [workspace]
 
 [lib]
@@ -28,46 +68,37 @@ unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
 
-[features]
-# The former Tauri window with the React screens, until M13 replaces every screen.
-web = [
-  "dep:tauri",
-  "dep:tauri-build",
-  "dep:tauri-plugin-deep-link",
-  "dep:tauri-plugin-dialog",
-  "dep:tauri-plugin-single-instance",
-  "dep:tauri-plugin-updater",
-]
-# The Tauri window's own tests (its mock runtime).
-web-test = ["web", "tauri/test"]
-
 [build-dependencies]
 slint-build = "1.18"
-tauri-build = { version = "2.7", features = [], optional = true }
+
+# The program's icon and manifest on Windows (T135; before, Tauri's build step embedded them).
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
 
 [dependencies]
 lode-client = { path = "../lode-client" }
 lode-ops = { path = "../lode-ops" }
 lode-core = { path = "../lode-core" }
+base64 = "0.22"
 directories = "6"
-# Decodes the two sides of an image diff (Slint takes pixels); already in the tree through tauri and rfd.
+# Decodes the two sides of an image diff (Slint takes pixels); already in the tree through rfd.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+# Checks the signature of an update (T135), the same minisign format the Tauri updater used.
+minisign-verify = "0.3"
 notify = "8.2"
+# The token of the single-instance socket (T135); already in the tree through lode-client.
+rand = "0.8"
+# Downloads the update feed and packages (T135); the workspace's reqwest, through lode-client.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = "0.18"
 # Slint under its Royalty-free License 2.0 (desktop apps; the About dialog carries the notice).
 slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility"] }
-tauri = { version = "2.12", features = [], optional = true }
-tauri-plugin-deep-link = { version = "2", optional = true }
-tauri-plugin-dialog = { version = "2.8", optional = true }
-tauri-plugin-single-instance = { version = "2", optional = true }
-tauri-plugin-updater = { version = "2", optional = true }
 time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 
 [dev-dependencies]
-base64 = "0.22"
 i-slint-backend-testing = "=1.18.1"
 png = "0.17"
 lode-proto = { path = "../lode-proto" }
@@ -83,3 +114,6 @@ harness = false
 
 [[example]]
 name = "screenshots"
+
+[[example]]
+name = "feed"

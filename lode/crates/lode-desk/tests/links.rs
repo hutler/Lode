@@ -1,11 +1,11 @@
-//! T113: `lode://` links are read and written by the same rules as the window
-//! (`ui/src/links.ts`), checked against the shared cases in `ui/src/linkCases.json`.
+//! T113: `lode://` links are read and written strictly, checked against the cases in
+//! `tests/link_cases.json` (the cases the earlier Tauri window's reader was tested against too).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use lode_desk::links::{self, Link, MAX_LINK};
 use serde_json::Value;
 
-const CASES: &str = include_str!("../ui/src/linkCases.json");
+const CASES: &str = include_str!("link_cases.json");
 
 fn cases() -> Vec<Value> {
     let doc: Value = serde_json::from_str(CASES).unwrap();

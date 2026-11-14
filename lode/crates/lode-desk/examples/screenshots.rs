@@ -19,6 +19,7 @@ use lode_desk::app::{
     BranchesState, Branching, ConflictState, FolderRow, MergeState, OutcomeState, RegionRow,
     SideLine, ViewState,
 };
+use lode_desk::app::{LinkChoice, LinkState, Links, UpdateOffer, Updates};
 use lode_desk::app::{LocksState, ShelvesState, SubmitState, Team};
 use lode_desk::changes::{self, FileEntry, ListInfo, Pending};
 use lode_desk::{branches, diffs, history, merge, team, views};
@@ -60,6 +61,13 @@ fn main() {
         config_dir: Some(home.path().join("config")),
         pick_folder: Rc::new(|_| None),
         open_browser: Arc::new(|_| false),
+        updater: lode_desk::update::Updater {
+            pubkey: String::new(),
+            feed: String::new(),
+            current: "0.1.0".into(),
+            platforms: Vec::new(),
+            settings_file: home.path().join("app/settings.json"),
+        },
     })
     .unwrap();
     window.dispatch_event(WindowEvent::ScaleFactorChanged {
@@ -138,14 +146,16 @@ fn main() {
                 depot: "game".into(),
                 branch: "main".into(),
                 rev: "1482".into(),
-                server: "https://lode.example.com".into(),
+                server: "lode.example.com".into(),
+                server_url: "https://lode.example.com".into(),
             },
             WorkspaceTab {
                 root: "D:\\work\\engine".into(),
                 depot: "engine".into(),
                 branch: "release-2.4".into(),
                 rev: "977".into(),
-                server: "https://lode.example.com".into(),
+                server: "lode.example.com".into(),
+                server_url: "https://lode.example.com".into(),
             },
         ]))));
         w.set_current_tab(1);
@@ -521,7 +531,70 @@ fn main() {
         r.set_pane(Pane::Changes);
         w.set_workspaces(ModelRc::default());
 
+        // T135: links handed to the app, a new version, and an error on Home.
         w.set_current_tab(0);
+        let l = w.global::<Links>();
+        l.set_link(LinkState {
+            text: "lode://someone@lode.example.com/game/r1".into(),
+            why: "Links do not carry user names.".into(),
+            ..LinkState::default()
+        });
+        w.set_dialog(Dialog::LinkRefused);
+        shot("link-refused");
+        l.set_link(LinkState {
+            text: "lode://lode.example.com/game/r1482".into(),
+            why: "".into(),
+            target: "r1482".into(),
+            depot: "game".into(),
+            host: "lode.example.com".into(),
+        });
+        l.set_choices(ModelRc::from(Rc::new(VecModel::from(vec![
+            LinkChoice {
+                path: "D:\\work\\game".into(),
+                branch: "main".into(),
+                open: true,
+            },
+            LinkChoice {
+                path: "E:\\review\\game".into(),
+                branch: "release-2.4".into(),
+                open: false,
+            },
+        ]))));
+        w.set_dialog(Dialog::LinkChoose);
+        shot("link-choose");
+        l.set_link(LinkState {
+            text: "lode://lode.example.com/tools/shelf/12".into(),
+            why: "".into(),
+            target: "shelf 12".into(),
+            depot: "tools".into(),
+            host: "lode.example.com".into(),
+        });
+        w.set_dialog(Dialog::LinkNone);
+        shot("link-none");
+        w.set_dialog(Dialog::None);
+
+        let u = w.global::<Updates>();
+        u.set_offer(UpdateOffer {
+            shown: true,
+            version: "0.2.0".into(),
+            current: "0.1.0".into(),
+            notes: "Lode Desk is a native app now: faster start, less memory, and one window per computer that takes every lode:// link.".into(),
+            busy: false,
+            error: ErrorInfo::default(),
+        });
+        u.set_notes_open(true);
+        shot("update");
+        u.set_offer(UpdateOffer::default());
+        u.set_notes_open(false);
+
+        w.set_home_error(app::error_info(&lode_desk::desk::ErrorView {
+            code: "not_a_workspace".into(),
+            message: "D:\\Downloads is not inside a Lode workspace".into(),
+            details: serde_json::Value::Null,
+        }));
+        shot("open-error");
+        w.set_home_error(ErrorInfo::default());
+
         w.set_dialog(Dialog::About);
         shot("about");
     }

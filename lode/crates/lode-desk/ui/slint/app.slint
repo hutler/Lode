@@ -2,6 +2,8 @@
 // per open workspace. The Rust side (src/app.rs) runs the operations and fills the properties.
 
 import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Links, LinkChoice, LinkState, RefusedLinkDialog, ChooseWorkspaceDialog, NoWorkspaceDialog } from "links.slint";
+import { Updates, UpdateOffer, UpdateSettings, UpdateBanner, UpdateSettingsPanel } from "updates.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
 import { SignInDialog, SignInState } from "sign_in.slint";
 import { ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget, NewChangelistDialog, RenameChangelistDialog, CommitChangelistDialog, ConfirmDialog, MoveDialog, MessagesDialog } from "changes.slint";
@@ -14,6 +16,7 @@ import { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, Bla
 export { ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
 export { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, CheckBadgeInfo, CheckRow }
 export { Branching, BranchRow, BranchesState, NewBranchState, MergeState, OutcomeRow, OutcomeState, SideLine, RegionRow, ConflictState, FolderRow, ViewState }
+export { Links, LinkChoice, LinkState, Updates, UpdateOffer, UpdateSettings }
 export { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState }
 
 /// A workspace opened before.
@@ -30,10 +33,13 @@ export struct WorkspaceTab {
     depot: string,
     branch: string,
     rev: string,
+    /// The server's host, as the sidebar shows it.
     server: string,
+    /// The server's address, for links.
+    server-url: string,
 }
 
-export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome }
+export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
 
 component Tab inherits Rectangle {
     in property <string> text;
@@ -174,6 +180,8 @@ component Home inherits Rectangle {
                 Button { text: "Open a workspace folder…"; clicked => { root.open-folder(); } }
                 Button { text: "Sign in to a server…"; clicked => { root.sign-in(); } }
                 Rectangle { height: 8px; }
+                UpdateSettingsPanel {}
+                Rectangle { height: 8px; }
                 Button { text: "About Lode Desk"; clicked => { root.about(); } }
             }
           }
@@ -284,6 +292,26 @@ component WorkspacePage inherits Rectangle {
             }
         }
         VerticalLayout {
+            if Links.notice != "": Rectangle {
+                height: notice.preferred-height + 16px;
+                notice := HorizontalLayout {
+                    x: 16px;
+                    y: 8px;
+                    width: parent.width - 32px;
+                    spacing: 8px;
+                    Text {
+                        text: Links.notice;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        color: Palette.foreground;
+                        accessible-role: text;
+                        accessible-label: "Note";
+                        accessible-value: self.text;
+                    }
+                    Button { text: "Dismiss"; clicked => { Links.notice = ""; } }
+                }
+            }
             if root.error.shown: Rectangle {
                 height: banner.preferred-height + 16px;
                 banner := ErrorBanner {
@@ -385,6 +413,8 @@ export component AppWindow inherits Window {
     callback pick-checkout-folder();
     callback check-out();
     callback close-dialog();
+    /// A `lode://` link handed to the app (T135).
+    callback link-arrived(string);
     // The changes view.
     callback tab-shown(int);
     callback files-changed(string);
@@ -402,9 +432,24 @@ export component AppWindow inherits Window {
 
     changed current-tab => { root.tab-shown(self.current-tab); }
 
+    /// Puts `text` on the clipboard, through a text input nobody sees.
+    public function copy-text(text: string) {
+        clip.text = text;
+        clip.select-all();
+        clip.copy();
+    }
+
     /// Light or dark instead of the system's choice (the screenshots use it).
     public function use-dark(dark: bool) {
         Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    // Holds what "Copy link" copies on its way to the clipboard; never shown.
+    Rectangle {
+        visible: false;
+        width: 0;
+        height: 0;
+        clip := TextInput { read-only: true; }
     }
 
     forward-focus: keys;
@@ -443,6 +488,7 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+            if Updates.offer.shown: UpdateBanner {}
             if root.current-tab == 0: Home {
                 recent: root.recent;
                 version: root.version;
@@ -623,6 +669,21 @@ export component AppWindow inherits Window {
             messages: root.recent-messages;
             pick(m) => { root.use-message(m); }
             close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.link-refused: RefusedLinkDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+        }
+        if root.dialog == Dialog.link-choose: ChooseWorkspaceDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+        }
+        if root.dialog == Dialog.link-none: NoWorkspaceDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
         }
         if root.dialog == Dialog.about: AboutDialog {
             x: (parent.width - self.width) / 2;

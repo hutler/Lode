@@ -51,6 +51,9 @@ pub(super) struct TeamState {
     shelves: RefCell<Vec<Value>>,
     shelf: RefCell<Value>,
     selected: Cell<Option<u64>>,
+    /// A shelf a link asked for: selected when the shelves load, even when the list leaves
+    /// it out.
+    wanted: Cell<Option<u64>>,
     checks: RefCell<Value>,
     /// The signed-in name on the server of the workspace (root, name), to mark one's own.
     me: RefCell<(String, String)>,
@@ -74,6 +77,7 @@ impl TeamState {
             shelves: RefCell::new(Vec::new()),
             shelf: RefCell::new(Value::Null),
             selected: Cell::new(None),
+            wanted: Cell::new(None),
             checks: RefCell::new(Value::Null),
             me: RefCell::new((String::new(), String::new())),
             my_open: RefCell::new(Vec::new()),
@@ -553,7 +557,12 @@ impl App {
                         .selected
                         .get()
                         .filter(|id| list.iter().any(|x| x["id"].as_u64() == Some(*id)));
-                    let selected = keep.or_else(|| list.first().and_then(|x| x["id"].as_u64()));
+                    let selected = me
+                        .team
+                        .wanted
+                        .take()
+                        .or(keep)
+                        .or_else(|| list.first().and_then(|x| x["id"].as_u64()));
                     *me.team.shelves.borrow_mut() = list;
                     me.team.selected.set(selected);
                     t.set_shelves(s);
@@ -586,6 +595,12 @@ impl App {
                     &team::shelf_target(&shelf),
                 )));
         }
+    }
+
+    /// Selects shelf `id` the next time the shelves load (a `lode://` link to it).
+    pub(super) fn team_want(&self, id: u64) {
+        self.team.wanted.set(Some(id));
+        self.team.selected.set(Some(id));
     }
 
     fn select_shelf(&self, id: Option<u64>) {

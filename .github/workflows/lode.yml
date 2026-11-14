@@ -106,30 +106,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: lode/crates/lode-desk
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: lode/crates/lode-desk/ui/package-lock.json
-      - name: Install the system web view (Linux)
+      - name: System libraries (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libsoup-3.0-dev libfontconfig1-dev libxkbcommon-dev
-      - run: npm ci
-        working-directory: lode/crates/lode-desk/ui
-      - run: npm test
-        working-directory: lode/crates/lode-desk/ui
-      - run: node --test packaging/feed.test.mjs
-      - run: npm run build
-        working-directory: lode/crates/lode-desk/ui
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
       - run: cargo fmt --check
-      # The Slint window (default) and the Tauri window (feature `web`, until T135).
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo clippy --all-targets --features web-test -- -D warnings
       - run: cargo test
-      - run: cargo test --features web-test --test update
       # The Slint screens, light and dark, for visual review.
       - run: cargo run --example screenshots -- target/screenshots
       - uses: actions/upload-artifact@v4
@@ -137,16 +121,3 @@ jobs:
         with:
           name: lode-desk-slint-screenshots
           path: lode/crates/lode-desk/target/screenshots/
-      # Screens of the app against the mocked backend, light and dark, for visual review.
-      - name: Screenshots
-        if: runner.os == 'Linux'
-        working-directory: lode/crates/lode-desk/ui
-        run: |
-          npm install --no-save playwright
-          npx playwright install --with-deps chromium
-          npm run screenshots
-      - uses: actions/upload-artifact@v4
-        if: runner.os == 'Linux'
-        with:
-          name: lode-desk-screenshots
-          path: lode/crates/lode-desk/ui/screenshots/

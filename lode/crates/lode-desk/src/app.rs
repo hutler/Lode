@@ -19,6 +19,8 @@ use serde_json::Value;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::desk::{Desk, ErrorView, RecentWorkspace};
+use crate::instance::{self, Start};
+use crate::update::Updater;
 
 /// The screens as Slint compiles them. Generated code: the crate's lints do not apply.
 #[allow(
@@ -35,11 +37,13 @@ mod screens {
 pub use screens::*;
 
 mod branch;
+mod outside;
 mod read;
 mod team;
 mod work;
 
 use branch::BranchState;
+use outside::OutsideState;
 use read::ReadState;
 use team::TeamState;
 use work::WorkspaceState;
@@ -71,6 +75,8 @@ pub struct Options {
     pub pick_folder: PickFolder,
     /// The browser for single sign-on.
     pub open_browser: OpenBrowser,
+    /// Where and how the app looks for a new version of itself.
+    pub updater: Updater,
 }
 
 impl Options {
@@ -78,9 +84,11 @@ impl Options {
     pub fn from_system() -> Result<Self, String> {
         let dirs = directories::BaseDirs::new()
             .ok_or_else(|| "cannot find the home directory".to_owned())?;
+        let data_dir = dirs.data_dir().join(APP_ID);
         Ok(Self {
             home: dirs.home_dir().to_path_buf(),
-            data_dir: dirs.data_dir().join(APP_ID),
+            updater: Updater::for_this_copy(data_dir.join("settings.json")),
+            data_dir,
             config_dir: None,
             pick_folder: Rc::new(|title| rfd::FileDialog::new().set_title(title).pick_folder()),
             open_browser: Arc::new(|url| lode_ops::output::open_in_browser(url).is_ok()),
@@ -88,9 +96,39 @@ impl Options {
     }
 }
 
-/// Starts the window and runs until it closes.
-pub fn run() -> Result<(), String> {
-    let window = build(Options::from_system()?)?;
+/// Starts the window and runs until it closes; `link` is the `lode://` link the app was
+/// started with. When another copy runs, the link goes to it and this one ends at once.
+pub fn run(link: Option<String>) -> Result<(), String> {
+    let options = Options::from_system()?;
+    let instance = match instance::claim(&options.data_dir, link.as_deref()) {
+        Ok(Start::HandedOver) => return Ok(()),
+        Ok(Start::First(i)) => Some(i),
+        Err(e) => {
+            eprintln!("warning: {e}; this window does not take links from other starts");
+            None
+        }
+    };
+    let window = build(options)?;
+    if let Some(i) = instance {
+        let weak = window.as_weak();
+        i.serve(move |link| {
+            let _ = weak.upgrade_in_event_loop(move |w| {
+                let _ = w.show();
+                w.window().set_minimized(false);
+                if let Some(l) = link {
+                    w.invoke_link_arrived(l.into());
+                }
+            });
+        });
+    }
+    if let Some(l) = link {
+        let weak = window.as_weak();
+        slint::Timer::single_shot(Duration::ZERO, move || {
+            if let Some(w) = weak.upgrade() {
+                w.invoke_link_arrived(l.into());
+            }
+        });
+    }
     window.run().map_err(|e| e.to_string())
 }
 
@@ -123,6 +161,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     let read = ReadState::new(&window, &options.data_dir);
     let team = TeamState::new(&window);
     let branch = BranchState::new(&window);
+    let outside = OutsideState::new(&window, options.updater);
     let app = Rc::new(App {
         window: window.as_weak(),
         desk,
@@ -143,6 +182,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         read,
         team,
         branch,
+        outside,
         this: RefCell::new(RcWeak::new()),
     });
     *app.this.borrow_mut() = Rc::downgrade(&app);
@@ -152,6 +192,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     read::connect(&window, &app);
     team::connect(&window, &app);
     branch::connect(&window, &app);
+    outside::connect(&window, &app);
     Ok(window)
 }
 
@@ -243,6 +284,8 @@ struct App {
     team: TeamState,
     /// Branches, merges, conflicts and the view (T134).
     branch: BranchState,
+    /// Links and updates (T135).
+    outside: OutsideState,
     /// This controller, for tasks that outlive a call.
     this: RefCell<RcWeak<App>>,
 }
@@ -312,6 +355,7 @@ impl App {
             branch: text(&info["branch"]).into(),
             rev: text(&info["rev"]).into(),
             server: host_of(&text(&info["server"])).into(),
+            server_url: text(&info["server"]).into(),
         };
         let at = self.workspaces.iter().position(|t| t.root == tab.root);
         let index = match at {
@@ -595,6 +639,7 @@ impl App {
                     w.set_dialog(Dialog::None);
                     me.show_workspace(&w, &info);
                     me.refresh_recent();
+                    me.link_after_checkout(&w, &info);
                 }
                 Err(e) => {
                     if e.code == "unauthenticated" {
@@ -646,6 +691,9 @@ impl App {
                 }
             }
             _ => w.set_dialog(Dialog::None),
+        }
+        if let Some(me) = self.me() {
+            me.queued_link();
         }
     }
 }

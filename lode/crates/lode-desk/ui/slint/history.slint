@@ -4,6 +4,7 @@
 import { Button, ListView, Slider, Palette } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Muted, Title } from "parts.slint";
 import { CheckBadgeInfo, CheckRow, CheckBadge, ChecksList } from "checks.slint";
+import { Links, CopyLinkButton } from "links.slint";
 
 /// Which view of a workspace shows.
 export enum Pane { changes, history, blame, diff, locks, shelves, conflict, view }
@@ -415,6 +416,12 @@ component RevFileRow inherits Rectangle {
             label: "Blame " + root.file.path;
             clicked => { Reading.blame-file(root.file.path, root.rev); }
         }
+        CopyLinkButton {
+            y: (parent.height - self.height) / 2;
+            text: "Link";
+            target: root.file.path + " at r" + root.rev;
+            clicked => { Links.copy-file(root.file.path, root.rev); }
+        }
     }
 }
 
@@ -526,6 +533,11 @@ export component HistoryView inherits Rectangle {
                         accessible-value: self.text;
                     }
                     Muted { text: Reading.detail.on-branch; vertical-alignment: center; horizontal-stretch: 1; }
+                    CopyLinkButton {
+                        y: (parent.height - self.height) / 2;
+                        target: "r" + Reading.detail.rev;
+                        clicked => { Links.copy-revision(Reading.detail.rev); }
+                    }
                 }
                 Text {
                     text: Reading.detail.summary;

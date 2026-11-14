@@ -5,6 +5,7 @@ import { Button, LineEdit, TextEdit, ListView, ComboBox, Palette } from "std-wid
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check, DialogButtons } from "parts.slint";
 import { CheckBadgeInfo, CheckRow, CheckBadge, ChecksList } from "checks.slint";
 import { DiffRow, DiffRowView, Reading } from "history.slint";
+import { Links, CopyLinkButton } from "links.slint";
 
 export struct LockRow {
     path: string,
@@ -428,6 +429,11 @@ export component ShelvesView inherits Rectangle {
                             accessible-value: self.text;
                         }
                         Muted { text: Team.shelf.subtitle; }
+                    }
+                    CopyLinkButton {
+                        y: (parent.height - self.height) / 2;
+                        target: "shelf " + Team.shelf.id;
+                        clicked => { Links.copy-shelf(Team.shelf.id); }
                     }
                     if !Team.shelf.deleted: Button {
                         text: Team.shelf.busy == "Unshelving" ? "Unshelving…" : "Unshelve";
