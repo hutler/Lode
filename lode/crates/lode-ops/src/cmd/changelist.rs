@@ -11,7 +11,7 @@ use lode_workspace::{FileState, Status};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, under, DEFAULT_CHANGELIST};
 
 /// Longest changelist name.
@@ -62,25 +62,25 @@ pub struct ChangelistArgs {
     pub command: ChangelistCommand,
 }
 
-fn check_name(name: &str) -> CliResult<()> {
+fn check_name(name: &str) -> OpResult<()> {
     let ok = !name.is_empty()
         && name.len() <= MAX_NAME
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
     if !ok {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "invalid changelist name `{name}`: use 1 to {MAX_NAME} letters, digits, `.`, `_` or `-`"
         )));
     }
     if name == DEFAULT_CHANGELIST {
-        return Err(CliError::usage("`default` always exists"));
+        return Err(OpError::usage("`default` always exists"));
     }
     Ok(())
 }
 
 /// Runs `lode changelist`.
-pub async fn changelist(ctx: &Ctx, args: ChangelistArgs) -> CliResult<Value> {
+pub async fn changelist(ctx: &Ctx, args: ChangelistArgs) -> OpResult<Value> {
     match args.command {
         ChangelistCommand::New { name, description } => new(ctx, &name, &description),
         ChangelistCommand::List => list(ctx),
@@ -89,12 +89,12 @@ pub async fn changelist(ctx: &Ctx, args: ChangelistArgs) -> CliResult<Value> {
     }
 }
 
-fn new(ctx: &Ctx, name: &str, description: &str) -> CliResult<Value> {
+fn new(ctx: &Ctx, name: &str, description: &str) -> OpResult<Value> {
     check_name(name)?;
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     if ws.db().changelists()?.iter().any(|c| c.name == name) {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "conflict",
             format!("changelist `{name}` already exists"),
         ));
@@ -105,7 +105,7 @@ fn new(ctx: &Ctx, name: &str, description: &str) -> CliResult<Value> {
     Ok(json!({ "changelist": name }))
 }
 
-fn list(ctx: &Ctx) -> CliResult<Value> {
+fn list(ctx: &Ctx) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let report = local::scan(ctx, &mut ws, &[], false)?;
     let lists = ws.db().changelists()?;
@@ -149,7 +149,7 @@ fn list(ctx: &Ctx) -> CliResult<Value> {
     Ok(json!({ "changelists": out }))
 }
 
-fn move_to(ctx: &Ctx, name: &str, paths: &[PathBuf]) -> CliResult<Value> {
+fn move_to(ctx: &Ctx, name: &str, paths: &[PathBuf]) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let target = local::changelist(&ws, name)?.map(|c| c.id);
@@ -206,11 +206,11 @@ fn move_to(ctx: &Ctx, name: &str, paths: &[PathBuf]) -> CliResult<Value> {
     Ok(json!({ "changelist": name, "moved": moved }))
 }
 
-fn delete(ctx: &Ctx, name: &str) -> CliResult<Value> {
+fn delete(ctx: &Ctx, name: &str) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let Some(cl) = local::changelist(&ws, name)? else {
-        return Err(CliError::usage("`default` cannot be deleted"));
+        return Err(OpError::usage("`default` cannot be deleted"));
     };
     let files = ws.db_mut().write(|tx| {
         let n = tx.changelist_size(cl.id)?;

@@ -11,12 +11,12 @@ use lode_workspace::{FileRow, FileState, Status, Workspace};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, under};
 use crate::materialize::{place_symlink, prepare_target, remove_and_prune};
 
 /// `lode add` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct AddArgs {
     /// Files and directories (directories are added recursively).
     #[arg(required = true)]
@@ -30,7 +30,7 @@ pub struct AddArgs {
 }
 
 /// `lode rm` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct RmArgs {
     /// Files and directories (directories recursively).
     #[arg(required = true)]
@@ -47,7 +47,7 @@ pub struct RmArgs {
 }
 
 /// `lode mv` and `lode cp` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct MoveArgs {
     /// Sources, then the destination. With several sources the destination is a directory.
     #[arg(required = true, num_args = 2..)]
@@ -61,13 +61,13 @@ pub struct MoveArgs {
 }
 
 /// The changelist id `-c NAME` names, or the default one when `-c` is absent.
-fn changelist_arg(ws: &Workspace, name: Option<&str>) -> CliResult<Option<Option<i64>>> {
+fn changelist_arg(ws: &Workspace, name: Option<&str>) -> OpResult<Option<Option<i64>>> {
     name.map(|n| local::changelist(ws, n).map(|c| c.map(|c| c.id)))
         .transpose()
 }
 
 /// An `added` row for the file at `local`, with its kind, executable bit, size and mtime.
-pub fn added_row(local: &Path, path: DepotPath) -> CliResult<FileRow> {
+pub fn added_row(local: &Path, path: DepotPath) -> OpResult<FileRow> {
     let meta = fs::symlink_metadata(local)?;
     let kind = if meta.file_type().is_symlink() {
         EntryKind::Symlink
@@ -106,7 +106,7 @@ fn is_executable(_meta: &fs::Metadata) -> bool {
 }
 
 /// Runs `lode add`.
-pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
+pub async fn add(ctx: &Ctx, args: AddArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let named = local::depot_paths(ctx, &ws, &args.paths)?;
@@ -127,7 +127,7 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
             match fs::symlink_metadata(&local) {
                 Ok(m) if m.is_dir() => {}
                 Ok(_) if !view.contains(p) => {
-                    return Err(CliError::failed(
+                    return Err(OpError::failed(
                         "outside_view",
                         format!("{p} is outside this workspace's view; see `lode view`"),
                     ))
@@ -141,7 +141,7 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
         return Err(local::not_found("no such file", &missing));
     }
     if !ignored_named.is_empty() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "ignored",
             format!(
                 "{} {} ignored; use --force to add anyway",
@@ -203,7 +203,7 @@ pub async fn add(ctx: &Ctx, args: AddArgs) -> CliResult<Value> {
 }
 
 /// Runs `lode rm`.
-pub async fn rm(ctx: &Ctx, args: RmArgs) -> CliResult<Value> {
+pub async fn rm(ctx: &Ctx, args: RmArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let named = local::depot_paths(ctx, &ws, &args.paths)?;
@@ -230,7 +230,7 @@ pub async fn rm(ctx: &Ctx, args: RmArgs) -> CliResult<Value> {
         .map(|e| e.path.as_str().to_owned())
         .collect();
     if !precious.is_empty() && !args.force && !args.keep {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "local_changes",
             format!(
                 "{} {} local changes; use --keep to stop tracking only, or --force",
@@ -283,15 +283,15 @@ struct Pair {
 }
 
 /// Where each named source goes.
-fn plan(ctx: &Ctx, ws: &Workspace, args: &MoveArgs, verb: &str) -> CliResult<Vec<Pair>> {
+fn plan(ctx: &Ctx, ws: &Workspace, args: &MoveArgs, verb: &str) -> OpResult<Vec<Pair>> {
     let (dest_arg, src_args) = args
         .paths
         .split_last()
-        .ok_or_else(|| CliError::usage("give a source and a destination"))?;
+        .ok_or_else(|| OpError::usage("give a source and a destination"))?;
     let dest = local::depot_path(ctx, ws, dest_arg)?;
     let dest_is_dir = fs::symlink_metadata(ws.local_path(&dest)).is_ok_and(|m| m.is_dir());
     if src_args.len() > 1 && !dest_is_dir {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "with several sources, {dest} must be an existing directory"
         )));
     }
@@ -300,14 +300,14 @@ fn plan(ctx: &Ctx, ws: &Workspace, args: &MoveArgs, verb: &str) -> CliResult<Vec
     for s in src_args {
         let src = local::depot_path(ctx, ws, s)?;
         if under(&dest, &src) {
-            return Err(CliError::usage(format!("cannot {verb} {src} into itself")));
+            return Err(OpError::usage(format!("cannot {verb} {src} into itself")));
         }
         let exact = rows
             .iter()
             .find(|r| r.path == src && r.state != FileState::Deleted);
         let base = if dest_is_dir && (src_args.len() > 1 || !args.after || exact.is_some()) {
             dest.join(src.name())
-                .map_err(|e| CliError::usage(e.to_string()))?
+                .map_err(|e| OpError::usage(e.to_string()))?
         } else {
             dest.clone()
         };
@@ -322,7 +322,7 @@ fn plan(ctx: &Ctx, ws: &Workspace, args: &MoveArgs, verb: &str) -> CliResult<Vec
                 base.clone()
             } else {
                 DepotPath::parse(&format!("{}{rest}", base.as_str()))
-                    .map_err(|e| CliError::usage(e.to_string()))?
+                    .map_err(|e| OpError::usage(e.to_string()))?
             };
             pairs.push(Pair {
                 from: r.clone(),
@@ -337,14 +337,14 @@ fn plan(ctx: &Ctx, ws: &Workspace, args: &MoveArgs, verb: &str) -> CliResult<Vec
 }
 
 /// Checks a plan against the database and the disk before anything changes.
-fn check(ws: &Workspace, pairs: &[Pair], after: bool, is_move: bool) -> CliResult<()> {
+fn check(ws: &Workspace, pairs: &[Pair], after: bool, is_move: bool) -> OpResult<()> {
     let view = ws.view_spec()?.compile()?;
     let mut targets = HashSet::new();
     let sources: HashSet<&DepotPath> = pairs.iter().map(|p| &p.from.path).collect();
     for p in pairs {
         let to = &p.to;
         let fail = |code: &str, msg: String| {
-            Err(CliError::failed(code, msg).with_details(json!({ "paths": [to.as_str()] })))
+            Err(OpError::failed(code, msg).with_details(json!({ "paths": [to.as_str()] })))
         };
         if to
             .segments()
@@ -408,12 +408,12 @@ fn check(ws: &Workspace, pairs: &[Pair], after: bool, is_move: bool) -> CliResul
     Ok(())
 }
 
-fn copy_on_disk(from: &Path, to: &Path) -> CliResult<()> {
+fn copy_on_disk(from: &Path, to: &Path) -> OpResult<()> {
     let meta = fs::symlink_metadata(from)?;
     if meta.file_type().is_symlink() {
         let target = fs::read_link(from)?;
         let text = target.to_str().ok_or_else(|| {
-            CliError::failed(
+            OpError::failed(
                 "invalid_name",
                 format!("{} points to a non-UTF-8 name", from.display()),
             )
@@ -426,7 +426,7 @@ fn copy_on_disk(from: &Path, to: &Path) -> CliResult<()> {
     Ok(())
 }
 
-async fn move_or_copy(ctx: &Ctx, args: MoveArgs, is_move: bool) -> CliResult<Value> {
+async fn move_or_copy(ctx: &Ctx, args: MoveArgs, is_move: bool) -> OpResult<Value> {
     let verb = if is_move { "move" } else { "copy" };
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
@@ -503,11 +503,11 @@ async fn move_or_copy(ctx: &Ctx, args: MoveArgs, is_move: bool) -> CliResult<Val
 }
 
 /// Runs `lode mv`.
-pub async fn mv(ctx: &Ctx, args: MoveArgs) -> CliResult<Value> {
+pub async fn mv(ctx: &Ctx, args: MoveArgs) -> OpResult<Value> {
     move_or_copy(ctx, args, true).await
 }
 
 /// Runs `lode cp`.
-pub async fn cp(ctx: &Ctx, args: MoveArgs) -> CliResult<Value> {
+pub async fn cp(ctx: &Ctx, args: MoveArgs) -> OpResult<Value> {
     move_or_copy(ctx, args, false).await
 }

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::cmd::checkout::{full_manifest, CHECKOUT_REV};
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::materialize::{fetch_entries, remove_and_prune};
 
 /// `lode view` subcommands.
@@ -24,7 +24,7 @@ pub enum ViewCmd {
 }
 
 /// Patterns to add or remove.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct PatternArgs {
     /// Glob patterns, such as `art/**`.
     #[arg(required = true)]
@@ -52,7 +52,7 @@ fn view_json(v: &ViewSpec) -> Value {
 }
 
 /// Runs a `lode view` subcommand.
-pub async fn view(ctx: &Ctx, cmd: ViewCmd) -> CliResult<Value> {
+pub async fn view(ctx: &Ctx, cmd: ViewCmd) -> OpResult<Value> {
     let mut ws = ctx.workspace()?;
     let current = ws.view_spec()?;
     let (args, include) = match cmd {
@@ -85,21 +85,16 @@ pub async fn view(ctx: &Ctx, cmd: ViewCmd) -> CliResult<Value> {
 }
 
 /// Brings the files on disk to `next` and stores it.
-async fn sync_view(
-    ctx: &Ctx,
-    ws: &mut Workspace,
-    next: &ViewSpec,
-    force: bool,
-) -> CliResult<Value> {
+async fn sync_view(ctx: &Ctx, ws: &mut Workspace, next: &ViewSpec, force: bool) -> OpResult<Value> {
     let _lock = ws.lock()?;
     if ws.db().config(CHECKOUT_REV)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "checkout_incomplete",
             "the checkout of this workspace did not finish; rerun `lode checkout` first",
         ));
     }
     let rev = ws.db().config_u64(keys::SYNCED_REV)?.ok_or_else(|| {
-        CliError::failed(
+        OpError::failed(
             "checkout_incomplete",
             "this workspace has no synced revision",
         )
@@ -107,7 +102,7 @@ async fn sync_view(
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let server = ctx.server_url(Some(ws))?;
     let client = ctx.client(&server)?;
     let (entries, _) = full_manifest(&client, &depot, rev, next).await?;
@@ -163,7 +158,7 @@ async fn sync_view(
             ));
         }
         msg.push_str("; commit or revert them, or pass --force");
-        return Err(CliError::failed("local_changes", msg)
+        return Err(OpError::failed("local_changes", msg)
             .with_details(json!({ "paths": blocked, "untracked": in_the_way })));
     }
 

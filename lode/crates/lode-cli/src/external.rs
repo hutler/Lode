@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use lode_workspace::db::keys;
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// The executable for `lode-<name>` on `PATH`.
 fn find(name: &str) -> Option<PathBuf> {
@@ -46,12 +46,12 @@ fn is_executable(p: &Path) -> bool {
 }
 
 /// Runs `lode-<args[0]>` and returns its exit code.
-pub fn run(ctx: &Ctx, args: &[OsString]) -> CliResult<i32> {
+pub fn run(ctx: &Ctx, args: &[OsString]) -> OpResult<i32> {
     let Some(name) = args.first().and_then(|a| a.to_str()) else {
-        return Err(CliError::usage("no command given; see `lode --help`"));
+        return Err(OpError::usage("no command given; see `lode --help`"));
     };
     let Some(exe) = find(name) else {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "unknown command `{name}`; see `lode --help` (no `lode-{name}` on PATH either)"
         )));
     };
@@ -79,6 +79,6 @@ pub fn run(ctx: &Ctx, args: &[OsString]) -> CliResult<i32> {
     }
     let status = cmd
         .status()
-        .map_err(|e| CliError::failed("external", format!("cannot run {}: {e}", exe.display())))?;
+        .map_err(|e| OpError::failed("external", format!("cannot run {}: {e}", exe.display())))?;
     Ok(status.code().unwrap_or(1))
 }

@@ -12,11 +12,11 @@ use lode_workspace::{FileState, ScanEntry, Status, Workspace};
 use serde_json::{json, Map, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local;
 
 /// `lode status` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Show changed paths, one per line.
 
 Each line is a status letter, a lock marker, and the depot path:
@@ -75,7 +75,7 @@ fn moved(e: &ScanEntry, rows: &HashMap<String, FileState>) -> bool {
 }
 
 /// Runs `lode status`.
-pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
+pub async fn status(ctx: &Ctx, args: StatusArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let paths = local::depot_paths(ctx, &ws, &args.paths)?;
     let report = local::scan(ctx, &mut ws, &paths, false)?;
@@ -192,15 +192,15 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> CliResult<Value> {
 /// What the server knows about the files in `scope` (all when empty): a newer version on the
 /// branch head, and locks. One request each for the head, the changes since the workspace's
 /// revision (skipped when it is at the head) and the locks.
-async fn remote(ctx: &Ctx, ws: &Workspace, scope: &[DepotPath]) -> CliResult<Value> {
+async fn remote(ctx: &Ctx, ws: &Workspace, scope: &[DepotPath]) -> OpResult<Value> {
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let branch = ws
         .db()
         .config(keys::BRANCH)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no branch"))?;
     let workspace_id = ws.db().config(keys::WORKSPACE_ID)?;
     let synced = local::synced_rev(ws)?;
     let server = ctx.server_url(Some(ws))?;

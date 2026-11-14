@@ -19,17 +19,17 @@ use serde_json::json;
 
 use crate::cmd::checkout::CHECKOUT_REV;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::materialize::{place_file, place_symlink, prepare_target};
 
 /// Largest symlink target accepted from the server.
 const MAX_SYMLINK: usize = 64 * 1024;
 
 /// The workspace around the working directory, refusing one whose checkout did not finish.
-pub fn open(ctx: &Ctx) -> CliResult<Workspace> {
+pub fn open(ctx: &Ctx) -> OpResult<Workspace> {
     let ws = ctx.workspace()?;
     if ws.db().config(CHECKOUT_REV)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "checkout_incomplete",
             "the checkout of this workspace did not finish; rerun `lode checkout` first",
         ));
@@ -39,7 +39,7 @@ pub fn open(ctx: &Ctx) -> CliResult<Workspace> {
 
 /// Command-line paths as depot paths. An empty result means the whole workspace (no paths
 /// given, or one of them is the root).
-pub fn depot_paths(ctx: &Ctx, ws: &Workspace, args: &[PathBuf]) -> CliResult<Vec<DepotPath>> {
+pub fn depot_paths(ctx: &Ctx, ws: &Workspace, args: &[PathBuf]) -> OpResult<Vec<DepotPath>> {
     let mut out = Vec::with_capacity(args.len());
     for a in args {
         match lode_workspace::paths::to_depot(ws.root(), &ctx.cwd, a)? {
@@ -53,9 +53,9 @@ pub fn depot_paths(ctx: &Ctx, ws: &Workspace, args: &[PathBuf]) -> CliResult<Vec
 }
 
 /// Like [`depot_paths`], but every argument must name something below the root.
-pub fn depot_path(ctx: &Ctx, ws: &Workspace, arg: &Path) -> CliResult<DepotPath> {
+pub fn depot_path(ctx: &Ctx, ws: &Workspace, arg: &Path) -> OpResult<DepotPath> {
     lode_workspace::paths::to_depot(ws.root(), &ctx.cwd, arg)?.ok_or_else(|| {
-        CliError::usage(format!(
+        OpError::usage(format!(
             "{} is the workspace root; name a file or directory",
             arg.display()
         ))
@@ -74,7 +74,7 @@ pub fn scan(
     ws: &mut Workspace,
     paths: &[DepotPath],
     report_ignored: bool,
-) -> CliResult<ScanReport> {
+) -> OpResult<ScanReport> {
     let report = ws.scan(&ScanOptions {
         paths: paths.to_vec(),
         report_ignored,
@@ -91,9 +91,9 @@ pub fn scan(
 }
 
 /// The revision the workspace was synced to.
-pub fn synced_rev(ws: &Workspace) -> CliResult<u64> {
+pub fn synced_rev(ws: &Workspace) -> OpResult<u64> {
     ws.db().config_u64(keys::SYNCED_REV)?.ok_or_else(|| {
-        CliError::failed(
+        OpError::failed(
             "checkout_incomplete",
             "this workspace has no synced revision",
         )
@@ -126,7 +126,7 @@ pub fn mine_path(ws: &Workspace, id: &ObjectId) -> PathBuf {
 }
 
 /// Forgets a conflict: its row, its `.theirs-r<N>` file and the content it set aside.
-pub fn clear_conflict(ws: &mut Workspace, c: &ConflictRow) -> CliResult<()> {
+pub fn clear_conflict(ws: &mut Workspace, c: &ConflictRow) -> OpResult<()> {
     remove_if_exists(&theirs_path(&ws.local_path(&c.path), c.theirs_rev))?;
     ws.db_mut().write(|tx| tx.remove_conflict(&c.path))?;
     if let Some(id) = c.mine_id {
@@ -161,11 +161,11 @@ pub struct Bases<'a> {
 
 impl<'a> Bases<'a> {
     /// Bases for `ws`.
-    pub fn new(ctx: &'a Ctx, ws: &Workspace) -> CliResult<Self> {
+    pub fn new(ctx: &'a Ctx, ws: &Workspace) -> OpResult<Self> {
         let depot = ws
             .db()
             .config(keys::DEPOT)?
-            .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+            .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
         Ok(Self {
             ctx,
             server: ctx.server_url(Some(ws))?,
@@ -178,18 +178,18 @@ impl<'a> Bases<'a> {
         })
     }
 
-    fn client(&mut self) -> CliResult<&Client> {
+    fn client(&mut self) -> OpResult<&Client> {
         if self.client.is_none() {
             self.client = Some(self.ctx.client(&self.server)?);
         }
         self.client
             .as_ref()
-            .ok_or_else(|| CliError::failed("internal", "no client"))
+            .ok_or_else(|| OpError::failed("internal", "no client"))
     }
 
     /// The content of `id` in memory, cached for later diffs and merges. At most
     /// [`MAX_IN_MEMORY`] bytes.
-    pub async fn read(&mut self, id: &ObjectId) -> CliResult<Vec<u8>> {
+    pub async fn read(&mut self, id: &ObjectId) -> OpResult<Vec<u8>> {
         if let Some(p) = self.cache.get(id)? {
             return Ok(fs::read(p)?);
         }
@@ -206,7 +206,7 @@ impl<'a> Bases<'a> {
 
     /// Writes the content of `id` to a new temporary file in `.lode/tmp` and returns it.
     /// Large files are not put in the cache: they would only evict the useful entries.
-    async fn fetch_tmp(&mut self, id: &ObjectId) -> CliResult<PathBuf> {
+    async fn fetch_tmp(&mut self, id: &ObjectId) -> OpResult<PathBuf> {
         fs::create_dir_all(&self.tmp)?;
         let tmp = self
             .tmp
@@ -240,19 +240,18 @@ impl<'a> Bases<'a> {
         id: &ObjectId,
         kind: EntryKind,
         executable: bool,
-    ) -> CliResult<PathBuf> {
+    ) -> OpResult<PathBuf> {
         let target = prepare_target(root, path)?;
         if kind == EntryKind::Symlink {
             let bytes = self.read(id).await?;
             if bytes.len() > MAX_SYMLINK {
-                return Err(CliError::failed(
+                return Err(OpError::failed(
                     "protocol",
                     format!("symlink {path} is too long"),
                 ));
             }
-            let text = String::from_utf8(bytes).map_err(|_| {
-                CliError::failed("protocol", format!("symlink {path} is not UTF-8"))
-            })?;
+            let text = String::from_utf8(bytes)
+                .map_err(|_| OpError::failed("protocol", format!("symlink {path} is not UTF-8")))?;
             place_symlink(&text, &target)?;
         } else {
             let tmp = self.fetch_tmp(id).await?;
@@ -262,9 +261,9 @@ impl<'a> Bases<'a> {
     }
 
     /// Puts `row`'s base content and mode back on disk and marks the row unchanged.
-    pub async fn restore(&mut self, ws: &mut Workspace, row: &FileRow) -> CliResult<()> {
+    pub async fn restore(&mut self, ws: &mut Workspace, row: &FileRow) -> OpResult<()> {
         let id = row.base_id.ok_or_else(|| {
-            CliError::failed("internal", format!("{} has no base to restore", row.path))
+            OpError::failed("internal", format!("{} has no base to restore", row.path))
         })?;
         let root = ws.root().to_path_buf();
         let target = self
@@ -283,8 +282,8 @@ impl<'a> Bases<'a> {
 }
 
 /// A `not_found` error naming `paths`.
-pub fn not_found(what: &str, paths: &[String]) -> CliError {
-    CliError::failed("not_found", format!("{what}: {}", paths.join(", ")))
+pub fn not_found(what: &str, paths: &[String]) -> OpError {
+    OpError::failed("not_found", format!("{what}: {}", paths.join(", ")))
         .with_details(json!({ "paths": paths }))
 }
 
@@ -292,7 +291,7 @@ pub fn not_found(what: &str, paths: &[String]) -> CliError {
 pub const DEFAULT_CHANGELIST: &str = "default";
 
 /// The changelist called `name`: `None` for `default`, `not_found` when there is none.
-pub fn changelist(ws: &Workspace, name: &str) -> CliResult<Option<lode_workspace::ChangelistRow>> {
+pub fn changelist(ws: &Workspace, name: &str) -> OpResult<Option<lode_workspace::ChangelistRow>> {
     if name == DEFAULT_CHANGELIST {
         return Ok(None);
     }
@@ -302,7 +301,7 @@ pub fn changelist(ws: &Workspace, name: &str) -> CliResult<Option<lode_workspace
         .find(|c| c.name == name)
         .map(Some)
         .ok_or_else(|| {
-            CliError::failed(
+            OpError::failed(
                 "not_found",
                 format!("no changelist `{name}`; create it with `lode changelist new {name}`"),
             )

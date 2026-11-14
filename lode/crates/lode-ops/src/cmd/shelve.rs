@@ -6,7 +6,6 @@
 //! unless `--keep`. `unshelve` applies a shelf's changes on top of the workspace with the merge
 //! and conflict handling of `update`, the shelf's base content being the common ancestor.
 
-use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use lode_client::Client;
@@ -24,12 +23,12 @@ use crate::cmd::history::{format_time, who};
 use crate::cmd::merge::{describe, pending_merges, set_pending_merges};
 use crate::cmd::update::UPDATE_REV;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, Bases, FROM_SHELF};
 use crate::materialize::remove_and_prune;
 
 /// `lode shelve` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Put pending changes on a shelf on the server.
 \nThe content is uploaded and the changes are checked against the branch head, like a commit,
 but no revision is made. The shelved files are then reverted in the workspace unless --keep.
@@ -53,7 +52,7 @@ pub struct ShelveArgs {
 }
 
 /// `lode shelves` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "List the open shelves of this depot.
 \nWith --json: {\"shelves\":[{\"id\",\"version\",\"branch\",\"base_rev\",\"owner\":{\"name\",\"kind\"},
 \"description\",\"state\",\"created_at\",\"updated_at\",...}]}, newest first.")]
@@ -112,7 +111,7 @@ pub struct ShelfArgs {
 }
 
 /// `lode unshelve` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Apply a shelf's changes to the workspace.
 \nWorks for anyone's shelf. A file changed here too is merged as `update` would merge it, with
 the shelf's base as the common ancestor; what cannot be merged is left in conflict (resolve it
@@ -132,12 +131,12 @@ struct Target {
     branch: String,
 }
 
-fn open(ctx: &Ctx) -> CliResult<Target> {
+fn open(ctx: &Ctx) -> OpResult<Target> {
     let ws = local::open(ctx)?;
-    let config = |k: &str| -> CliResult<String> {
+    let config = |k: &str| -> OpResult<String> {
         ws.db()
             .config(k)?
-            .ok_or_else(|| CliError::failed("workspace", format!("workspace has no {k}")))
+            .ok_or_else(|| OpError::failed("workspace", format!("workspace has no {k}")))
     };
     let depot = config(keys::DEPOT)?;
     let branch = config(keys::BRANCH)?;
@@ -152,11 +151,11 @@ fn open(ctx: &Ctx) -> CliResult<Target> {
 }
 
 /// A shelf call's error, saying so when the server does not run the module.
-async fn refused(client: &Client, e: lode_client::Error) -> CliError {
+async fn refused(client: &Client, e: lode_client::Error) -> OpError {
     if e.is_code(lode_core::ErrorCode::NotFound) && e.api().is_some_and(|a| a.paths().is_empty()) {
         if let Ok(info) = client.info().await {
             if !info.modules.iter().any(|m| m == "shelves") {
-                return CliError::failed(
+                return OpError::failed(
                     "module_disabled",
                     "this server does not have the shelves module enabled",
                 );
@@ -166,15 +165,15 @@ async fn refused(client: &Client, e: lode_client::Error) -> CliError {
     explain(e)
 }
 
-fn refuse_unfinished(ws: &Workspace) -> CliResult<()> {
+fn refuse_unfinished(ws: &Workspace) -> OpResult<()> {
     if ws.db().config(PENDING_COMMIT)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "pending_commit",
             "an earlier commit did not get an answer; run `lode commit` first",
         ));
     }
     if ws.db().config(UPDATE_REV)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "update_incomplete",
             "an update did not finish; run `lode update` first",
         ));
@@ -198,12 +197,12 @@ fn state_name(s: ShelfState) -> &'static str {
     }
 }
 
-fn to_json(v: &impl serde::Serialize) -> CliResult<Value> {
-    serde_json::to_value(v).map_err(|e| CliError::failed("internal", e.to_string()))
+fn to_json(v: &impl serde::Serialize) -> OpResult<Value> {
+    serde_json::to_value(v).map_err(|e| OpError::failed("internal", e.to_string()))
 }
 
 /// Runs `lode shelve`.
-pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
+pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> OpResult<Value> {
     let mut t = open(ctx)?;
     let _lock = t.ws.lock()?;
     refuse_unfinished(&t.ws)?;
@@ -225,11 +224,11 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
         .or_else(|| existing.as_ref().map(|s| s.description.clone()))
         .map(|d| d.trim().to_owned())
         .filter(|d| !d.is_empty())
-        .ok_or_else(|| CliError::usage("a shelf needs a description: pass -m"))?;
+        .ok_or_else(|| OpError::usage("a shelf needs a description: pass -m"))?;
 
     let merges = pending_merges(&t.ws)?;
     if !merges.is_empty() && (!paths.is_empty() || list_id.is_some()) {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "the merge of {} must be shelved whole: shelve without paths or -c",
             describe(&merges[0])
         )));
@@ -240,10 +239,10 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
             Some(n) => format!("nothing to shelve in changelist {n}"),
             None => "nothing to shelve".to_owned(),
         };
-        return Err(CliError::failed("nothing_to_shelve", msg));
+        return Err(OpError::failed("nothing_to_shelve", msg));
     }
     let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
-    validate_changes(&changes).map_err(|e| CliError::failed("invalid_change", e.to_string()))?;
+    validate_changes(&changes).map_err(|e| OpError::failed("invalid_change", e.to_string()))?;
     let uploaded = upload(ctx, &t.client, &t.depot, &out).await?;
     // Checked against the head: the touched files must be up to date, as for a commit.
     let head = t.client.branch(&t.depot, &t.branch).await?.head_rev;
@@ -318,7 +317,7 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> CliResult<Value> {
 
 /// Takes the shelved changes out of the workspace: adds are removed from disk, the rest
 /// restored to their base.
-async fn discard(ctx: &Ctx, ws: &mut Workspace, out: &[Outgoing]) -> CliResult<()> {
+async fn discard(ctx: &Ctx, ws: &mut Workspace, out: &[Outgoing]) -> OpResult<()> {
     let mut bases = Bases::new(ctx, ws)?;
     let root = ws.root().to_path_buf();
     let mut paths = Vec::with_capacity(out.len());
@@ -341,7 +340,7 @@ async fn discard(ctx: &Ctx, ws: &mut Workspace, out: &[Outgoing]) -> CliResult<(
 }
 
 /// Runs `lode shelves`.
-pub async fn shelves(ctx: &Ctx, args: ShelvesArgs) -> CliResult<Value> {
+pub async fn shelves(ctx: &Ctx, args: ShelvesArgs) -> OpResult<Value> {
     let t = open(ctx)?;
     let owner = if args.mine {
         Some(t.client.whoami().await?.principal.name)
@@ -380,7 +379,7 @@ pub async fn shelves(ctx: &Ctx, args: ShelvesArgs) -> CliResult<Value> {
 }
 
 /// Runs `lode shelf`.
-pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> CliResult<Value> {
+pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> OpResult<Value> {
     let t = open(ctx)?;
     match args.command {
         ShelfCommand::Show { id } => {
@@ -394,11 +393,7 @@ pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> CliResult<Value> {
                 .line(format!("# shelf {} version {}", v.id, v.version));
             for d in v.diff.iter().flatten() {
                 match (&d.patch, &d.skipped) {
-                    (Some(p), _) => {
-                        if !ctx.g.json {
-                            print!("{p}");
-                        }
-                    }
+                    (Some(p), _) => ctx.out.raw(p.as_bytes())?,
                     (None, Some(why)) => ctx.out.line(format!("# {}: {why}, not shown", d.path)),
                     (None, None) => {}
                 }
@@ -417,8 +412,8 @@ pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> CliResult<Value> {
 }
 
 /// `ID` or `ID@VERSION`.
-fn parse_spec(spec: &str) -> CliResult<(u64, Option<u64>)> {
-    let bad = || CliError::usage(format!("`{spec}` is not a shelf: use ID or ID@VERSION"));
+fn parse_spec(spec: &str) -> OpResult<(u64, Option<u64>)> {
+    let bad = || OpError::usage(format!("`{spec}` is not a shelf: use ID or ID@VERSION"));
     let (id, version) = match spec.split_once('@') {
         Some((i, v)) => (i, Some(v.parse::<u64>().map_err(|_| bad())?)),
         None => (spec, None),
@@ -458,7 +453,7 @@ fn unmet_checks(details: &Value) -> Option<String> {
 }
 
 /// What to do about a refused submit.
-fn submit_refused(e: lode_client::Error) -> CliError {
+fn submit_refused(e: lode_client::Error) -> OpError {
     let version = e
         .api()
         .and_then(|a| a.details.get("version"))
@@ -486,24 +481,22 @@ fn submit_refused(e: lode_client::Error) -> CliError {
     err
 }
 
-async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> CliResult<Value> {
+async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> OpResult<Value> {
     let (id, version) = parse_spec(spec)?;
     let version = match version {
         Some(v) => v,
         None => {
-            let interactive = !ctx.g.json && std::io::stdin().is_terminal();
+            let interactive = !ctx.g.json && ctx.out.ui().interactive();
             if !interactive {
-                return Err(CliError::usage(
+                return Err(OpError::usage(
                     "name the version you reviewed: `lode shelf submit ID@VERSION`",
                 ));
             }
             let v = get(t, id, false).await?;
             print_shelf(ctx, &v);
-            eprint!("Submit version {} of shelf {id}? [y/N] ", v.version);
-            let mut answer = String::new();
-            std::io::stdin().read_line(&mut answer)?;
-            if !matches!(answer.trim(), "y" | "Y" | "yes") {
-                return Err(CliError::failed("aborted", "nothing was submitted"));
+            let question = format!("Submit version {} of shelf {id}?", v.version);
+            if !ctx.out.ui().confirm(&question)? {
+                return Err(OpError::failed("aborted", "nothing was submitted"));
             }
             v.version
         }
@@ -538,7 +531,7 @@ async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> C
     }))
 }
 
-async fn get(t: &Target, id: u64, diff: bool) -> CliResult<ShelfView> {
+async fn get(t: &Target, id: u64, diff: bool) -> OpResult<ShelfView> {
     match t.client.shelf(&t.depot, id, diff).await {
         Ok(v) => Ok(v),
         Err(e) => Err(refused(&t.client, e).await),
@@ -584,21 +577,21 @@ pub(crate) fn print_shelf(ctx: &Ctx, v: &ShelfView) {
 }
 
 /// Runs `lode unshelve`.
-pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> CliResult<Value> {
+pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> OpResult<Value> {
     let mut t = open(ctx)?;
     let _lock = t.ws.lock()?;
     refuse_unfinished(&t.ws)?;
     refuse_conflicts(&t.ws)?;
     let shelf = get(&t, args.id, false).await?;
     if shelf.state == ShelfState::Deleted {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "not_found",
             format!("shelf {} was deleted", shelf.id),
         ));
     }
     if !shelf.merged_from.is_empty() {
         if let Some(m) = pending_merges(&t.ws)?.first() {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "merge_pending",
                 format!(
                     "the shelf carries a merge, and the merge of {} is pending here; commit or abandon it first",

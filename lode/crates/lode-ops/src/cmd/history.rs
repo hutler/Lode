@@ -14,11 +14,11 @@ use time::format_description::well_known::Rfc3339;
 use tokio::io::AsyncWriteExt;
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local;
 
 /// Where to read from, for commands that also work outside a workspace.
-#[derive(Debug, Clone, clap::Args)]
+#[derive(Debug, Clone, Default, clap::Args)]
 pub struct Source {
     /// Depot to read, instead of the workspace's (paths are then depot paths).
     #[arg(long)]
@@ -46,8 +46,21 @@ pub struct LogArgs {
     pub source: Source,
 }
 
+/// The options of a bare `lode log`.
+impl Default for LogArgs {
+    fn default() -> Self {
+        Self {
+            path: None,
+            max: 50,
+            follow: false,
+            verbose: false,
+            source: Source::default(),
+        }
+    }
+}
+
 /// `lode cat` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(
     long_about = "Print a file as of a revision (default: the workspace's revision, else \
 the branch head).
@@ -67,7 +80,7 @@ pub struct CatArgs {
 }
 
 /// `lode blame` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(
     long_about = "Show the revision that last changed each line of a text file.
 \nThe file's history is followed through copies and renames (`lode mv`, `lode cp`) and into
@@ -85,7 +98,7 @@ pub struct BlameArgs {
 }
 
 /// `lode ls` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct LsArgs {
     /// Directory or file, optionally `@rev`; the working directory (or, with --depot, the
     /// root) when missing.
@@ -108,13 +121,13 @@ struct Target {
     root: Option<std::path::PathBuf>,
 }
 
-fn target(ctx: &Ctx, src: &Source) -> CliResult<Target> {
+fn target(ctx: &Ctx, src: &Source) -> OpResult<Target> {
     let ws = if src.depot.is_some() {
         None
     } else {
         Some(local::open(ctx).map_err(|e| {
             if e.code == "not_a_workspace" {
-                CliError::usage("not in a workspace: run this inside one, or give --depot")
+                OpError::usage("not in a workspace: run this inside one, or give --depot")
             } else {
                 e
             }
@@ -134,7 +147,7 @@ fn target(ctx: &Ctx, src: &Source) -> CliResult<Target> {
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let ws_branch = ws
         .db()
         .config(keys::BRANCH)?
@@ -155,13 +168,13 @@ fn target(ctx: &Ctx, src: &Source) -> CliResult<Target> {
 }
 
 /// Splits `path@rev`. A trailing `@` part that is not a revision stays in the path.
-fn split_rev(arg: &str) -> CliResult<(&str, Option<u64>)> {
+fn split_rev(arg: &str) -> OpResult<(&str, Option<u64>)> {
     if let Some((p, r)) = arg.rsplit_once('@') {
         let digits = r.strip_prefix('r').unwrap_or(r);
         if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
             let rev = digits
                 .parse()
-                .map_err(|_| CliError::usage(format!("bad revision in {arg}")))?;
+                .map_err(|_| OpError::usage(format!("bad revision in {arg}")))?;
             return Ok((p, Some(rev)));
         }
     }
@@ -171,7 +184,7 @@ fn split_rev(arg: &str) -> CliResult<(&str, Option<u64>)> {
 impl Target {
     /// A path argument: local (relative to the working directory) in a workspace, a depot
     /// path otherwise. `None` for the root.
-    fn path(&self, ctx: &Ctx, arg: &str) -> CliResult<Option<DepotPath>> {
+    fn path(&self, ctx: &Ctx, arg: &str) -> OpResult<Option<DepotPath>> {
         if arg.is_empty() {
             return Ok(None);
         }
@@ -188,14 +201,14 @@ impl Target {
                 }
                 DepotPath::parse(trimmed)
                     .map(Some)
-                    .map_err(|e| CliError::usage(format!("{arg}: {e}")))
+                    .map_err(|e| OpError::usage(format!("{arg}: {e}")))
             }
         }
     }
 
     /// The revision to read: the one given, else the workspace's synced revision on its own
     /// branch, else the branch head.
-    async fn rev(&self, given: Option<u64>) -> CliResult<u64> {
+    async fn rev(&self, given: Option<u64>) -> OpResult<u64> {
         if let Some(r) = given.or(self.synced) {
             return Ok(r);
         }
@@ -296,14 +309,14 @@ fn print_revision(ctx: &Ctx, r: &RevisionView, verbose: bool) {
 }
 
 /// Runs `lode log`.
-pub async fn log(ctx: &Ctx, args: LogArgs) -> CliResult<Value> {
+pub async fn log(ctx: &Ctx, args: LogArgs) -> OpResult<Value> {
     let t = target(ctx, &args.source)?;
     let path = match &args.path {
         Some(p) => t.path(ctx, p)?,
         None => None,
     };
     if args.follow && path.is_none() {
-        return Err(CliError::usage("--follow needs a path"));
+        return Err(OpError::usage("--follow needs a path"));
     }
     let mut out: Vec<RevisionView> = Vec::new();
     let mut before = None;
@@ -345,18 +358,18 @@ pub async fn log(ctx: &Ctx, args: LogArgs) -> CliResult<Value> {
     Ok(json!({
         "depot": t.depot,
         "branch": t.branch,
-        "revisions": serde_json::to_value(&out).map_err(|e| CliError::failed("internal", e.to_string()))?,
+        "revisions": serde_json::to_value(&out).map_err(|e| OpError::failed("internal", e.to_string()))?,
         "more": more,
     }))
 }
 
 /// Runs `lode cat`.
-pub async fn cat(ctx: &Ctx, args: CatArgs) -> CliResult<Value> {
+pub async fn cat(ctx: &Ctx, args: CatArgs) -> OpResult<Value> {
     let t = target(ctx, &args.source)?;
     let (p, given) = split_rev(&args.path)?;
     let path = t
         .path(ctx, p)?
-        .ok_or_else(|| CliError::usage("name a file to print"))?;
+        .ok_or_else(|| OpError::usage("name a file to print"))?;
     let rev = t.rev(given).await?;
     let file = t.client.file(&t.depot, rev, &path).await?;
     let (id, kind, executable) = (file.id, file.kind, file.executable);
@@ -374,7 +387,7 @@ pub async fn cat(ctx: &Ctx, args: CatArgs) -> CliResult<Value> {
         f.flush().await?;
         f.sync_all().await?;
         drop(f);
-        tmp.persist(&dest).map_err(|e| CliError::from(e.error))?;
+        tmp.persist(&dest).map_err(|e| OpError::from(e.error))?;
         return Ok(json!({
             "path": path.as_str(),
             "rev": rev,
@@ -405,7 +418,9 @@ pub async fn cat(ctx: &Ctx, args: CatArgs) -> CliResult<Value> {
         }
         return Ok(v);
     }
-    let mut stdout = tokio::io::stdout();
+    let mut stdout = ctx.out.stream().ok_or_else(|| {
+        OpError::usage("there is nowhere to print the file here: pass --output FILE or --json")
+    })?;
     let size = file.write_to(&mut stdout).await?;
     stdout.flush().await?;
     Ok(json!({ "path": path.as_str(), "rev": rev, "size": size }))
@@ -421,7 +436,7 @@ fn mode(e: &TreeEntryView) -> &'static str {
 }
 
 /// Runs `lode ls`.
-pub async fn ls(ctx: &Ctx, args: LsArgs) -> CliResult<Value> {
+pub async fn ls(ctx: &Ctx, args: LsArgs) -> OpResult<Value> {
     let t = target(ctx, &args.source)?;
     // In a workspace, no path means the working directory.
     let here = if t.root.is_some() { "." } else { "" };
@@ -481,17 +496,17 @@ pub async fn ls(ctx: &Ctx, args: LsArgs) -> CliResult<Value> {
         "depot": t.depot,
         "rev": rev,
         "path": dir.as_ref().map(DepotPath::as_str),
-        "entries": serde_json::to_value(&entries).map_err(|e| CliError::failed("internal", e.to_string()))?,
+        "entries": serde_json::to_value(&entries).map_err(|e| OpError::failed("internal", e.to_string()))?,
     }))
 }
 
 /// Runs `lode blame`.
-pub async fn blame(ctx: &Ctx, args: BlameArgs) -> CliResult<Value> {
+pub async fn blame(ctx: &Ctx, args: BlameArgs) -> OpResult<Value> {
     let t = target(ctx, &args.source)?;
     let (p, given) = split_rev(&args.path)?;
     let path = t
         .path(ctx, p)?
-        .ok_or_else(|| CliError::usage("name a file to blame"))?;
+        .ok_or_else(|| OpError::usage("name a file to blame"))?;
     let rev = t.rev(given).await?;
     let b = t.client.blame(&t.depot, rev, &path).await?;
     let info: std::collections::HashMap<u64, &lode_proto::read::BlameRevision> =
@@ -534,5 +549,5 @@ pub async fn blame(ctx: &Ctx, args: BlameArgs) -> CliResult<Value> {
         ctx.out
             .warn("the history was cut short; lines marked ^ may be older than shown");
     }
-    serde_json::to_value(&b).map_err(|e| CliError::failed("internal", e.to_string()))
+    serde_json::to_value(&b).map_err(|e| OpError::failed("internal", e.to_string()))
 }

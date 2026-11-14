@@ -20,7 +20,7 @@ use lode_workspace::{BlobCache, FileRow, Workspace};
 use serde_json::json;
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// Parallel downloads.
 pub const PARALLEL_DOWNLOADS: usize = 8;
@@ -28,15 +28,15 @@ pub const PARALLEL_DOWNLOADS: usize = 8;
 /// Largest symlink target accepted.
 const MAX_SYMLINK: u64 = 64 * 1024;
 
-fn unsafe_path(path: &DepotPath, why: &str) -> CliError {
-    CliError::failed("unsafe_path", format!("refusing to write {path}: {why}"))
+fn unsafe_path(path: &DepotPath, why: &str) -> OpError {
+    OpError::failed("unsafe_path", format!("refusing to write {path}: {why}"))
         .with_details(json!({ "paths": [path.as_str()] }))
 }
 
 /// The local path for `path`, with every parent directory present as a real directory
 /// (created if missing). Fails if a parent is a symlink or a file, or if the path is inside
 /// `.lode`.
-pub fn prepare_target(root: &Path, path: &DepotPath) -> CliResult<PathBuf> {
+pub fn prepare_target(root: &Path, path: &DepotPath) -> OpResult<PathBuf> {
     let segs: Vec<&str> = path.segments().collect();
     if segs
         .first()
@@ -56,7 +56,7 @@ pub fn prepare_target(root: &Path, path: &DepotPath) -> CliResult<PathBuf> {
             }
             Ok(m) if m.is_dir() => {}
             Ok(_) => {
-                return Err(CliError::failed(
+                return Err(OpError::failed(
                     "conflict",
                     format!("cannot write {path}: {} is a file", dir.display()),
                 )
@@ -71,7 +71,7 @@ pub fn prepare_target(root: &Path, path: &DepotPath) -> CliResult<PathBuf> {
     let target = dir.join(segs.last().copied().unwrap_or_default());
     if let Ok(m) = fs::symlink_metadata(&target) {
         if m.is_dir() && !m.file_type().is_symlink() {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "conflict",
                 format!("cannot write {path}: a directory is in the way"),
             )
@@ -194,7 +194,7 @@ fn exit_after() -> Option<u64> {
 }
 
 /// Whether the file on disk already is `entry` (so a resumed sync can skip it).
-fn already_there(ws: &Workspace, entry: &ManifestEntry) -> CliResult<bool> {
+fn already_there(ws: &Workspace, entry: &ManifestEntry) -> OpResult<bool> {
     let Some(row) = ws.db().file(&entry.path)? else {
         return Ok(false);
     };
@@ -224,7 +224,7 @@ pub async fn fetch_entries(
     depot: &str,
     entries: Vec<ManifestEntry>,
     ctx: &Ctx,
-) -> CliResult<Fetched> {
+) -> OpResult<Fetched> {
     let out = &ctx.out;
     let root = ws.root().to_path_buf();
     let tmp_dir = ws.layout().tmp();
@@ -263,7 +263,7 @@ pub async fn fetch_entries(
                   e: &ManifestEntry,
                   target: &Path,
                   stats: &mut Fetched|
-     -> CliResult<()> {
+     -> OpResult<()> {
         let mut row = FileRow::synced(e.path.clone(), e.id, e.kind, e.executable);
         let (size, mtime) = stat_for_row(target, now)?;
         row.size = size;
@@ -281,7 +281,7 @@ pub async fn fetch_entries(
     for e in links {
         let mut target_text = Vec::new();
         if e.size > MAX_SYMLINK {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "protocol",
                 format!("symlink {} is too long", e.path),
             ));
@@ -289,9 +289,8 @@ pub async fn fetch_entries(
         client
             .get_blob_to_max(depot, &e.id, &mut target_text, MAX_SYMLINK)
             .await?;
-        let text = String::from_utf8(target_text).map_err(|_| {
-            CliError::failed("protocol", format!("symlink {} is not UTF-8", e.path))
-        })?;
+        let text = String::from_utf8(target_text)
+            .map_err(|_| OpError::failed("protocol", format!("symlink {} is not UTF-8", e.path)))?;
         let target = prepare_target(&root, &e.path)?;
         place_symlink(&text, &target)?;
         record(ws, &e, &target, &mut stats)?;
@@ -303,12 +302,13 @@ pub async fn fetch_entries(
         let tmp_dir = tmp_dir.clone();
         let cache = cache.clone();
         let depot = depot.to_owned();
+        let out = out.clone();
         async move {
             let tmp = tmp_dir.join(format!("{}-{}", id.to_hex(), std::process::id()));
             // A cache problem never fails the sync: the blob is downloaded instead.
             let hit = match &cache {
                 Some(c) => c.copy_out(&id, &tmp).unwrap_or_else(|e| {
-                    eprintln!("warning: shared cache: {e}");
+                    out.warn(format!("shared cache: {e}"));
                     false
                 }),
                 None => false,
@@ -319,11 +319,11 @@ pub async fn fetch_entries(
                 client.download_blob_max(&depot, &id, &tmp, size).await?;
                 if let Some(c) = &cache {
                     if let Err(e) = c.store_file(&id, &tmp) {
-                        eprintln!("warning: shared cache: {e}");
+                        out.warn(format!("shared cache: {e}"));
                     }
                 }
             }
-            Ok::<_, CliError>((tmp, group, !hit))
+            Ok::<_, OpError>((tmp, group, !hit))
         }
     }))
     .buffer_unordered(PARALLEL_DOWNLOADS);

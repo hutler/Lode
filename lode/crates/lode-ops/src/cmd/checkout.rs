@@ -10,7 +10,7 @@ use lode_workspace::{ViewSpec, Workspace, WorkspaceInit};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::materialize::fetch_entries;
 use crate::output::human_bytes;
 
@@ -35,18 +35,31 @@ pub struct CheckoutArgs {
     pub exclude: Vec<String>,
 }
 
+/// The options `lode checkout` gets when only the target is given.
+impl Default for CheckoutArgs {
+    fn default() -> Self {
+        Self {
+            target: String::new(),
+            dir: None,
+            branch: "main".into(),
+            include: Vec::new(),
+            exclude: Vec::new(),
+        }
+    }
+}
+
 /// Splits `https://host/prefix/depot` into the server and the depot.
-pub(crate) fn split_target(ctx: &Ctx, target: &str) -> CliResult<(ServerUrl, String)> {
+pub(crate) fn split_target(ctx: &Ctx, target: &str) -> OpResult<(ServerUrl, String)> {
     if target.contains("://") {
         let trimmed = target.trim_end_matches('/');
         let (server, depot) = trimmed
             .rsplit_once('/')
             .filter(|(s, d)| !d.is_empty() && s.contains("://") && !s.ends_with('/'))
             .ok_or_else(|| {
-                CliError::usage(format!("`{target}` has no depot: use <server-url>/<depot>"))
+                OpError::usage(format!("`{target}` has no depot: use <server-url>/<depot>"))
             })?;
         if server.ends_with(':') || server.ends_with("://") {
-            return Err(CliError::usage(format!(
+            return Err(OpError::usage(format!(
                 "`{target}` has no depot: use <server-url>/<depot>"
             )));
         }
@@ -62,7 +75,7 @@ pub async fn full_manifest(
     depot: &str,
     rev: u64,
     view: &ViewSpec,
-) -> CliResult<(Vec<ManifestEntry>, Option<u64>)> {
+) -> OpResult<(Vec<ManifestEntry>, Option<u64>)> {
     let stream = client
         .manifest(depot, rev, &view.include, &view.exclude)
         .await?;
@@ -72,7 +85,7 @@ pub async fn full_manifest(
 }
 
 /// Creates (or resumes) a workspace and fills it.
-pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
+pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> OpResult<Value> {
     let (server, depot) = split_target(ctx, &args.target)?;
     let dir = ctx.local(args.dir.as_deref().unwrap_or(std::path::Path::new(&depot)));
     let view = ViewSpec {
@@ -99,7 +112,7 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
             && ws.db().config(keys::BRANCH)?.as_deref() == Some(args.branch.as_str());
         let finished = ws.db().config(keys::SYNCED_REV)?.is_some();
         if finished || !(same || configured.is_none()) {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "already_a_workspace",
                 format!(
                     "{} is already a workspace; use `lode update` there",
@@ -118,7 +131,7 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> CliResult<Value> {
                 .filter_map(Result::ok)
                 .any(|e| e.file_name() != lode_workspace::layout::DOT_LODE)
         {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "not_empty",
                 format!("{} exists and is not empty", dir.display()),
             ));

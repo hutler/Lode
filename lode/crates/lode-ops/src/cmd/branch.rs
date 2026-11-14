@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::cmd::commit::explain;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local;
 
 /// `lode branch` subcommands.
@@ -49,7 +49,7 @@ pub struct BranchArgs {
 }
 
 /// `lode switch` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Move the workspace to another branch.
 \nLike `lode update`, but to the head (or -r REV) of another branch: local changes are carried
 over and merged, and conflicts are left as an update leaves them. Locks held here stay on the
@@ -77,16 +77,16 @@ fn view(b: &BranchView) -> Value {
 }
 
 /// Runs `lode branch`.
-pub async fn branch(ctx: &Ctx, args: BranchArgs) -> CliResult<Value> {
+pub async fn branch(ctx: &Ctx, args: BranchArgs) -> OpResult<Value> {
     let ws = local::open(ctx)?;
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let current = ws
         .db()
         .config(keys::BRANCH)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no branch"))?;
     let synced = local::synced_rev(&ws)?;
     let server = ctx.server_url(Some(&ws))?;
     let client = ctx.client(&server)?;
@@ -123,7 +123,7 @@ pub async fn branch(ctx: &Ctx, args: BranchArgs) -> CliResult<Value> {
                     Some((b, r)) => {
                         let digits = r.strip_prefix('r').unwrap_or(r);
                         let rev = digits.parse::<u64>().map_err(|_| {
-                            CliError::usage(format!("`{spec}` is not BRANCH or BRANCH@REV"))
+                            OpError::usage(format!("`{spec}` is not BRANCH or BRANCH@REV"))
                         })?;
                         (b.to_owned(), Some(rev))
                     }
@@ -172,6 +172,6 @@ pub async fn branch(ctx: &Ctx, args: BranchArgs) -> CliResult<Value> {
 }
 
 /// Runs `lode switch`.
-pub async fn switch(ctx: &Ctx, args: SwitchArgs) -> CliResult<Value> {
+pub async fn switch(ctx: &Ctx, args: SwitchArgs) -> OpResult<Value> {
     crate::cmd::update::sync(ctx, args.rev, Some(args.branch)).await
 }

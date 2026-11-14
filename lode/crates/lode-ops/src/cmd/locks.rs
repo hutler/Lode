@@ -21,11 +21,11 @@ use lode_workspace::{FileRow, FileState, Workspace};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, under};
 
 /// `lode lock` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Take exclusive locks on files of this branch.
 
 Only the holder may commit changes to a locked file. All named files are locked or none.
@@ -45,7 +45,7 @@ pub struct LockArgs {
 }
 
 /// `lode unlock` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Release locks.
 
 Releases this workspace's locks on the named files. With --force, a depot administrator
@@ -62,7 +62,7 @@ pub struct UnlockArgs {
 }
 
 /// `lode locks` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(
     long_about = "List the locks of this branch: path, holder, workspace, time and comment.
 
@@ -158,7 +158,7 @@ fn protect_rows(ws: &Workspace, required: &PathGlobSet, rows: &[FileRow]) {
 }
 
 /// [`protect_rows`] for the given paths.
-pub fn protect(ws: &Workspace, paths: &[DepotPath]) -> CliResult<()> {
+pub fn protect(ws: &Workspace, paths: &[DepotPath]) -> OpResult<()> {
     let required = required(ws);
     if required.is_empty() {
         return Ok(());
@@ -174,7 +174,7 @@ pub fn protect(ws: &Workspace, paths: &[DepotPath]) -> CliResult<()> {
 }
 
 /// [`protect_rows`] for every tracked file.
-pub fn protect_all(ws: &Workspace) -> CliResult<()> {
+pub fn protect_all(ws: &Workspace) -> OpResult<()> {
     let required = required(ws);
     if required.is_empty() {
         return Ok(());
@@ -183,15 +183,15 @@ pub fn protect_all(ws: &Workspace) -> CliResult<()> {
     Ok(())
 }
 
-fn module_disabled() -> CliError {
-    CliError::failed(
+fn module_disabled() -> OpError {
+    OpError::failed(
         "module_disabled",
         "this server does not have the locks module enabled",
     )
 }
 
 /// Maps a refusal of the locks endpoints to what the user can do about it.
-async fn explain(client: &Client, e: lode_client::Error) -> CliError {
+async fn explain(client: &Client, e: lode_client::Error) -> OpError {
     if e.is_code(ErrorCode::NotFound) && e.api().is_some_and(|a| a.paths().is_empty()) {
         // The route itself is missing when the module is off.
         if let Ok(info) = client.info().await {
@@ -204,7 +204,7 @@ async fn explain(client: &Client, e: lode_client::Error) -> CliError {
         .api()
         .map(|a| a.paths().iter().map(|p| p.to_string()).collect())
         .unwrap_or_default();
-    let mut err = CliError::from(e);
+    let mut err = OpError::from(e);
     let hint = match err.code.as_str() {
         "out_of_date" => Some("changed on the server since you synced: run `lode update` first"),
         "locked" => Some("held by someone else (see `lode locks`)"),
@@ -224,12 +224,12 @@ struct Target {
     workspace_id: String,
 }
 
-fn open(ctx: &Ctx) -> CliResult<Target> {
+fn open(ctx: &Ctx) -> OpResult<Target> {
     let ws = local::open(ctx)?;
-    let config = |k: &str| -> CliResult<String> {
+    let config = |k: &str| -> OpResult<String> {
         ws.db()
             .config(k)?
-            .ok_or_else(|| CliError::failed("workspace", format!("workspace has no {k}")))
+            .ok_or_else(|| OpError::failed("workspace", format!("workspace has no {k}")))
     };
     let depot = config(keys::DEPOT)?;
     let branch = config(keys::BRANCH)?;
@@ -246,7 +246,7 @@ fn open(ctx: &Ctx) -> CliResult<Target> {
 }
 
 /// Tracked rows under the named paths; `not_found` for a name with none.
-fn rows_under(ws: &Workspace, named: &[DepotPath]) -> CliResult<Vec<FileRow>> {
+fn rows_under(ws: &Workspace, named: &[DepotPath]) -> OpResult<Vec<FileRow>> {
     let rows = ws.db().files()?;
     let mut out = Vec::new();
     let mut seen = HashSet::new();
@@ -269,7 +269,7 @@ fn rows_under(ws: &Workspace, named: &[DepotPath]) -> CliResult<Vec<FileRow>> {
 }
 
 /// Runs `lode lock`.
-pub async fn lock(ctx: &Ctx, args: LockArgs) -> CliResult<Value> {
+pub async fn lock(ctx: &Ctx, args: LockArgs) -> OpResult<Value> {
     let mut t = open(ctx)?;
     let _lock = t.ws.lock()?;
     let named = local::depot_paths(ctx, &t.ws, &args.paths)?;
@@ -280,7 +280,7 @@ pub async fn lock(ctx: &Ctx, args: LockArgs) -> CliResult<Value> {
         .map(|r| r.path.as_str().to_owned())
         .collect();
     if !new.is_empty() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "not_found",
             format!(
                 "not on the server yet, so there is nothing to lock: {}",
@@ -317,7 +317,7 @@ pub async fn lock(ctx: &Ctx, args: LockArgs) -> CliResult<Value> {
     Ok(json!({ "locked": locked }))
 }
 
-fn set_held(ws: &mut Workspace, paths: &[DepotPath], held: bool) -> CliResult<()> {
+fn set_held(ws: &mut Workspace, paths: &[DepotPath], held: bool) -> OpResult<()> {
     ws.db_mut().write(|tx| {
         for p in paths {
             tx.set_lock_held(p, held)?;
@@ -328,7 +328,7 @@ fn set_held(ws: &mut Workspace, paths: &[DepotPath], held: bool) -> CliResult<()
 }
 
 /// Runs `lode unlock`.
-pub async fn unlock(ctx: &Ctx, args: UnlockArgs) -> CliResult<Value> {
+pub async fn unlock(ctx: &Ctx, args: UnlockArgs) -> OpResult<Value> {
     let mut t = open(ctx)?;
     let _lock = t.ws.lock()?;
     let named = local::depot_paths(ctx, &t.ws, &args.paths)?;
@@ -403,7 +403,7 @@ async fn own_locks(
 fn reconcile_rows(
     ws: &mut Workspace,
     held: &BTreeMap<String, LockView>,
-) -> CliResult<(Vec<DepotPath>, Vec<DepotPath>)> {
+) -> OpResult<(Vec<DepotPath>, Vec<DepotPath>)> {
     let rows = ws.db().files()?;
     let lost: Vec<DepotPath> = rows
         .iter()
@@ -427,7 +427,7 @@ pub async fn reconcile_after_update(
     ctx: &Ctx,
     ws: &mut Workspace,
     client: &Client,
-) -> CliResult<()> {
+) -> OpResult<()> {
     if !ws.db().files()?.iter().any(|r| r.lock_held) {
         return Ok(());
     }
@@ -457,7 +457,7 @@ pub async fn reconcile_after_update(
 }
 
 /// Runs `lode locks`.
-pub async fn locks(ctx: &Ctx, args: LocksArgs) -> CliResult<Value> {
+pub async fn locks(ctx: &Ctx, args: LocksArgs) -> OpResult<Value> {
     let mut t = open(ctx)?;
     let me = t.client.whoami().await?.principal.name;
     let held = match own_locks(&t.client, &t.depot, &t.branch, &t.workspace_id, &me).await {
@@ -515,7 +515,7 @@ pub async fn locks(ctx: &Ctx, args: LocksArgs) -> CliResult<Value> {
         }
         ctx.out.line(line);
         let mut v =
-            serde_json::to_value(l).map_err(|e| CliError::failed("internal", e.to_string()))?;
+            serde_json::to_value(l).map_err(|e| OpError::failed("internal", e.to_string()))?;
         v["mine"] = json!(mine);
         out.push(v);
     }

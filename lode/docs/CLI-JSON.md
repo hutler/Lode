@@ -5,6 +5,9 @@ else. Progress, prompts and warnings go to stderr or are left out, and a command
 need to ask something fails instead (exit code 2). This page lists the document of each
 command. Fields may be added in later versions; existing fields keep their meaning.
 
+The same documents, without the `ok` envelope, are what the `lode-ops` library returns to
+programs that call the operations directly, such as the Lode Desk app.
+
 ## Envelope
 
 Success:

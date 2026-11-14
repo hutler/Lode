@@ -8,12 +8,12 @@ use serde_json::{json, Value};
 
 use crate::cmd::history::format_time;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local;
 use lode_workspace::db::keys;
 
 /// `lode checks` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(
     long_about = "List the checks reported on a revision (`r214`) or on one version of \
 a shelf (`37@3`; `37` alone means the shelf's current version): name, state, reporter, time, \
@@ -37,9 +37,9 @@ enum Spec {
     Shelf(u64, Option<u64>),
 }
 
-fn parse_spec(s: &str) -> CliResult<Spec> {
+fn parse_spec(s: &str) -> OpResult<Spec> {
     let bad = || {
-        CliError::usage(format!(
+        OpError::usage(format!(
             "`{s}` is not a target: use rN for a revision, ID or ID@VERSION for a shelf"
         ))
     };
@@ -54,11 +54,11 @@ fn parse_spec(s: &str) -> CliResult<Spec> {
 }
 
 /// When a 404 means the server runs without a module, says so.
-async fn module_missing(client: &Client, e: lode_client::Error, module: &str) -> CliError {
+async fn module_missing(client: &Client, e: lode_client::Error, module: &str) -> OpError {
     if e.is_code(ErrorCode::NotFound) {
         if let Ok(info) = client.info().await {
             if !info.modules.iter().any(|m| m == module) {
-                return CliError::failed(
+                return OpError::failed(
                     "module_disabled",
                     format!("this server does not have the {module} module enabled"),
                 );
@@ -93,13 +93,13 @@ pub(crate) fn check_line(c: &CheckView) -> String {
 }
 
 /// Runs `lode checks`.
-pub async fn checks(ctx: &Ctx, args: ChecksArgs) -> CliResult<Value> {
+pub async fn checks(ctx: &Ctx, args: ChecksArgs) -> OpResult<Value> {
     let spec = parse_spec(&args.target)?;
     let ws = match &args.depot {
         Some(_) => None,
         None => Some(local::open(ctx).map_err(|e| {
             if e.code == "not_a_workspace" {
-                CliError::usage("not in a workspace: run this inside one, or give --depot")
+                OpError::usage("not in a workspace: run this inside one, or give --depot")
             } else {
                 e
             }
@@ -112,7 +112,7 @@ pub async fn checks(ctx: &Ctx, args: ChecksArgs) -> CliResult<Value> {
             .map(|w| w.db().config(keys::DEPOT))
             .transpose()?
             .flatten()
-            .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?,
+            .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?,
     };
     let server = ctx.server_url(ws.as_ref())?;
     let client = ctx.client(&server)?;
@@ -158,7 +158,7 @@ pub async fn checks(ctx: &Ctx, args: ChecksArgs) -> CliResult<Value> {
         target["version"] = json!(v);
     }
     let mut out =
-        serde_json::to_value(&list).map_err(|e| CliError::failed("internal", e.to_string()))?;
+        serde_json::to_value(&list).map_err(|e| OpError::failed("internal", e.to_string()))?;
     out["target"] = target;
     Ok(out)
 }

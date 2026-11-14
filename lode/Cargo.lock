@@ -1412,14 +1412,12 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "clap",
- "diffy",
- "directories",
  "futures",
  "hex",
  "insta",
  "lode-client",
  "lode-core",
- "lode-import",
+ "lode-ops",
  "lode-proto",
  "lode-server",
  "lode-testkit",
@@ -1433,8 +1431,6 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
- "toml",
- "uuid",
 ]
 
 [[package]]
@@ -1609,6 +1605,31 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "lode-ops"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "clap",
+ "diffy",
+ "directories",
+ "futures",
+ "lode-client",
+ "lode-core",
+ "lode-import",
+ "lode-proto",
+ "lode-server",
+ "lode-testkit",
+ "lode-workspace",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "toml",
+ "uuid",
 ]
 
 [[package]]

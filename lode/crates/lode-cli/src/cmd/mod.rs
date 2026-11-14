@@ -1,24 +1,9 @@
-//! Subcommands.
+//! Subcommands: the operations of `lode-ops`, plus the ones only the command line has.
 
-pub mod admin;
-pub mod apply;
-pub mod branch;
-pub mod changelist;
-pub mod checkout;
-pub mod checks;
-pub mod commit;
-pub mod diff;
-pub mod files;
-pub mod history;
-pub mod import;
-pub mod init;
-pub mod locks;
-pub mod login;
+pub use lode_ops::cmd::{
+    admin, branch, changelist, checkout, checks, commit, diff, files, history, import, init, locks,
+    login, merge, revert, shelve, status, update, view,
+};
+
 pub mod mcp;
-pub mod merge;
-pub mod revert;
 pub mod self_update;
-pub mod shelve;
-pub mod status;
-pub mod update;
-pub mod view;

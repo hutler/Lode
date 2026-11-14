@@ -2,8 +2,6 @@
 //! tokens, access rules, maintenance). Needs a token with the `admin` scope; nothing here
 //! touches the server's database directly.
 
-use std::io::{BufRead, IsTerminal};
-
 use lode_client::Client;
 use lode_core::{DepotPath, PathGlobSet};
 use lode_proto::admin::{
@@ -17,7 +15,7 @@ use serde_json::{json, Value};
 
 use crate::cmd::history::format_time;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// `lode admin` options.
 #[derive(Debug, clap::Args)]
@@ -138,7 +136,7 @@ pub enum DepotCmd {
 }
 
 /// How a password is given.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct PasswordArgs {
     /// Read the password from stdin instead of prompting.
     #[arg(long)]
@@ -310,39 +308,38 @@ pub enum AclCmd {
     },
 }
 
-fn client(ctx: &Ctx) -> CliResult<Client> {
+fn client(ctx: &Ctx) -> OpResult<Client> {
     let ws = ctx.workspace().ok();
     let server = ctx.server_url(ws.as_ref())?;
     ctx.client(&server)
 }
 
-fn to_json(v: &impl serde::Serialize) -> CliResult<Value> {
-    serde_json::to_value(v).map_err(|e| CliError::failed("internal", e.to_string()))
+fn to_json(v: &impl serde::Serialize) -> OpResult<Value> {
+    serde_json::to_value(v).map_err(|e| OpError::failed("internal", e.to_string()))
 }
 
 /// A password from stdin (`--password-stdin`) or typed twice at a prompt.
-fn password(ctx: &Ctx, args: &PasswordArgs) -> CliResult<String> {
+fn password(ctx: &Ctx, args: &PasswordArgs) -> OpResult<String> {
+    let ui = ctx.out.ui();
     if args.password_stdin {
-        let mut line = String::new();
-        std::io::stdin().lock().read_line(&mut line)?;
-        let p = line.trim_end_matches(['\r', '\n']).to_owned();
+        let p = ui.read_line()?;
         if p.is_empty() {
-            return Err(CliError::usage("no password on stdin"));
+            return Err(OpError::usage("no password on stdin"));
         }
         return Ok(p);
     }
-    if ctx.g.json || !std::io::stdin().is_terminal() {
-        return Err(CliError::usage(
+    if ctx.g.json || !ui.interactive() {
+        return Err(OpError::usage(
             "password needed but stdin is not a terminal; use --password-stdin",
         ));
     }
-    let first = rpassword::prompt_password("New password: ")?;
-    let again = rpassword::prompt_password("Again: ")?;
+    let first = ui.prompt("New password: ", true)?;
+    let again = ui.prompt("Again: ", true)?;
     if first != again {
-        return Err(CliError::usage("the passwords differ"));
+        return Err(OpError::usage("the passwords differ"));
     }
     if first.is_empty() {
-        return Err(CliError::usage("empty password"));
+        return Err(OpError::usage("empty password"));
     }
     Ok(first)
 }
@@ -370,14 +367,14 @@ fn print_principals(ctx: &Ctx, list: &[&PrincipalView]) {
     }
 }
 
-async fn principals_of(ctx: &Ctx, c: &Client, kind: PrincipalKind) -> CliResult<Value> {
+async fn principals_of(ctx: &Ctx, c: &Client, kind: PrincipalKind) -> OpResult<Value> {
     let all = c.principals().await?;
     let list: Vec<&PrincipalView> = all.principals.iter().filter(|p| p.kind == kind).collect();
     print_principals(ctx, &list);
     Ok(json!({ "principals": list }))
 }
 
-async fn set_disabled(ctx: &Ctx, c: &Client, name: &str, enable: bool) -> CliResult<Value> {
+async fn set_disabled(ctx: &Ctx, c: &Client, name: &str, enable: bool) -> OpResult<Value> {
     let p = c
         .patch_principal(
             name,
@@ -413,13 +410,13 @@ fn token_line(t: &TokenView) -> String {
     line
 }
 
-fn parse_subject(s: &str) -> CliResult<AclSubject> {
+fn parse_subject(s: &str) -> OpResult<AclSubject> {
     match s.split_once(':') {
         None if s == "all" || s == "*" => Ok(AclSubject::All),
         None => Ok(AclSubject::User(s.to_owned())),
         Some(("user", n)) if !n.is_empty() => Ok(AclSubject::User(n.to_owned())),
         Some(("group", n)) if !n.is_empty() => Ok(AclSubject::Group(n.to_owned())),
-        _ => Err(CliError::usage(format!(
+        _ => Err(OpError::usage(format!(
             "`{s}` is not a subject: use user:NAME, group:NAME or all"
         ))),
     }
@@ -457,18 +454,18 @@ fn rule_line(r: &AclRule) -> String {
     )
 }
 
-fn check_glob(what: &str, pattern: &str) -> CliResult<()> {
+fn check_glob(what: &str, pattern: &str) -> OpResult<()> {
     if pattern.is_empty() {
-        return Err(CliError::usage(format!("the {what} pattern is empty")));
+        return Err(OpError::usage(format!("the {what} pattern is empty")));
     }
     PathGlobSet::new([pattern])
         .map(|_| ())
-        .map_err(|e| CliError::usage(format!("bad {what} pattern `{pattern}`: {e}")))
+        .map_err(|e| OpError::usage(format!("bad {what} pattern `{pattern}`: {e}")))
 }
 
-fn depot_path(p: &str) -> CliResult<DepotPath> {
+fn depot_path(p: &str) -> OpResult<DepotPath> {
     DepotPath::parse(p.trim_matches('/'))
-        .map_err(|e| CliError::usage(format!("`{p}` is not a depot path: {e}")))
+        .map_err(|e| OpError::usage(format!("`{p}` is not a depot path: {e}")))
 }
 
 fn print_check(ctx: &Ctx, c: &AccessCheck) {
@@ -522,7 +519,7 @@ fn delivery_line(d: &DeliveryView) -> String {
     line
 }
 
-async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> CliResult<Value> {
+async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> OpResult<Value> {
     match cmd {
         WebhookCmd::Add {
             depot,
@@ -550,15 +547,13 @@ async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> CliResult<Value> {
                 .await?;
             // The secret goes to stdout once; the rest is commentary on stderr.
             ctx.out.line(&created.secret);
-            if !ctx.g.json {
-                eprintln!(
-                    "Webhook {} on {}: {}. The secret above is shown only now; receivers check \
-                     X-Lode-Signature with it.",
-                    created.hook.id,
-                    created.hook.depot,
-                    webhook_line(&created.hook).trim()
-                );
-            }
+            ctx.out.note(format!(
+                "Webhook {} on {}: {}. The secret above is shown only now; receivers check \
+                 X-Lode-Signature with it.",
+                created.hook.id,
+                created.hook.depot,
+                webhook_line(&created.hook).trim()
+            ));
             to_json(&created)
         }
         WebhookCmd::List { depot } => {
@@ -603,7 +598,7 @@ fn print_report(ctx: &Ctx, what: &str, r: &MaintenanceReport) {
 }
 
 /// Runs `lode admin`.
-pub async fn admin(ctx: &Ctx, args: AdminArgs) -> CliResult<Value> {
+pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
     let c = client(ctx)?;
     match args.command {
         AdminCmd::Depot(DepotCmd::Create { name }) => {
@@ -722,14 +717,12 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> CliResult<Value> {
             };
             // The value goes to stdout once; the rest is commentary on stderr.
             ctx.out.line(&resp.token);
-            if !ctx.g.json {
-                eprintln!(
-                    "Token {} for {} with scopes {}. It is shown only now.",
-                    resp.info.id,
-                    for_.as_deref().unwrap_or("you"),
-                    resp.info.scopes.join(", ")
-                );
-            }
+            ctx.out.note(format!(
+                "Token {} for {} with scopes {}. It is shown only now.",
+                resp.info.id,
+                for_.as_deref().unwrap_or("you"),
+                resp.info.scopes.join(", ")
+            ));
             to_json(&resp)
         }
         AdminCmd::Token(TokenCmd::List { for_ }) => {
@@ -772,7 +765,7 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> CliResult<Value> {
             let sample = match check.as_deref() {
                 Some([p, b, path]) => {
                     let Some(d) = depot.clone() else {
-                        return Err(CliError::usage("--check needs --depot"));
+                        return Err(OpError::usage("--check needs --depot"));
                     };
                     Some((p.clone(), d, b.clone(), depot_path(path)?))
                 }
@@ -834,7 +827,7 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> CliResult<Value> {
             print_report(ctx, "fsck", &r);
             let v = to_json(&r)?;
             if !r.problems.is_empty() {
-                return Err(CliError::failed(
+                return Err(OpError::failed(
                     "fsck_failed",
                     format!("{} problem(s) found in depot {depot}", r.problems.len()),
                 )

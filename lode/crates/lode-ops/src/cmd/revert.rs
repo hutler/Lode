@@ -9,12 +9,12 @@ use lode_workspace::{FileState, Status};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, under, Bases};
 use crate::materialize::remove_and_prune;
 
 /// `lode revert` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct RevertArgs {
     /// Files and directories to revert.
     pub paths: Vec<PathBuf>,
@@ -28,7 +28,7 @@ pub struct RevertArgs {
 }
 
 /// `lode clean` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct CleanArgs {
     /// Only below these files and directories.
     pub paths: Vec<PathBuf>,
@@ -41,9 +41,9 @@ pub struct CleanArgs {
 }
 
 /// Runs `lode revert`.
-pub async fn revert(ctx: &Ctx, args: RevertArgs) -> CliResult<Value> {
+pub async fn revert(ctx: &Ctx, args: RevertArgs) -> OpResult<Value> {
     if !args.all && !args.merge && args.paths.is_empty() {
-        return Err(CliError::usage(
+        return Err(OpError::usage(
             "name the paths to revert, or pass --all to revert everything",
         ));
     }
@@ -159,7 +159,7 @@ fn display(root: &Path, local: &Path, dir: bool) -> String {
 }
 
 /// Runs `lode clean`.
-pub async fn clean(ctx: &Ctx, args: CleanArgs) -> CliResult<Value> {
+pub async fn clean(ctx: &Ctx, args: CleanArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let paths = local::depot_paths(ctx, &ws, &args.paths)?;

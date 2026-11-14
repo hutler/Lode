@@ -1,4 +1,4 @@
-//! CLI errors: a stable `code`, a message, details, and the exit code of SPEC §9.
+//! Operation errors: a stable `code`, a message, details, and the exit code of SPEC §9.
 
 use std::fmt;
 
@@ -21,7 +21,7 @@ pub enum Exit {
 
 /// An error as the user sees it.
 #[derive(Debug, Clone)]
-pub struct CliError {
+pub struct OpError {
     /// Stable code, such as `out_of_date` or `workspace_in_use`.
     pub code: String,
     /// What happened and, where possible, what to do.
@@ -32,7 +32,7 @@ pub struct CliError {
     pub exit: Exit,
 }
 
-impl CliError {
+impl OpError {
     /// An error with no details.
     pub fn new(exit: Exit, code: &str, message: impl Into<String>) -> Self {
         Self {
@@ -69,13 +69,13 @@ impl CliError {
     }
 }
 
-impl fmt::Display for CliError {
+impl fmt::Display for OpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-impl From<lode_client::Error> for CliError {
+impl From<lode_client::Error> for OpError {
     fn from(e: lode_client::Error) -> Self {
         use lode_client::Error as E;
         match e {
@@ -118,7 +118,7 @@ impl From<lode_client::Error> for CliError {
     }
 }
 
-impl From<WorkspaceError> for CliError {
+impl From<WorkspaceError> for OpError {
     fn from(e: WorkspaceError) -> Self {
         let code = match &e {
             WorkspaceError::InUse => "workspace_in_use",
@@ -137,11 +137,11 @@ impl From<WorkspaceError> for CliError {
     }
 }
 
-impl From<std::io::Error> for CliError {
+impl From<std::io::Error> for OpError {
     fn from(e: std::io::Error) -> Self {
         Self::failed("io", e.to_string())
     }
 }
 
 /// Shorthand.
-pub type CliResult<T> = Result<T, CliError>;
+pub type OpResult<T> = Result<T, OpError>;

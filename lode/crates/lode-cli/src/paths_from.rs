@@ -8,7 +8,7 @@
 use std::ffi::OsString;
 use std::io::Read;
 
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// Commands that take a list of paths (`changelist` only as `changelist move`).
 const COMMANDS: &[&str] = &[
@@ -19,7 +19,7 @@ const COMMANDS: &[&str] = &[
 const VALUED: &[&str] = &["--server", "-C", "--paths-from"];
 
 /// `argv` with the paths from `--paths-from` appended, or unchanged without it.
-pub fn expand(argv: Vec<OsString>) -> CliResult<Vec<OsString>> {
+pub fn expand(argv: Vec<OsString>) -> OpResult<Vec<OsString>> {
     let mut source: Option<OsString> = None;
     let mut words: Vec<String> = Vec::new();
     let mut has_separator = false;
@@ -35,7 +35,7 @@ pub fn expand(argv: Vec<OsString>) -> CliResult<Vec<OsString>> {
         } else if VALUED.contains(&a.as_ref()) {
             if a == "--paths-from" {
                 source = Some(argv.get(i + 1).cloned().ok_or_else(|| {
-                    CliError::usage("--paths-from needs a file name, or - for standard input")
+                    OpError::usage("--paths-from needs a file name, or - for standard input")
                 })?);
             }
             i += 2;
@@ -54,7 +54,7 @@ pub fn expand(argv: Vec<OsString>) -> CliResult<Vec<OsString>> {
         None => false,
     };
     if !allowed {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "--paths-from works only with {} and changelist move",
             COMMANDS.join(", ")
         )));
@@ -63,7 +63,7 @@ pub fn expand(argv: Vec<OsString>) -> CliResult<Vec<OsString>> {
     let paths = parse(&text);
     if paths.is_empty() {
         // An empty list must not turn into "everything" for commands such as commit.
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "{} names no paths",
             source.to_string_lossy()
         )));
@@ -76,20 +76,20 @@ pub fn expand(argv: Vec<OsString>) -> CliResult<Vec<OsString>> {
     Ok(out)
 }
 
-fn read(source: &OsString) -> CliResult<String> {
+fn read(source: &OsString) -> OpResult<String> {
     let bytes = if source == "-" {
         let mut buf = Vec::new();
         std::io::stdin().lock().read_to_end(&mut buf)?;
         buf
     } else {
         std::fs::read(source).map_err(|e| {
-            CliError::usage(format!(
+            OpError::usage(format!(
                 "cannot read --paths-from {}: {e}",
                 source.to_string_lossy()
             ))
         })?
     };
-    String::from_utf8(bytes).map_err(|_| CliError::usage("the --paths-from list is not UTF-8 text"))
+    String::from_utf8(bytes).map_err(|_| OpError::usage("the --paths-from list is not UTF-8 text"))
 }
 
 /// One path per line; a byte-order mark, `\r\n` line ends and blank lines are allowed.

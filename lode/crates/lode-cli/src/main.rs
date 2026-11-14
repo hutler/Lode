@@ -8,25 +8,22 @@
 #![forbid(unsafe_code)]
 
 mod cmd;
-mod context;
-mod crash;
-mod error;
 mod external;
-mod local;
-mod materialize;
-mod output;
 mod paths_from;
-mod templates;
+mod term;
+
+use lode_ops::{context, error};
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 
 use crate::context::{Ctx, Globals};
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// Lode version control client.
 #[derive(Parser, Debug)]
@@ -138,23 +135,26 @@ enum Command {
     External(Vec<OsString>),
 }
 
-async fn run(cli: Cli) -> CliResult<Value> {
+async fn run(cli: Cli) -> OpResult<Value> {
     // Already turned into path arguments by `paths_from::expand`.
     let _ = cli.paths_from;
-    let ctx = Ctx::new(Globals {
-        json: cli.json,
-        server: cli.server,
-        dir: cli.chdir,
-        insecure: cli.insecure,
-        agent: None,
-    })?;
+    let ctx = Ctx::new(
+        Globals {
+            json: cli.json,
+            server: cli.server,
+            dir: cli.chdir,
+            insecure: cli.insecure,
+            agent: None,
+        },
+        Arc::new(term::Terminal::new(cli.json)),
+    )?;
     if cli.version {
         let v = env!("CARGO_PKG_VERSION");
         ctx.out.line(format!("lode {v}"));
         return Ok(json!({ "version": v, "api": lode_proto::consts::API_VERSION }));
     }
     match cli.command {
-        None => Err(CliError::usage("no command given; see `lode --help`")),
+        None => Err(OpError::usage("no command given; see `lode --help`")),
         Some(Command::Login(a)) => cmd::login::login(&ctx, a).await,
         Some(Command::Logout) => cmd::login::logout(&ctx).await,
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
@@ -204,7 +204,7 @@ fn wants_json() -> bool {
     std::env::args().any(|a| a == "--json")
 }
 
-fn finish(json: bool, result: CliResult<Value>) -> ExitCode {
+fn finish(json: bool, result: OpResult<Value>) -> ExitCode {
     match result {
         Ok(v) => {
             if json {
@@ -239,7 +239,7 @@ fn main() -> ExitCode {
         Err(e) => {
             use clap::error::ErrorKind;
             if json && !matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
-                return finish(true, Err(CliError::usage(e.to_string())));
+                return finish(true, Err(OpError::usage(e.to_string())));
             }
             e.exit();
         }

@@ -1,15 +1,14 @@
 //! `lode login`, `lode logout`, `lode whoami`.
 
-use std::io::{BufRead, IsTerminal, Write};
-
 use lode_proto::auth::LoginRequest;
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
+use crate::output::Ui;
 
 /// `lode login` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct LoginArgs {
     /// Server URL, such as https://lode.example.com.
     pub url: Option<String>,
@@ -24,58 +23,53 @@ pub struct LoginArgs {
     pub password_stdin: bool,
 }
 
-fn read_stdin_line(what: &str) -> CliResult<String> {
-    let mut line = String::new();
-    std::io::stdin().lock().read_line(&mut line)?;
-    let line = line.trim().to_owned();
+fn read_stdin_line(ui: &dyn Ui, what: &str) -> OpResult<String> {
+    let line = ui.read_line()?.trim().to_owned();
     if line.is_empty() {
-        return Err(CliError::usage(format!("no {what} on stdin")));
+        return Err(OpError::usage(format!("no {what} on stdin")));
     }
     Ok(line)
 }
 
-fn prompt(text: &str) -> CliResult<String> {
-    if !std::io::stdin().is_terminal() {
-        return Err(CliError::usage(format!(
+fn prompt(ui: &dyn Ui, text: &str) -> OpResult<String> {
+    if !ui.interactive() {
+        return Err(OpError::usage(format!(
             "{} needed but stdin is not a terminal; pass it as an option",
             text.trim_end_matches(": ")
         )));
     }
-    eprint!("{text}");
-    std::io::stderr().flush()?;
-    let mut line = String::new();
-    std::io::stdin().lock().read_line(&mut line)?;
-    Ok(line.trim().to_owned())
+    ui.prompt(text, false)
 }
 
 /// Signs in and stores the token for the server.
-pub async fn login(ctx: &Ctx, args: LoginArgs) -> CliResult<Value> {
+pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
     let server = match &args.url {
         Some(u) => ctx.parse_server(u)?,
         None => ctx.server_url(None)?,
     };
     let anon = ctx.anonymous_client(&server)?;
+    let ui = ctx.out.ui();
     let token = if args.token_stdin {
-        read_stdin_line("token")?
+        read_stdin_line(ui, "token")?
     } else {
         if ctx.g.json && (args.name.is_none() || !args.password_stdin) {
-            return Err(CliError::usage(
+            return Err(OpError::usage(
                 "with --json, give --name and --password-stdin (or --token-stdin)",
             ));
         }
         let name = match args.name {
             Some(n) => n,
-            None => prompt("Name: ")?,
+            None => prompt(ui, "Name: ")?,
         };
         let password = if args.password_stdin {
-            read_stdin_line("password")?
+            read_stdin_line(ui, "password")?
         } else {
-            if !std::io::stdin().is_terminal() {
-                return Err(CliError::usage(
+            if !ui.interactive() {
+                return Err(OpError::usage(
                     "password needed but stdin is not a terminal; use --password-stdin",
                 ));
             }
-            rpassword::prompt_password("Password: ")?
+            ui.prompt("Password: ", true)?
         };
         let host = std::env::var("COMPUTERNAME")
             .or_else(|_| std::env::var("HOSTNAME"))
@@ -107,7 +101,7 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> CliResult<Value> {
 }
 
 /// Revokes the stored token on the server (best effort) and forgets it.
-pub async fn logout(ctx: &Ctx) -> CliResult<Value> {
+pub async fn logout(ctx: &Ctx) -> OpResult<Value> {
     let server = ctx.server_url(None)?;
     let store = ctx.credentials();
     let Some(token) = store.load(&server)? else {
@@ -129,7 +123,7 @@ pub async fn logout(ctx: &Ctx) -> CliResult<Value> {
 }
 
 /// Shows who the current token belongs to.
-pub async fn whoami(ctx: &Ctx) -> CliResult<Value> {
+pub async fn whoami(ctx: &Ctx) -> OpResult<Value> {
     let ws = ctx.workspace().ok();
     let server = ctx.server_url(ws.as_ref())?;
     let me = ctx.client(&server)?.whoami().await?;

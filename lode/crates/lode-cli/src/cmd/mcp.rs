@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, oneshot, OnceCell};
 
 use crate::cmd;
 use crate::context::{Ctx, Globals};
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// `lode mcp` options.
 #[derive(Debug, clap::Args)]
@@ -54,7 +54,7 @@ files, and `shelve` to propose the changes on the server for a person to review.
 offered only when your token may write. Errors carry a stable `code`.";
 
 /// Runs the server until the client closes stdin.
-pub async fn serve(ctx: &Ctx, args: McpArgs) -> CliResult<Value> {
+pub async fn serve(ctx: &Ctx, args: McpArgs) -> OpResult<Value> {
     let ws = ctx.workspace()?;
     let root = ws.root().to_path_buf();
     drop(ws);
@@ -74,11 +74,11 @@ pub async fn serve(ctx: &Ctx, args: McpArgs) -> CliResult<Value> {
     let running = server
         .serve(rmcp::transport::stdio())
         .await
-        .map_err(|e| CliError::failed("mcp", format!("cannot start the MCP server: {e}")))?;
+        .map_err(|e| OpError::failed("mcp", format!("cannot start the MCP server: {e}")))?;
     running
         .waiting()
         .await
-        .map_err(|e| CliError::failed("mcp", format!("the MCP server stopped: {e}")))?;
+        .map_err(|e| OpError::failed("mcp", format!("the MCP server stopped: {e}")))?;
     // Nothing more may go to stdout: it belonged to the protocol.
     std::process::exit(0)
 }
@@ -106,7 +106,7 @@ fn agent(args: &McpArgs) -> Option<AgentProvenance> {
 struct Job {
     name: String,
     input: Value,
-    reply: oneshot::Sender<CliResult<Value>>,
+    reply: oneshot::Sender<OpResult<Value>>,
 }
 
 /// Name of the job that answers the stored token's scopes.
@@ -127,14 +127,14 @@ struct Server {
 }
 
 impl Server {
-    async fn call(&self, name: &str, input: Value) -> CliResult<Value> {
+    async fn call(&self, name: &str, input: Value) -> OpResult<Value> {
         let (reply, answer) = oneshot::channel();
         let job = Job {
             name: name.to_owned(),
             input,
             reply,
         };
-        let gone = || CliError::failed("mcp", "the command worker stopped");
+        let gone = || OpError::failed("mcp", "the command worker stopped");
         self.jobs.send(job).map_err(|_| gone())?;
         answer.await.map_err(|_| gone())?
     }
@@ -155,7 +155,7 @@ impl Server {
 }
 
 impl Worker {
-    fn spawn(self) -> CliResult<mpsc::UnboundedSender<Job>> {
+    fn spawn(self) -> OpResult<mpsc::UnboundedSender<Job>> {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -174,14 +174,17 @@ impl Worker {
     }
 
     /// A context like the one `lode -C <root> --json` would have.
-    fn ctx(&self) -> CliResult<Ctx> {
-        Ctx::new(Globals {
-            dir: Some(self.root.clone()),
-            ..self.g.clone()
-        })
+    fn ctx(&self) -> OpResult<Ctx> {
+        Ctx::new(
+            Globals {
+                dir: Some(self.root.clone()),
+                ..self.g.clone()
+            },
+            std::sync::Arc::new(crate::term::Protocol),
+        )
     }
 
-    async fn run(&self, name: &str, input: Value) -> CliResult<Value> {
+    async fn run(&self, name: &str, input: Value) -> OpResult<Value> {
         let ctx = self.ctx()?;
         let root = &self.root;
         match name {
@@ -239,10 +242,10 @@ impl Worker {
                 let i: Revert = parse(input)?;
                 let paths = confine_all(root, &i.paths)?;
                 if paths.is_empty() && !i.all {
-                    return Err(CliError::usage("name the paths to revert, or pass `all`"));
+                    return Err(OpError::usage("name the paths to revert, or pass `all`"));
                 }
                 if !paths.is_empty() && i.all {
-                    return Err(CliError::usage("pass `paths` or `all`, not both"));
+                    return Err(OpError::usage("pass `paths` or `all`, not both"));
                 }
                 let args = cmd::revert::RevertArgs {
                     paths,
@@ -333,7 +336,7 @@ impl Worker {
                 };
                 cmd::history::cat(&ctx, args).await
             }
-            other => Err(CliError::usage(format!("unknown tool `{other}`"))),
+            other => Err(OpError::usage(format!("unknown tool `{other}`"))),
         }
     }
 }
@@ -345,15 +348,15 @@ fn no_source() -> cmd::history::Source {
     }
 }
 
-fn parse<T: DeserializeOwned>(input: Value) -> CliResult<T> {
-    serde_json::from_value(input).map_err(|e| CliError::usage(format!("bad input: {e}")))
+fn parse<T: DeserializeOwned>(input: Value) -> OpResult<T> {
+    serde_json::from_value(input).map_err(|e| OpError::usage(format!("bad input: {e}")))
 }
 
 /// A workspace-relative path from tool input, refused if it is absolute or climbs out of
 /// the workspace. The result is relative to the root, `.` for the root itself.
-fn confine(root: &Path, p: &str) -> CliResult<PathBuf> {
+fn confine(root: &Path, p: &str) -> OpResult<PathBuf> {
     let outside = || {
-        CliError::new(
+        OpError::new(
             crate::error::Exit::Failed,
             "outside_workspace",
             format!("`{p}` is outside the workspace; use a path relative to its root"),
@@ -392,14 +395,14 @@ fn confine(root: &Path, p: &str) -> CliResult<PathBuf> {
     Ok(out)
 }
 
-fn confine_all(root: &Path, paths: &[String]) -> CliResult<Vec<PathBuf>> {
+fn confine_all(root: &Path, paths: &[String]) -> OpResult<Vec<PathBuf>> {
     paths.iter().map(|p| confine(root, p)).collect()
 }
 
 /// Like [`confine_all`], for tools that need at least one path.
-fn confine_some(root: &Path, paths: &[String]) -> CliResult<Vec<PathBuf>> {
+fn confine_some(root: &Path, paths: &[String]) -> OpResult<Vec<PathBuf>> {
     if paths.is_empty() {
-        return Err(CliError::usage("`paths` is empty"));
+        return Err(OpError::usage("`paths` is empty"));
     }
     confine_all(root, paths)
 }
@@ -738,7 +741,7 @@ impl ServerHandler for Server {
             ));
         }
         if request.name == "commit" && !self.can_write().await {
-            let e = CliError::new(
+            let e = OpError::new(
                 crate::error::Exit::Auth,
                 "permission_denied",
                 "this token lacks the `write` scope; shelve the changes instead",

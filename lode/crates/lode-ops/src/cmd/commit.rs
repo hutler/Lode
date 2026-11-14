@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -23,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::cmd::merge::{describe, pending_merges, PENDING_MERGE};
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult, Exit};
+use crate::error::{Exit, OpError, OpResult};
 use crate::local;
 use crate::materialize::PARALLEL_DOWNLOADS;
 
@@ -34,7 +33,7 @@ const KEEP_LOCKS: &str = "locks.keep";
 pub const PENDING_COMMIT: &str = "pending_commit";
 
 /// `lode commit` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct CommitArgs {
     /// Only changes to these files and directories.
     pub paths: Vec<PathBuf>,
@@ -84,7 +83,7 @@ fn mtime_ns(meta: &fs::Metadata) -> i64 {
 
 /// Hashes the file at `local` and returns its id with the stat taken before hashing. Fails
 /// if the file changed while it was read.
-fn hash_stable(path: &DepotPath, local: &Path, kind: EntryKind) -> CliResult<(ObjectId, u64, i64)> {
+fn hash_stable(path: &DepotPath, local: &Path, kind: EntryKind) -> OpResult<(ObjectId, u64, i64)> {
     let before = fs::symlink_metadata(local)?;
     let (id, size) = if kind == EntryKind::Symlink {
         symlink_id(local)?
@@ -99,8 +98,8 @@ fn hash_stable(path: &DepotPath, local: &Path, kind: EntryKind) -> CliResult<(Ob
     Ok((id, size, mtime_ns(&before)))
 }
 
-fn changed_while_committing(path: &DepotPath) -> CliError {
-    CliError::failed(
+fn changed_while_committing(path: &DepotPath) -> OpError {
+    OpError::failed(
         "changed_during_commit",
         format!("{path} changed while it was being committed; nothing was committed, run the commit again"),
     )
@@ -114,12 +113,12 @@ fn message(
     args: &CommitArgs,
     summary: &[String],
     default: Option<&str>,
-) -> CliResult<String> {
+) -> OpResult<String> {
     let raw = if let Some(m) = &args.message {
         m.clone()
     } else if let Some(f) = &args.file {
         if f.as_os_str() == "-" {
-            std::io::read_to_string(std::io::stdin())?
+            ctx.out.ui().read_all()?
         } else {
             fs::read_to_string(ctx.local(f))?
         }
@@ -130,9 +129,8 @@ fn message(
             .ok()
             .or_else(|| std::env::var("EDITOR").ok())
             .filter(|e| !e.trim().is_empty());
-        let (Some(editor), false, true) = (editor, ctx.g.json, std::io::stdin().is_terminal())
-        else {
-            return Err(CliError::usage(
+        let (Some(editor), false, true) = (editor, ctx.g.json, ctx.out.ui().interactive()) else {
+            return Err(OpError::usage(
                 "no commit message: pass -m or -F (or set EDITOR in a terminal)",
             ));
         };
@@ -148,9 +146,8 @@ fn message(
             template.push_str(&format!("#   {s}\n"));
         }
         fs::write(&file, template)?;
-        let status = editor_command(&editor, &file).status()?;
-        if !status.success() {
-            return Err(CliError::failed(
+        if !ctx.out.ui().edit(&editor, &file)? {
+            return Err(OpError::failed(
                 "aborted",
                 "the editor failed; nothing was committed",
             ));
@@ -162,28 +159,12 @@ fn message(
     let text: Vec<&str> = raw.lines().filter(|l| !l.starts_with('#')).collect();
     let text = text.join("\n").trim().to_owned();
     if text.is_empty() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "aborted",
             "empty commit message; nothing was committed",
         ));
     }
     Ok(text)
-}
-
-/// Runs `$EDITOR file` through the shell, so an editor with arguments works.
-fn editor_command(editor: &str, file: &Path) -> std::process::Command {
-    if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.arg("/C").arg(format!("{editor} \"{}\"", file.display()));
-        c
-    } else {
-        let mut c = std::process::Command::new("sh");
-        c.arg("-c")
-            .arg(format!("{editor} \"$1\""))
-            .arg("sh")
-            .arg(file);
-        c
-    }
 }
 
 /// What the server says next, for the errors a user can act on.
@@ -198,12 +179,12 @@ fn advice(code: &str) -> Option<&'static str> {
 }
 
 /// A server refusal with the affected paths and what to do next.
-pub(crate) fn explain(e: lode_client::Error) -> CliError {
+pub(crate) fn explain(e: lode_client::Error) -> OpError {
     let paths: Vec<String> = e
         .api()
         .map(|a| a.paths().iter().map(|p| p.to_string()).collect())
         .unwrap_or_default();
-    let mut err = CliError::from(e);
+    let mut err = OpError::from(e);
     if let Some(hint) = advice(&err.code) {
         if !paths.is_empty() {
             err.message = format!("{}: {}", err.message, paths.join(", "));
@@ -222,7 +203,7 @@ fn maybe_committed(e: &lode_client::Error) -> bool {
 }
 
 /// Brings the rows of a committed request up to date.
-fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> CliResult<()> {
+fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> OpResult<()> {
     let now = SystemTime::now();
     let keep_locks = p
         .request
@@ -290,7 +271,7 @@ async fn finish_pending(
     depot: &str,
     branch: &str,
     pending: Pending,
-) -> CliResult<Value> {
+) -> OpResult<Value> {
     ctx.out
         .warn("an earlier commit did not get an answer; sending it again");
     match client.commit(depot, branch, &pending.request).await {
@@ -330,7 +311,7 @@ pub(crate) fn gather(
     ws: &mut Workspace,
     paths: &[DepotPath],
     list_id: Option<Option<i64>>,
-) -> CliResult<(Vec<Outgoing>, Vec<i64>)> {
+) -> OpResult<(Vec<Outgoing>, Vec<i64>)> {
     let report = local::scan(ctx, ws, paths, false)?;
 
     let mut conflicted = Vec::new();
@@ -395,7 +376,7 @@ pub(crate) fn gather(
         }
     }
     if !conflicted.is_empty() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "conflicted",
             format!(
                 "resolve these conflicts first (`lode resolve`): {}",
@@ -405,7 +386,7 @@ pub(crate) fn gather(
         .with_details(json!({ "paths": conflicted })));
     }
     if !missing.is_empty() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "missing",
             format!(
                 "these files are gone without `lode rm`: {}; remove them with `lode rm` or restore them with `lode revert`",
@@ -424,7 +405,7 @@ pub(crate) async fn upload(
     client: &Client,
     depot: &str,
     out: &[Outgoing],
-) -> CliResult<usize> {
+) -> OpResult<usize> {
     let mut by_id: HashMap<ObjectId, &Outgoing> = HashMap::new();
     for o in out {
         if let Some(id) = o.change.new_id {
@@ -460,7 +441,7 @@ pub(crate) async fn upload(
                 {
                     Err(changed_while_committing(&path))
                 }
-                Err(e) => Err(CliError::from(e)),
+                Err(e) => Err(OpError::from(e)),
             }
         }
     }))
@@ -486,23 +467,23 @@ pub(crate) async fn upload(
 }
 
 /// Runs `lode commit`.
-pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
+pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let branch = ws
         .db()
         .config(keys::BRANCH)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no branch"))?;
     let server = ctx.server_url(Some(&ws))?;
     let client = ctx.client(&server)?;
 
     if let Some(text) = ws.db().config(PENDING_COMMIT)? {
         let pending: Pending = serde_json::from_str(&text)
-            .map_err(|e| CliError::failed("workspace", format!("stored commit: {e}")))?;
+            .map_err(|e| OpError::failed("workspace", format!("stored commit: {e}")))?;
         return finish_pending(ctx, &mut ws, &client, &depot, &branch, pending).await;
     }
 
@@ -535,7 +516,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
     }
     let merges = pending_merges(&ws)?;
     if !merges.is_empty() && (!paths.is_empty() || list_id.is_some()) {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "the merge of {} must be committed whole: commit without paths or -c",
             describe(&merges[0])
         )));
@@ -546,10 +527,10 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
             Some(n) => format!("nothing to commit in changelist {n}"),
             None => "nothing to commit".to_owned(),
         };
-        return Err(CliError::failed("nothing_to_commit", msg));
+        return Err(OpError::failed("nothing_to_commit", msg));
     }
     let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
-    validate_changes(&changes).map_err(|e| CliError::failed("invalid_change", e.to_string()))?;
+    validate_changes(&changes).map_err(|e| OpError::failed("invalid_change", e.to_string()))?;
     let summary: Vec<String> = changes
         .iter()
         .map(|c| {
@@ -596,7 +577,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> CliResult<Value> {
         changelists: lists,
     };
     let stored =
-        serde_json::to_string(&pending).map_err(|e| CliError::failed("internal", e.to_string()))?;
+        serde_json::to_string(&pending).map_err(|e| OpError::failed("internal", e.to_string()))?;
     ws.db_mut()
         .write(|tx| tx.set_config(PENDING_COMMIT, &stored))?;
     crate::crash::point("commit.stored");

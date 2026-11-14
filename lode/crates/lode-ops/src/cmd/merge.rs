@@ -21,14 +21,14 @@ use crate::cmd::apply::{apply_changes, count, refuse_conflicts, Outcome};
 use crate::cmd::commit::{explain, PENDING_COMMIT};
 use crate::cmd::update::{check_on_branch, UPDATE_REV};
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local;
 
 /// Config key: the merges the next commit records, as a JSON list of `MergedFrom`.
 pub const PENDING_MERGE: &str = "pending_merge";
 
 /// `lode merge` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(long_about = "Merge another branch into the workspace.
 \nApplies the source branch's changes since the merge base: the highest source revision up to
 which everything is already merged here, or the branch point. Files unchanged here take the
@@ -49,22 +49,22 @@ pub struct MergeArgs {
 }
 
 /// The merges waiting for the next commit.
-pub(crate) fn pending_merges(ws: &Workspace) -> CliResult<Vec<MergedFrom>> {
+pub(crate) fn pending_merges(ws: &Workspace) -> OpResult<Vec<MergedFrom>> {
     match ws.db().config(PENDING_MERGE)? {
         None => Ok(Vec::new()),
         Some(text) => serde_json::from_str(&text)
-            .map_err(|e| CliError::failed("workspace", format!("stored merge: {e}"))),
+            .map_err(|e| OpError::failed("workspace", format!("stored merge: {e}"))),
     }
 }
 
 /// Stores the merges waiting for the next commit (none removes the key).
-pub(crate) fn set_pending_merges(ws: &mut Workspace, merges: &[MergedFrom]) -> CliResult<()> {
+pub(crate) fn set_pending_merges(ws: &mut Workspace, merges: &[MergedFrom]) -> OpResult<()> {
     if merges.is_empty() {
         ws.db_mut().write(|tx| tx.remove_config(PENDING_MERGE))?;
         return Ok(());
     }
     let text =
-        serde_json::to_string(merges).map_err(|e| CliError::failed("internal", e.to_string()))?;
+        serde_json::to_string(merges).map_err(|e| OpError::failed("internal", e.to_string()))?;
     ws.db_mut()
         .write(|tx| tx.set_config(PENDING_MERGE, &text))?;
     Ok(())
@@ -87,7 +87,7 @@ async fn changes_between(
     head: u64,
     include: &[String],
     exclude: &[String],
-) -> CliResult<Vec<Change>> {
+) -> OpResult<Vec<Change>> {
     let Some(base) = base else {
         let entries: Vec<ManifestEntry> = client
             .manifest(depot, head, include, exclude)
@@ -159,24 +159,24 @@ fn put(e: ManifestEntry, base_id: Option<lode_core::ObjectId>) -> Change {
 }
 
 /// Runs `lode merge`.
-pub async fn merge(ctx: &Ctx, args: MergeArgs) -> CliResult<Value> {
+pub async fn merge(ctx: &Ctx, args: MergeArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     if ws.db().config(PENDING_COMMIT)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "pending_commit",
             "an earlier commit did not get an answer; run `lode commit` first",
         ));
     }
     if ws.db().config(UPDATE_REV)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "update_incomplete",
             "an update did not finish; run `lode update` first",
         ));
     }
     refuse_conflicts(&ws)?;
     if let Some(m) = pending_merges(&ws)?.first() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "merge_pending",
             format!(
                 "the merge of {} is not committed yet; commit it, or abandon it with `lode revert --merge`",
@@ -187,13 +187,13 @@ pub async fn merge(ctx: &Ctx, args: MergeArgs) -> CliResult<Value> {
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let branch = ws
         .db()
         .config(keys::BRANCH)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no branch"))?;
     if args.source == branch {
-        return Err(CliError::usage(format!(
+        return Err(OpError::usage(format!(
             "the workspace is on `{branch}` already"
         )));
     }
@@ -249,7 +249,7 @@ pub async fn merge(ctx: &Ctx, args: MergeArgs) -> CliResult<Value> {
             .next()
             .is_some_and(|s| s.eq_ignore_ascii_case(lode_workspace::layout::DOT_LODE))
         {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "unsafe_path",
                 format!("refusing to write {}: it is inside .lode", c.path),
             ));

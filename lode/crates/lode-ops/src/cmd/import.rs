@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::cmd::checkout::split_target;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// `lode import` sources.
 #[derive(Debug, clap::Subcommand)]
@@ -19,7 +19,7 @@ pub enum ImportCmd {
 }
 
 /// `lode import git` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct GitArgs {
     /// A folder in the Git repository.
     pub repo: PathBuf,
@@ -57,7 +57,7 @@ impl Progress for Report<'_> {
     }
 }
 
-fn cli_error(e: ImportError) -> CliError {
+fn cli_error(e: ImportError) -> OpError {
     match e {
         ImportError::Client(c) => c.into(),
         ImportError::Io(io) => io.into(),
@@ -72,13 +72,13 @@ fn cli_error(e: ImportError) -> CliError {
                 ImportError::Mismatch { .. } => "import_mismatch",
                 _ => "git_failed",
             };
-            CliError::failed(code, other.to_string())
+            OpError::failed(code, other.to_string())
         }
     }
 }
 
 /// Runs `lode import`.
-pub async fn import(ctx: &Ctx, cmd: ImportCmd) -> CliResult<Value> {
+pub async fn import(ctx: &Ctx, cmd: ImportCmd) -> OpResult<Value> {
     let ImportCmd::Git(args) = cmd;
     let (server, depot) = split_target(ctx, &args.target)?;
     let repo = ctx.local(&args.repo);

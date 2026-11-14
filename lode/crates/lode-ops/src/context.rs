@@ -1,14 +1,15 @@
 //! Global options, user settings, sign-in resolution and the client.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use lode_client::{read_token_file, Client, CredentialStore, ServerUrl};
 use lode_workspace::db::keys;
 use lode_workspace::{BlobCache, Workspace, DEFAULT_SHARED_CACHE_CAP};
 use serde::{Deserialize, Serialize};
 
-use crate::error::{CliError, CliResult, Exit};
-use crate::output::Out;
+use crate::error::{Exit, OpError, OpResult};
+use crate::output::{Out, Ui};
 
 /// `User-Agent` product of this binary; the server records it as `provenance.client`.
 pub const PRODUCT: &str = concat!("lode-cli/", env!("CARGO_PKG_VERSION"));
@@ -68,15 +69,23 @@ impl Globals {
 }
 
 impl Ctx {
-    /// Resolves the working and config directories.
-    pub fn new(g: Globals) -> CliResult<Self> {
+    /// Resolves the working directory (`-C` against the process's current directory) and
+    /// the config directory; output goes to `ui`.
+    pub fn new(g: Globals, ui: Arc<dyn Ui>) -> OpResult<Self> {
         let base = std::env::current_dir()?;
+        Self::in_dir(g, &base, ui)
+    }
+
+    /// Like [`Ctx::new`], with `base` in place of the process's current directory. The
+    /// desktop app runs every workspace's operations this way.
+    pub fn in_dir(g: Globals, base: &Path, ui: Arc<dyn Ui>) -> OpResult<Self> {
+        let base = base.to_path_buf();
         let cwd = match &g.dir {
             Some(d) => base.join(d),
             None => base,
         };
         if !cwd.is_dir() {
-            return Err(CliError::usage(format!(
+            return Err(OpError::usage(format!(
                 "{} is not a directory",
                 cwd.display()
             )));
@@ -88,19 +97,26 @@ impl Ctx {
             _ => directories::ProjectDirs::from("", "", "lode")
                 .map(|d| d.config_dir().to_path_buf())
                 .ok_or_else(|| {
-                    CliError::failed(
+                    OpError::failed(
                         "no_config_dir",
                         "cannot find a config directory; set LODE_CONFIG_DIR",
                     )
                 })?,
         };
-        let out = Out { json: g.json };
+        let out = Out::new(g.json, ui);
         Ok(Self {
             g,
             cwd,
             config_dir,
             out,
         })
+    }
+
+    /// Uses `dir` as the config directory (stored sign-ins and settings) instead of
+    /// `LODE_CONFIG_DIR` or the platform's.
+    pub fn with_config_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.config_dir = dir.into();
+        self
     }
 
     /// Stored tokens.
@@ -113,10 +129,10 @@ impl Ctx {
     }
 
     /// User settings; missing file means defaults.
-    pub fn settings(&self) -> CliResult<Settings> {
+    pub fn settings(&self) -> OpResult<Settings> {
         match std::fs::read_to_string(self.settings_path()) {
             Ok(text) => toml::from_str(&text).map_err(|e| {
-                CliError::failed(
+                OpError::failed(
                     "bad_settings",
                     format!("{}: {e}", self.settings_path().display()),
                 )
@@ -127,22 +143,22 @@ impl Ctx {
     }
 
     /// Writes user settings.
-    pub fn save_settings(&self, s: &Settings) -> CliResult<()> {
+    pub fn save_settings(&self, s: &Settings) -> OpResult<()> {
         std::fs::create_dir_all(&self.config_dir)?;
         let text =
-            toml::to_string(s).map_err(|e| CliError::failed("bad_settings", e.to_string()))?;
+            toml::to_string(s).map_err(|e| OpError::failed("bad_settings", e.to_string()))?;
         std::fs::write(self.settings_path(), text)?;
         Ok(())
     }
 
     /// Parses and checks a server URL against `--insecure`.
-    pub fn parse_server(&self, url: &str) -> CliResult<ServerUrl> {
+    pub fn parse_server(&self, url: &str) -> OpResult<ServerUrl> {
         Ok(lode_client::parse_server_url(url, self.g.insecure)?)
     }
 
     /// The server: `--server`, else the workspace's, else `LODE_SERVER`, else the one from
     /// `lode login`.
-    pub fn server_url(&self, ws: Option<&Workspace>) -> CliResult<ServerUrl> {
+    pub fn server_url(&self, ws: Option<&Workspace>) -> OpResult<ServerUrl> {
         if let Some(s) = &self.g.server {
             return self.parse_server(s);
         }
@@ -157,19 +173,19 @@ impl Ctx {
         if let Some(s) = self.settings()?.server {
             return self.parse_server(&s);
         }
-        Err(CliError::usage(
+        Err(OpError::usage(
             "no server given: pass --server, set LODE_SERVER, or run `lode login <server>`",
         ))
     }
 
     /// The token for `server`: `LODE_TOKEN_FILE` first, then the stored login.
-    pub fn token(&self, server: &ServerUrl) -> CliResult<Option<String>> {
+    pub fn token(&self, server: &ServerUrl) -> OpResult<Option<String>> {
         if let Some(file) = std::env::var_os("LODE_TOKEN_FILE").filter(|f| !f.is_empty()) {
             let path = PathBuf::from(file);
             // The path is only reported, never stored in the workspace.
             return match read_token_file(&path) {
                 Ok(Some(t)) => Ok(Some(t)),
-                Ok(None) => Err(CliError::new(
+                Ok(None) => Err(OpError::new(
                     Exit::Auth,
                     "unauthenticated",
                     format!(
@@ -177,7 +193,7 @@ impl Ctx {
                         path.display()
                     ),
                 )),
-                Err(e) => Err(CliError::new(
+                Err(e) => Err(OpError::new(
                     Exit::Auth,
                     "unauthenticated",
                     format!("cannot read LODE_TOKEN_FILE {}: {e}", path.display()),
@@ -189,7 +205,7 @@ impl Ctx {
 
     /// The shared download cache: `LODE_CACHE_DIR`, else the `cache_dir` setting; none when
     /// neither is set.
-    pub fn shared_cache(&self) -> CliResult<Option<BlobCache>> {
+    pub fn shared_cache(&self) -> OpResult<Option<BlobCache>> {
         let settings = self.settings()?;
         let dir = match std::env::var_os("LODE_CACHE_DIR").filter(|d| !d.is_empty()) {
             Some(d) => PathBuf::from(d),
@@ -205,7 +221,7 @@ impl Ctx {
     }
 
     /// A client for `server` without a token.
-    pub fn anonymous_client(&self, server: &ServerUrl) -> CliResult<Client> {
+    pub fn anonymous_client(&self, server: &ServerUrl) -> OpResult<Client> {
         Ok(Client::builder(server.as_str())
             .allow_insecure_http(self.g.insecure)
             .product(PRODUCT)
@@ -213,9 +229,9 @@ impl Ctx {
     }
 
     /// A signed-in client for `server`.
-    pub fn client(&self, server: &ServerUrl) -> CliResult<Client> {
+    pub fn client(&self, server: &ServerUrl) -> OpResult<Client> {
         let token = self.token(server)?.ok_or_else(|| {
-            CliError::new(
+            OpError::new(
                 Exit::Auth,
                 "unauthenticated",
                 format!(
@@ -227,7 +243,7 @@ impl Ctx {
     }
 
     /// The workspace containing the working directory.
-    pub fn workspace(&self) -> CliResult<Workspace> {
+    pub fn workspace(&self) -> OpResult<Workspace> {
         Ok(Workspace::discover(&self.cwd)?)
     }
 

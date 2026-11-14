@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use crate::cmd::commit::PENDING_COMMIT;
 use crate::cmd::diff::TEXT_LIMIT;
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, Bases};
 use crate::materialize::{fetch_entries, place_file, prepare_target, remove_and_prune};
 
@@ -33,7 +33,7 @@ pub const UPDATE_REV: &str = "update_rev";
 pub const SWITCH_BRANCH: &str = "switch_branch";
 
 /// `lode update` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct UpdateArgs {
     /// Revision to update to (default: the branch head).
     #[arg(short = 'r', long = "rev")]
@@ -41,7 +41,7 @@ pub struct UpdateArgs {
 }
 
 /// `lode resolve` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 #[command(group(clap::ArgGroup::new("how").required(true).args(["mine", "theirs", "merged"])))]
 pub struct ResolveArgs {
     /// Conflicted files (or directories holding them).
@@ -102,7 +102,7 @@ impl Incoming {
 }
 
 /// The content id of what is on disk at `e` now.
-pub(crate) fn disk_id(ws: &Workspace, e: &ScanEntry) -> CliResult<Option<ObjectId>> {
+pub(crate) fn disk_id(ws: &Workspace, e: &ScanEntry) -> OpResult<Option<ObjectId>> {
     let Some(d) = &e.disk else { return Ok(None) };
     if let Some(id) = d.id {
         return Ok(Some(id));
@@ -125,7 +125,7 @@ pub(crate) fn write_through_tmp(
     path: &DepotPath,
     bytes: &[u8],
     exec: bool,
-) -> CliResult<()> {
+) -> OpResult<()> {
     let tmp_dir = ws.layout().tmp();
     fs::create_dir_all(&tmp_dir)?;
     let tmp = tmp_dir.join(format!("merge-{}", std::process::id()));
@@ -184,7 +184,7 @@ impl Run<'_> {
         old_base: Option<ObjectId>,
         theirs: Option<&ManifestEntry>,
         mine_id: Option<ObjectId>,
-    ) -> CliResult<()> {
+    ) -> OpResult<()> {
         // Already recorded by an interrupted run of this update: keep what it set aside.
         if ws
             .db()
@@ -225,7 +225,7 @@ impl Run<'_> {
         e: &ScanEntry,
         row: &FileRow,
         theirs: &ManifestEntry,
-    ) -> CliResult<()> {
+    ) -> OpResult<()> {
         let local = ws.local_path(&e.path);
         let is_file = row.kind == EntryKind::File
             && theirs.kind == EntryKind::File
@@ -291,7 +291,7 @@ impl Run<'_> {
 }
 
 /// Runs `lode update`.
-pub async fn update(ctx: &Ctx, args: UpdateArgs) -> CliResult<Value> {
+pub async fn update(ctx: &Ctx, args: UpdateArgs) -> OpResult<Value> {
     sync(ctx, args.rev, None).await
 }
 
@@ -303,11 +303,11 @@ pub(crate) async fn sync(
     ctx: &Ctx,
     rev: Option<u64>,
     switch_to: Option<String>,
-) -> CliResult<Value> {
+) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     if ws.db().config(PENDING_COMMIT)?.is_some() {
-        return Err(CliError::failed(
+        return Err(OpError::failed(
             "pending_commit",
             "an earlier commit did not get an answer; run `lode commit` first",
         ));
@@ -315,11 +315,11 @@ pub(crate) async fn sync(
     let depot = ws
         .db()
         .config(keys::DEPOT)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no depot"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no depot"))?;
     let branch = ws
         .db()
         .config(keys::BRANCH)?
-        .ok_or_else(|| CliError::failed("workspace", "workspace has no branch"))?;
+        .ok_or_else(|| OpError::failed("workspace", "workspace has no branch"))?;
     let server = ctx.server_url(Some(&ws))?;
     let client = ctx.client(&server)?;
     let synced = local::synced_rev(&ws)?;
@@ -327,7 +327,7 @@ pub(crate) async fn sync(
     let unfinished_switch = ws.db().config(SWITCH_BRANCH)?;
     let switching = match (unfinished_switch, switch_to) {
         (Some(p), Some(s)) if p != s => {
-            return Err(CliError::usage(format!(
+            return Err(OpError::usage(format!(
                 "a switch to `{p}` did not finish; run `lode switch {p}` to complete it first"
             )))
         }
@@ -340,7 +340,7 @@ pub(crate) async fn sync(
     let resuming = ws.db().config_u64(UPDATE_REV)?;
     let target = match (resuming, rev) {
         (Some(r), Some(asked)) if r != asked => {
-            return Err(CliError::usage(format!(
+            return Err(OpError::usage(format!(
                 "an update to r{r} did not finish; run `lode update` (or `-r {r}`) to complete it first"
             )))
         }
@@ -360,7 +360,7 @@ pub(crate) async fn sync(
                 .iter()
                 .map(|c| c.path.as_str().to_owned())
                 .collect();
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "conflicted",
                 format!(
                     "resolve these conflicts first (`lode resolve`): {}",
@@ -410,7 +410,7 @@ pub(crate) async fn sync(
             .next()
             .is_some_and(|s| s.eq_ignore_ascii_case(lode_workspace::layout::DOT_LODE))
         {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "unsafe_path",
                 format!("refusing to write {}: it is inside .lode", i.path()),
             ));
@@ -426,7 +426,7 @@ pub(crate) async fn sync(
             .map(|e| e.path.as_str().to_owned())
             .collect();
         if !touched.is_empty() {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "local_changes",
                 format!(
                     "going back to r{target} would touch files with local changes: {}; commit or revert them first",
@@ -645,7 +645,7 @@ pub(crate) async fn check_on_branch(
     depot: &str,
     branch: &str,
     rev: u64,
-) -> CliResult<()> {
+) -> OpResult<()> {
     let q = lode_proto::read::RevisionListQuery {
         branch: Some(branch.to_owned()),
         before: Some(rev.saturating_add(1)),
@@ -656,7 +656,7 @@ pub(crate) async fn check_on_branch(
     if list.revisions.first().map(|r| r.rev) == Some(rev) {
         Ok(())
     } else {
-        Err(CliError::failed(
+        Err(OpError::failed(
             "not_found",
             format!("r{rev} is not in the history of branch `{branch}`"),
         ))
@@ -664,7 +664,7 @@ pub(crate) async fn check_on_branch(
 }
 
 /// Runs `lode resolve`.
-pub async fn resolve(ctx: &Ctx, args: ResolveArgs) -> CliResult<Value> {
+pub async fn resolve(ctx: &Ctx, args: ResolveArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let named = local::depot_paths(ctx, &ws, &args.paths)?;
@@ -730,7 +730,7 @@ pub async fn resolve(ctx: &Ctx, args: ResolveArgs) -> CliResult<Value> {
                 if let Some(id) = c.mine_id {
                     let kept = local::mine_path(&ws, &id);
                     let bytes = fs::read(&kept).map_err(|e| {
-                        CliError::failed(
+                        OpError::failed(
                             "workspace",
                             format!(
                                 "the local version of {} is gone ({e}); use --merged or --theirs",

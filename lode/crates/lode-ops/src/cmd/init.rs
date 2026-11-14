@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use crate::cmd::checkout::split_target;
 use crate::cmd::commit::{commit, CommitArgs};
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::output::human_bytes;
 use crate::templates::{self, Template};
 
@@ -42,6 +42,18 @@ pub struct InitArgs {
     pub message: Option<String>,
 }
 
+/// The options `lode init` gets when only the target is given.
+impl Default for InitArgs {
+    fn default() -> Self {
+        Self {
+            target: String::new(),
+            template: "generic".into(),
+            dry_run: false,
+            message: None,
+        }
+    }
+}
+
 /// Files a template's rules leave in, and their total size.
 struct Plan {
     files: u64,
@@ -51,10 +63,10 @@ struct Plan {
 
 /// Walks `root` as the first commit would see it, with the root ignore rules taken from
 /// `root_ignore` (the template's, when the folder has no `.lodeignore` yet).
-fn plan(root: &Path, root_ignore: &str) -> CliResult<Plan> {
+fn plan(root: &Path, root_ignore: &str) -> OpResult<Plan> {
     let (stack, problem) = IgnoreStack::with_text(&IgnoreStack::empty(), root, root_ignore);
     if let Some(p) = problem {
-        return Err(CliError::failed("bad_ignore", p));
+        return Err(OpError::failed("bad_ignore", p));
     }
     let mut out = Plan {
         files: 0,
@@ -95,7 +107,7 @@ fn plan(root: &Path, root_ignore: &str) -> CliResult<Plan> {
 }
 
 /// Writes `name` with `text` unless the folder already has it; returns whether it wrote.
-fn write_unless_present(root: &Path, name: &str, text: &str) -> CliResult<bool> {
+fn write_unless_present(root: &Path, name: &str, text: &str) -> OpResult<bool> {
     let path = root.join(name);
     if path.exists() {
         return Ok(false);
@@ -104,16 +116,16 @@ fn write_unless_present(root: &Path, name: &str, text: &str) -> CliResult<bool> 
     Ok(true)
 }
 
-fn template(name: &str) -> CliResult<&'static Template> {
+fn template(name: &str) -> OpResult<&'static Template> {
     templates::find(name).ok_or_else(|| {
-        CliError::usage(format!(
+        OpError::usage(format!(
             "no template `{name}`; the templates are:{}",
             templates::names()
         ))
     })
 }
 
-pub async fn init(ctx: &Ctx, args: InitArgs) -> CliResult<Value> {
+pub async fn init(ctx: &Ctx, args: InitArgs) -> OpResult<Value> {
     let root = lode_workspace::paths::canonical(&ctx.local(Path::new(".")))?;
     let db = root.join(DOT_LODE).join(lode_workspace::layout::DB_FILE);
     let resuming = db.is_file();
@@ -168,13 +180,13 @@ pub async fn init(ctx: &Ctx, args: InitArgs) -> CliResult<Value> {
     if resuming {
         let ws = Workspace::open(&root)?;
         let Some(name) = ws.db().config(INIT_TEMPLATE)? else {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "already_a_workspace",
                 format!("{} is already a workspace", root.display()),
             ));
         };
         if ws.db().config(keys::DEPOT)?.as_deref() != Some(depot.as_str()) {
-            return Err(CliError::failed(
+            return Err(OpError::failed(
                 "already_a_workspace",
                 format!(
                     "{} is being set up for another depot; rerun `lode init` with that one",
@@ -193,7 +205,7 @@ pub async fn init(ctx: &Ctx, args: InitArgs) -> CliResult<Value> {
             Err(lode_client::Error::Api(e)) if e.status == 409 => {
                 let head = client.branch(&depot, "main").await?.head_rev;
                 if head > 1 {
-                    return Err(CliError::failed(
+                    return Err(OpError::failed(
                         "depot_not_empty",
                         format!(
                             "depot {depot} already has revisions; check it out with `lode checkout` instead"

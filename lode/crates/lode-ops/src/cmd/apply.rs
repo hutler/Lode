@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::cmd::diff::TEXT_LIMIT;
 use crate::cmd::update::{disk_id, local_config, relabel, write_through_tmp};
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 use crate::local::{self, Bases};
 use crate::materialize::remove_and_prune;
 
@@ -61,7 +61,7 @@ impl Apply<'_> {
 
     /// A row for `c.path` now that the incoming content is on disk: the row it had (deleted
     /// no more), or an add.
-    fn put_row(ws: &mut Workspace, c: &Change, row: Option<FileRow>) -> CliResult<()> {
+    fn put_row(ws: &mut Workspace, c: &Change, row: Option<FileRow>) -> OpResult<()> {
         let r = match row {
             Some(mut r) => {
                 if r.state == FileState::Deleted {
@@ -89,7 +89,7 @@ impl Apply<'_> {
         c: &Change,
         row: Option<FileRow>,
         mine_id: Option<ObjectId>,
-    ) -> CliResult<Outcome> {
+    ) -> OpResult<Outcome> {
         let mut r = row.unwrap_or(FileRow {
             path: c.path.clone(),
             base_id: None,
@@ -124,7 +124,7 @@ impl Apply<'_> {
         ws: &mut Workspace,
         c: &Change,
         e: Option<&ScanEntry>,
-    ) -> CliResult<Outcome> {
+    ) -> OpResult<Outcome> {
         let Some(theirs) = c.new_id else {
             return Ok(Outcome::Unchanged);
         };
@@ -204,7 +204,7 @@ impl Apply<'_> {
         ws: &mut Workspace,
         c: &Change,
         e: Option<&ScanEntry>,
-    ) -> CliResult<Outcome> {
+    ) -> OpResult<Outcome> {
         let Some(row) = e.and_then(|e| e.row.clone()) else {
             return Ok(Outcome::Unchanged);
         };
@@ -212,7 +212,7 @@ impl Apply<'_> {
             Some(e) => disk_id(ws, e)?,
             None => None,
         };
-        let gone = |ws: &mut Workspace, row: FileRow| -> CliResult<()> {
+        let gone = |ws: &mut Workspace, row: FileRow| -> OpResult<()> {
             if row.base_id.is_none() {
                 ws.db_mut().write(|tx| tx.remove_file(&row.path))?;
             } else {
@@ -248,7 +248,7 @@ pub(crate) async fn apply_changes(
     changes: &[Change],
     label: String,
     theirs_rev: u64,
-) -> CliResult<BTreeMap<String, Outcome>> {
+) -> OpResult<BTreeMap<String, Outcome>> {
     let view = ws.view_spec()?.compile()?;
     let paths: Vec<DepotPath> = changes.iter().map(|c| c.path.clone()).collect();
     let report = local::scan(ctx, ws, &paths, false)?;
@@ -285,7 +285,7 @@ pub(crate) fn count(outcomes: &BTreeMap<String, Outcome>) -> BTreeMap<&'static s
 }
 
 /// Fails while conflicts wait to be resolved.
-pub(crate) fn refuse_conflicts(ws: &Workspace) -> CliResult<()> {
+pub(crate) fn refuse_conflicts(ws: &Workspace) -> OpResult<()> {
     let conflicts = ws.db().conflicts()?;
     if conflicts.is_empty() {
         return Ok(());
@@ -294,7 +294,7 @@ pub(crate) fn refuse_conflicts(ws: &Workspace) -> CliResult<()> {
         .iter()
         .map(|c| c.path.as_str().to_owned())
         .collect();
-    Err(CliError::failed(
+    Err(OpError::failed(
         "conflicted",
         format!(
             "resolve these conflicts first (`lode resolve`): {}",

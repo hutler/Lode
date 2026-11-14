@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::context::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::{OpError, OpResult};
 
 /// Where releases are listed unless `LODE_UPDATE_URL` says otherwise.
 pub const RELEASES_URL: &str =
@@ -121,11 +121,11 @@ fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-fn failed(code: &str, message: impl Into<String>) -> CliError {
-    CliError::failed(code, message)
+fn failed(code: &str, message: impl Into<String>) -> OpError {
+    OpError::failed(code, message)
 }
 
-fn http_client() -> CliResult<reqwest::Client> {
+fn http_client() -> OpResult<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(concat!("lode/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(30))
@@ -134,7 +134,7 @@ fn http_client() -> CliResult<reqwest::Client> {
 }
 
 /// Refuses plain HTTP except to this machine.
-fn check_url(url: &str) -> CliResult<reqwest::Url> {
+fn check_url(url: &str) -> OpResult<reqwest::Url> {
     let u = reqwest::Url::parse(url)
         .map_err(|e| failed("update_failed", format!("bad update URL `{url}`: {e}")))?;
     let loopback = matches!(
@@ -150,7 +150,7 @@ fn check_url(url: &str) -> CliResult<reqwest::Url> {
     Ok(u)
 }
 
-async fn get(client: &reqwest::Client, url: &str) -> CliResult<reqwest::Response> {
+async fn get(client: &reqwest::Client, url: &str) -> OpResult<reqwest::Response> {
     let resp = client
         .get(check_url(url)?)
         .send()
@@ -179,12 +179,7 @@ fn newest(releases: Vec<Release>) -> Option<((u64, u64, u64), Release)> {
 }
 
 /// Downloads `url` into `dest`, returning the SHA-256 of what arrived.
-async fn download(
-    ctx: &Ctx,
-    client: &reqwest::Client,
-    url: &str,
-    dest: &Path,
-) -> CliResult<String> {
+async fn download(ctx: &Ctx, client: &reqwest::Client, url: &str, dest: &Path) -> OpResult<String> {
     let resp = get(client, url).await?;
     let mut progress = ctx
         .out
@@ -246,7 +241,7 @@ fn old_path(exe: &Path) -> PathBuf {
 }
 
 /// Runs `lode self-update`.
-pub async fn self_update(ctx: &Ctx, args: SelfUpdateArgs) -> CliResult<Value> {
+pub async fn self_update(ctx: &Ctx, args: SelfUpdateArgs) -> OpResult<Value> {
     let exe = std::env::current_exe()?;
     let exe = exe.canonicalize().unwrap_or(exe);
     if cfg!(windows) {

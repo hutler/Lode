@@ -25,7 +25,8 @@ Design rules:
 
 1. The core knows nothing about locks, shelves or MCP. Modules use only the extension points
    in section 8. If a module needs a back door, the core is wrong — fix the extension point.
-2. The CLI uses the same public API as any third party.
+2. The CLI uses the same public API as any third party. Its commands live in `lode-ops`, so
+   the CLI and the desktop app run the same code.
 3. Everything that touches content streams it. No code path buffers a whole file in memory
    (tree objects and small text merges excepted).
 4. The server never trusts a client-supplied hash. It always recomputes.
@@ -49,7 +50,8 @@ One Cargo workspace. Library crates never depend on binaries; arrows point downw
 | `lode-client` | lib | Typed HTTP client, blob transfer, retry |
 | `lode-workspace` | lib | Workspace database, scanner, sync, merge, changelists, client side of locks and shelves |
 | `lode-import` | lib | Imports history from other systems: Git through the `git` command (first-parent replay, renames, LFS content) |
-| `lode-cli` | bin `lode` | Argument parsing, output formatting (human and `--json`), local MCP server |
+| `lode-ops` | lib | Every client operation (context, sign-in resolution, workspace helpers, the commands). Each returns the command's `--json` document and reports through a `Ui` trait (lines, warnings, progress, questions), so it never touches the terminal. Used by `lode` and by the Lode Desk app |
+| `lode-cli` | bin `lode` | Argument parsing, the terminal `Ui` (printing, progress, prompts, editor), the `--json` envelope, local MCP server, `self-update`, external subcommands |
 | `loded` | bin | Wires `lode-server` and enabled modules together |
 | `lode-testkit` | lib (dev) | Starts an in-process server on a temp directory; helpers to drive CLI workspaces |
 

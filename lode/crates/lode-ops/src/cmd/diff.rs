@@ -15,14 +15,14 @@ use serde_json::{json, Value};
 
 use crate::cmd::status::status_name;
 use crate::context::Ctx;
-use crate::error::CliResult;
+use crate::error::OpResult;
 use crate::local::{self, Bases};
 
 /// Files larger than this are reported like binary files, with sizes only.
 pub const TEXT_LIMIT: u64 = 16 * 1024 * 1024;
 
 /// `lode diff` options.
-#[derive(Debug, clap::Args)]
+#[derive(Debug, Default, clap::Args)]
 pub struct DiffArgs {
     /// Only these files and directories.
     pub paths: Vec<PathBuf>,
@@ -64,7 +64,7 @@ struct FileDiff {
     patch: Vec<u8>,
 }
 
-fn read_disk(local: &std::path::Path, kind: EntryKind) -> CliResult<(Option<Vec<u8>>, u64)> {
+fn read_disk(local: &std::path::Path, kind: EntryKind) -> OpResult<(Option<Vec<u8>>, u64)> {
     if kind == EntryKind::Symlink {
         let target = fs::read_link(local)?;
         let text = target.to_string_lossy().replace('\\', "/").into_bytes();
@@ -86,7 +86,7 @@ async fn base_side(
     row: &FileRow,
     id: ObjectId,
     fetch: bool,
-) -> CliResult<Side> {
+) -> OpResult<Side> {
     let (bytes, size) = if fetch {
         let b = bases.read(&id).await?;
         let n = b.len() as u64;
@@ -198,7 +198,7 @@ fn local_config(root: &std::path::Path) -> Option<LodeConfig> {
 }
 
 /// Runs `lode diff`.
-pub async fn diff(ctx: &Ctx, args: DiffArgs) -> CliResult<Value> {
+pub async fn diff(ctx: &Ctx, args: DiffArgs) -> OpResult<Value> {
     let mut ws = local::open(ctx)?;
     let paths = local::depot_paths(ctx, &ws, &args.paths)?;
     let report = local::scan(ctx, &mut ws, &paths, false)?;
@@ -270,7 +270,7 @@ pub async fn diff(ctx: &Ctx, args: DiffArgs) -> CliResult<Value> {
         .iter()
         .fold((0, 0), |(i, d), f| (i + f.insertions, d + f.deletions));
     if !ctx.g.json {
-        let mut stdout = std::io::stdout().lock();
+        let mut stdout = Vec::new();
         if args.stat {
             let width = diffs.iter().map(|d| d.path.len()).max().unwrap_or(0);
             for d in &diffs {
@@ -298,10 +298,10 @@ pub async fn diff(ctx: &Ctx, args: DiffArgs) -> CliResult<Value> {
             )?;
         } else {
             for d in &diffs {
-                stdout.write_all(&d.patch)?;
+                stdout.extend_from_slice(&d.patch);
             }
         }
-        stdout.flush()?;
+        ctx.out.raw(&stdout)?;
     }
     let files: Vec<Value> = diffs
         .iter()
