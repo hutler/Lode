@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { buildFeed, readBundles } from "./feed.mjs";
 
 const SIG = Buffer.from("untrusted comment: signature from tauri secret key\nRUQ...\n").toString("base64");
-const BASE = "https://github.com/hutler/simpledevops/releases/download/lode-v0.2.0";
+const BASE = "https://github.com/hutler/Lode/releases/download/lode-v0.2.0";
 
 test("signed bundles become platforms, unsigned ones are left out", () => {
   const dir = mkdtempSync(join(tmpdir(), "feed-"));

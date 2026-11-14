@@ -1,10 +1,5 @@
 # Rust (lode/)
 target/
-# Go (umpalumpa/)
-umpalumpa/bin/
-umpalumpa/dist/
-umpalumpa/web/node_modules/
-umpalumpa/web/dist/
 # Unreal (unreal/)
 Binaries/
 Intermediate/

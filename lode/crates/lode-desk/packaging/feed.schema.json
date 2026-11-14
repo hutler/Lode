@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/hutler/simpledevops/lode/crates/lode-desk/packaging/feed.schema.json",
+  "$id": "https://github.com/hutler/Lode/lode/crates/lode-desk/packaging/feed.schema.json",
   "title": "Lode Desk update feed",
   "description": "latest.json as the Tauri updater reads it, with the platforms Lode Desk publishes.",
   "type": "object",

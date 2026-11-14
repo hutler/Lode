@@ -13,7 +13,7 @@
 
 [Unit]
 Description=Lode version control server
-Documentation=https://github.com/hutler/simpledevops/tree/main/lode/docs
+Documentation=https://github.com/hutler/Lode/tree/main/lode/docs
 After=network-online.target
 Wants=network-online.target
 # Not before `loded setup` has run.

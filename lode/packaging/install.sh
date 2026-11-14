@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs Lode on Linux from the newest GitHub release, as a .deb or .rpm package:
 #
-#   curl -fsSL https://raw.githubusercontent.com/hutler/simpledevops/main/lode/packaging/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh
 #
 # It installs the server (lode-server) and the client (lode). To choose, pass arguments
 # after `sh -s --`:
@@ -12,7 +12,7 @@
 # instead of GitHub, for mirrors and tests.
 set -eu
 
-repo="hutler/simpledevops"
+repo="hutler/Lode"
 version=""
 packages="lode-server lode"
 while [ $# -gt 0 ]; do

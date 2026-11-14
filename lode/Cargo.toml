@@ -28,7 +28,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.88"
-repository = "https://github.com/hutler/simpledevops"
+repository = "https://github.com/hutler/Lode"
 publish = false
 
 [workspace.dependencies]

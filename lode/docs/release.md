@@ -78,7 +78,7 @@ The workflow then:
 ## After the tag
 
 - [ ] The release lists the archives, packages, `SHA256SUMS` and the `lode-desk-*` files.
-- [ ] `https://github.com/<owner>/simpledevops/releases/download/lode-desk-feed/latest.json`
+- [ ] `https://github.com/<owner>/Lode/releases/download/lode-desk-feed/latest.json`
       names the new version.
 - [ ] On one machine with the previous Lode Desk: Home, "Check for updates now" finds the new
       version; "Install and restart" brings it up at the new version.

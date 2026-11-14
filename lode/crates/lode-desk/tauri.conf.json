@@ -34,7 +34,7 @@
     "updater": {
       "pubkey": "",
       "endpoints": [
-        "https://github.com/hutler/simpledevops/releases/download/lode-desk-feed/latest.json"
+        "https://github.com/hutler/Lode/releases/download/lode-desk-feed/latest.json"
       ],
       "windows": {
         "installMode": "passive"
@@ -54,7 +54,7 @@
     ],
     "createUpdaterArtifacts": false,
     "publisher": "SimpleDevOps",
-    "homepage": "https://github.com/hutler/simpledevops",
+    "homepage": "https://github.com/hutler/Lode",
     "copyright": "Copyright the SimpleDevOps contributors",
     "license": "Apache-2.0",
     "category": "DeveloperTool",

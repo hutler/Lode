@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 # Slint 1.18 needs 1.92; the rest of Lode stays on 1.88.
 rust-version = "1.92"
-repository = "https://github.com/hutler/simpledevops"
+repository = "https://github.com/hutler/Lode"
 publish = false
 
 # Its own workspace: building the CLI and server never needs the system web view libraries.

@@ -12,7 +12,7 @@ description: |
   Lode version control client (lode).
   The command line client of the Lode version control system.
 vendor: SimpleDevOps
-homepage: https://github.com/hutler/simpledevops
+homepage: https://github.com/hutler/Lode
 license: Apache-2.0
 contents:
   - src: ${BIN}/lode

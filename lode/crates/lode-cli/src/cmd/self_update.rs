@@ -21,7 +21,7 @@ use crate::error::{OpError, OpResult};
 
 /// Where releases are listed unless `LODE_UPDATE_URL` says otherwise.
 pub const RELEASES_URL: &str =
-    "https://api.github.com/repos/hutler/simpledevops/releases?per_page=100";
+    "https://api.github.com/repos/hutler/Lode/releases?per_page=100";
 
 /// Largest executable accepted.
 const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;

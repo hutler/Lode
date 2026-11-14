@@ -16,7 +16,7 @@ description: |
   After installing, run `sudo -u lode loded setup` and then
   `sudo systemctl enable --now loded`.
 vendor: SimpleDevOps
-homepage: https://github.com/hutler/simpledevops
+homepage: https://github.com/hutler/Lode
 license: Apache-2.0
 recommends:
   - lode

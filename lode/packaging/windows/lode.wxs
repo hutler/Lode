@@ -18,7 +18,7 @@
            Compressed="yes">
     <MajorUpgrade DowngradeErrorMessage="A newer Lode is already installed." />
     <MediaTemplate EmbedCab="yes" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/hutler/simpledevops" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hutler/Lode" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Lode" />

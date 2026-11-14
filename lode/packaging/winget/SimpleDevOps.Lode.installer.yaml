@@ -10,7 +10,7 @@ Commands:
   - lode
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/hutler/simpledevops/releases/download/lode-v{{VERSION}}/lode-{{VERSION}}-x64.msi
+    InstallerUrl: https://github.com/hutler/Lode/releases/download/lode-v{{VERSION}}/lode-{{VERSION}}-x64.msi
     InstallerSha256: "{{SHA256_lode-{{VERSION}}-x64.msi}}"
 ManifestType: installer
 ManifestVersion: 1.6.0

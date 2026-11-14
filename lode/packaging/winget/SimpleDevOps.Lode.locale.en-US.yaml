@@ -2,11 +2,11 @@ PackageIdentifier: SimpleDevOps.Lode
 PackageVersion: "{{VERSION}}"
 PackageLocale: en-US
 Publisher: SimpleDevOps
-PublisherUrl: https://github.com/hutler/simpledevops
+PublisherUrl: https://github.com/hutler/Lode
 PackageName: Lode
-PackageUrl: https://github.com/hutler/simpledevops/tree/main/lode
+PackageUrl: https://github.com/hutler/Lode/tree/main/lode
 License: Apache-2.0
-LicenseUrl: https://github.com/hutler/simpledevops/blob/main/LICENSE
+LicenseUrl: https://github.com/hutler/Lode/blob/main/LICENSE
 ShortDescription: Command line client of the Lode version control system.
 Description: Lode is a centralized version control system for small teams that work with source code and large binary files together.
 Tags:

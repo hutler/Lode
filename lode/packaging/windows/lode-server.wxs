@@ -22,7 +22,7 @@
     <MajorUpgrade DowngradeErrorMessage="A newer Lode Server is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Property Id="ARPHELPLINK" Value="https://github.com/hutler/simpledevops" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hutler/Lode" />
     <Property Id="ARPCOMMENTS" Value="Lode version control server. Uninstalling keeps C:\ProgramData\Lode." />
 
     <StandardDirectory Id="ProgramFiles64Folder">

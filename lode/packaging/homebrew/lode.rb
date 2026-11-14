@@ -3,11 +3,11 @@
 # `packaging/render-manifests.sh` fills in the placeholders for a release.
 class Lode < Formula
   desc "Command-line client of the Lode version control system"
-  homepage "https://github.com/hutler/simpledevops"
+  homepage "https://github.com/hutler/Lode"
   version "{{VERSION}}"
   license "Apache-2.0"
 
-  base = "https://github.com/hutler/simpledevops/releases/download/lode-v{{VERSION}}"
+  base = "https://github.com/hutler/Lode/releases/download/lode-v{{VERSION}}"
   on_macos do
     on_arm do
       url "#{base}/lode-{{VERSION}}-aarch64-apple-darwin.tar.gz"
