@@ -18,7 +18,7 @@ use lode_ops::output::{ProgressEvent, Ui};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::desk::{Desk, ErrorView, RecentWorkspace};
+use crate::desk::{Desk, ErrorView, RecentWorkspace, ShelveRequest};
 
 /// Forwards an operation's reports to the window as events.
 struct WindowUi {
@@ -221,6 +221,55 @@ async fn locks(desk: State<'_, Desk>, workspace: String, mine: bool) -> Result<V
 }
 
 #[tauri::command]
+async fn shelve(
+    desk: State<'_, Desk>,
+    workspace: String,
+    request: ShelveRequest,
+) -> Result<Value, ErrorView> {
+    desk.shelve(workspace, request).await
+}
+
+#[tauri::command]
+async fn shelves(
+    desk: State<'_, Desk>,
+    workspace: String,
+    mine: bool,
+    state: Option<String>,
+) -> Result<Value, ErrorView> {
+    desk.shelves(workspace, mine, state).await
+}
+
+#[tauri::command]
+async fn shelf(desk: State<'_, Desk>, workspace: String, id: u64) -> Result<Value, ErrorView> {
+    desk.shelf(workspace, id).await
+}
+
+#[tauri::command]
+async fn shelf_submit(
+    desk: State<'_, Desk>,
+    workspace: String,
+    id: u64,
+    version: u64,
+    message: Option<String>,
+) -> Result<Value, ErrorView> {
+    desk.shelf_submit(workspace, id, version, message).await
+}
+
+#[tauri::command]
+async fn shelf_delete(
+    desk: State<'_, Desk>,
+    workspace: String,
+    id: u64,
+) -> Result<Value, ErrorView> {
+    desk.shelf_delete(workspace, id).await
+}
+
+#[tauri::command]
+async fn unshelve(desk: State<'_, Desk>, workspace: String, id: u64) -> Result<Value, ErrorView> {
+    desk.unshelve(workspace, id).await
+}
+
+#[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
 }
@@ -278,6 +327,12 @@ pub fn run() -> Result<(), tauri::Error> {
             lock,
             unlock,
             locks,
+            shelve,
+            shelves,
+            shelf,
+            shelf_submit,
+            shelf_delete,
+            unshelve,
             watch,
             unwatch,
         ])

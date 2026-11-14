@@ -14,7 +14,7 @@ export type Layout = "unified" | "split";
 const TEXT_LIMIT = 16 * 1024 * 1024;
 const LAYOUT_KEY = "lode-desk.diff-layout";
 
-function savedLayout(): Layout {
+export function savedLayout(): Layout {
   try {
     return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "unified";
   } catch {
@@ -22,7 +22,7 @@ function savedLayout(): Layout {
   }
 }
 
-function saveLayout(l: Layout) {
+export function saveLayout(l: Layout) {
   try {
     localStorage.setItem(LAYOUT_KEY, l);
   } catch {

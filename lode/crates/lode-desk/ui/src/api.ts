@@ -162,6 +162,84 @@ export interface LockInfo {
   mine: boolean;
 }
 
+/** One file's diff in a shelf against the shelf's base. */
+export interface ShelfFileDiff {
+  path: string;
+  /** Unified diff, for text files. */
+  patch?: string;
+  /** Why there is no patch: `binary`, `symlink` or `too_large`. */
+  skipped?: string;
+}
+
+/** A shelf as `lode shelves --json` and `lode shelf diff --json` give it. */
+export interface ShelfInfo {
+  id: number;
+  /** Raised by every update; a submit names the version that was reviewed. */
+  version: number;
+  branch: string;
+  base_rev: number;
+  owner: PrincipalRef;
+  /** The user who owns the agent, when the owner is an agent. */
+  agent_owner?: string;
+  description: string;
+  state: "open" | "submitted" | "deleted";
+  submitted_rev?: number;
+  created_at: string;
+  updated_at: string;
+  /** Only when one shelf is asked for. */
+  changes?: ChangeView[];
+  merged_from?: MergedFrom[];
+  diff?: ShelfFileDiff[];
+}
+
+/** What to shelve. */
+export interface ShelveRequest {
+  /** Depot paths; all changes when empty and no changelist is named. */
+  paths: string[];
+  changelist: string | null;
+  /** Description; the changelist's, or the updated shelf's, when null. */
+  message: string | null;
+  /** Leave the changes in the workspace. */
+  keep: boolean;
+  /** Replace the content of this open shelf of mine. */
+  update: number | null;
+}
+
+/** `lode shelve --json`. */
+export interface ShelveResult {
+  shelf: number;
+  version: number;
+  files: number;
+  kept: boolean;
+  updated: boolean;
+}
+
+/** `lode unshelve --json`: what happened to each file. */
+export interface UnshelveResult {
+  shelf: number;
+  version: number;
+  files: { path: string; outcome: "applied" | "merged" | "conflicted" | "unchanged" | "skipped" | string }[];
+  counts: Record<string, number>;
+}
+
+/** `lode shelf submit --json`. */
+export interface SubmitResult {
+  rev: number;
+  branch: string;
+  shelf: number;
+  version: number;
+}
+
+/** One unmet check of a `checks_required` refusal. */
+export interface MissingCheck {
+  name: string;
+  /** Who must report it. */
+  reporter: string;
+  reason: "absent" | "not_success" | "wrong_reporter" | string;
+  state?: string;
+  reported_by?: string;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -213,6 +291,17 @@ export interface Backend {
   unlock(workspace: string, paths: string[], force: boolean): Promise<{ released: string[] }>;
   /** The branch's locks; `mine` keeps this workspace's only. */
   locks(workspace: string, mine: boolean): Promise<{ locks: LockInfo[] }>;
+  /** Puts changes on a shelf on the server (or replaces an open shelf's content). */
+  shelve(workspace: string, request: ShelveRequest): Promise<ShelveResult>;
+  /** The depot's shelves, newest first; `state` null means open ones. */
+  shelves(workspace: string, mine: boolean, state: ShelfInfo["state"] | null): Promise<{ shelves: ShelfInfo[] }>;
+  /** One shelf with its changes and each file's diff. */
+  shelf(workspace: string, id: number): Promise<ShelfInfo>;
+  /** Submits `version` of a shelf; refused with `conflict` when it changed since. */
+  shelfSubmit(workspace: string, id: number, version: number, message: string | null): Promise<SubmitResult>;
+  shelfDelete(workspace: string, id: number): Promise<void>;
+  /** Applies a shelf's changes to the workspace. */
+  unshelve(workspace: string, id: number): Promise<UnshelveResult>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
   watch(workspace: string): Promise<void>;
   unwatch(workspace: string): Promise<void>;
@@ -278,6 +367,14 @@ async function tauriBackend(): Promise<Backend> {
     lock: (workspace, paths, comment) => invoke("lock", { workspace, paths, comment }),
     unlock: (workspace, paths, force) => invoke("unlock", { workspace, paths, force }),
     locks: (workspace, mine) => invoke("locks", { workspace, mine }),
+    shelve: (workspace, request) => invoke("shelve", { workspace, request }),
+    shelves: (workspace, mine, state) => invoke("shelves", { workspace, mine, state }),
+    shelf: (workspace, id) => invoke("shelf", { workspace, id }),
+    shelfSubmit: (workspace, id, version, message) => invoke("shelf_submit", { workspace, id, version, message }),
+    shelfDelete: async (workspace, id) => {
+      await invoke("shelf_delete", { workspace, id });
+    },
+    unshelve: (workspace, id) => invoke("unshelve", { workspace, id }),
     watch: (workspace) => invoke("watch", { workspace }),
     unwatch: (workspace) => invoke("unwatch", { workspace }),
     onChanged: (listener) => subscribe<string>("lode://changed", listener),

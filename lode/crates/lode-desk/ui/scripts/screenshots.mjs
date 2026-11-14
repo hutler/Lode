@@ -170,6 +170,27 @@ const scenes = {
     await page.getByRole("button", { name: "Commit changelist sails" }).click();
     await page.getByRole("dialog").waitFor();
   },
+  async shelves(page) {
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: "Shelves" }).click();
+    await page.getByRole("article", { name: "Shelf 44" }).waitFor();
+  },
+  async "shelf-checks"(page) {
+    await scenes.shelves(page);
+    await page.getByRole("article", { name: "Shelf 44" }).getByRole("button", { name: "Submit…" }).click();
+    const d = page.getByRole("dialog");
+    await d.getByRole("button", { name: "Submit" }).click();
+    await d.getByRole("list", { name: "Missing checks" }).waitFor();
+  },
+  async shelve(page) {
+    await scenes.workspace(page);
+    const pending = page.getByRole("region", { name: "Pending changes" });
+    await pending.getByRole("checkbox", { name: "Pick Source/Skyfall/Boat.cpp" }).click();
+    await pending.getByRole("button", { name: "Shelve…" }).click();
+    const d = page.getByRole("dialog");
+    await d.getByLabel("Description").fill("Rough water: boats roll and pitch with the waves");
+    await d.getByLabel(/Put on/).waitFor();
+  },
   async "open-error"(page) {
     // The mocked folder picker returns a folder that is not a workspace.
     await page.getByRole("button", { name: "Open a workspace folder…" }).click();

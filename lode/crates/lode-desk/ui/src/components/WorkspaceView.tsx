@@ -6,6 +6,7 @@ import { ChangesView } from "./ChangesView";
 import { DiffView } from "./DiffView";
 import { HistoryView } from "./HistoryView";
 import { LocksView } from "./LocksView";
+import { ShelvesView } from "./ShelvesView";
 
 interface Props {
   info: WorkspaceInfo;
@@ -27,12 +28,14 @@ type Section = (typeof SECTIONS)[number];
 type View =
   | { kind: "changes" }
   | { kind: "locks" }
+  | { kind: "shelves" }
   | { kind: "history"; path: string | null; rev: number | null }
   | { kind: "blame"; path: string; rev: number | null }
   | { kind: "diff"; path: string; rev: number | null };
 
 function sectionOf(v: View): Section {
   if (v.kind === "locks") return "Locks";
+  if (v.kind === "shelves") return "Shelves";
   return v.kind === "changes" || (v.kind === "diff" && v.rev === null) ? "Changes" : "History";
 }
 
@@ -68,14 +71,15 @@ export function WorkspaceView({ info, onError }: Props) {
               key={s}
               className={s === active ? "active" : ""}
               aria-current={s === active ? "page" : undefined}
-              disabled={s === "Shelves"}
               onClick={() =>
                 setView(
                   s === "Changes"
                     ? { kind: "changes" }
                     : s === "Locks"
                       ? { kind: "locks" }
-                      : { kind: "history", path: null, rev: null },
+                      : s === "Shelves"
+                        ? { kind: "shelves" }
+                        : { kind: "history", path: null, rev: null },
                 )
               }
             >
@@ -114,6 +118,11 @@ export function WorkspaceView({ info, onError }: Props) {
       {view.kind === "locks" && (
         <div className="section">
           <LocksView info={info} />
+        </div>
+      )}
+      {view.kind === "shelves" && (
+        <div className="section">
+          <ShelvesView info={info} />
         </div>
       )}
       {view.kind === "diff" && (

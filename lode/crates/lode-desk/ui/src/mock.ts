@@ -18,6 +18,7 @@ import type {
 } from "./api";
 import { demoRevisionDiff, demoWorkingDiff } from "./mockDiff";
 import { demoBlame, demoHead, demoLog, demoRevision } from "./mockHistory";
+import { demoShelves, type MockShelf } from "./mockShelves";
 
 export interface MockOptions {
   /** Workspaces listed on the welcome page. */
@@ -32,6 +33,8 @@ export interface MockOptions {
   admin?: boolean;
   /** The server has no locks module. */
   noLocks?: boolean;
+  /** The server has no shelves module. */
+  noShelves?: boolean;
 }
 
 const DEMO_SERVER = "https://lode.example.com";
@@ -160,6 +163,8 @@ function parseTarget(target: string): { server: string; depot: string } {
 export type MockBackend = Backend & {
   /** Changes a file's status as an editor would, and reports the change. */
   touch(workspace: string, file: StatusFile): void;
+  /** Updates a shelf as its owner would from elsewhere, raising its version. */
+  bumpShelf(workspace: string, id: number): void;
 };
 
 export function createMockBackend(opts: MockOptions = {}): MockBackend {
@@ -267,6 +272,25 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     return table;
   };
   const pause = () => new Promise((r) => setTimeout(r, stepMs));
+  // Shelves per depot.
+  const shelfTables = new Map<string, MockShelf[]>();
+  const shelvesOf = (workspace: string): MockShelf[] => {
+    const info = workspaces.get(workspace);
+    if (!info) fail("not_a_workspace", `${workspace} is not in a lode workspace`);
+    if (opts.noShelves) fail("module_disabled", "this server does not have the shelves module enabled");
+    let table = shelfTables.get(info.depot);
+    if (!table) {
+      table = info.depot === "skyfall" ? demoShelves() : [];
+      shelfTables.set(info.depot, table);
+    }
+    return table;
+  };
+  const shelfOf = (workspace: string, id: number): MockShelf => {
+    const s = shelvesOf(workspace).find((x) => x.id === id);
+    if (!s) fail("not_found", `no shelf ${id}`);
+    return s;
+  };
+  const now = () => new Date(Date.UTC(2026, 10, 14, 9, 30)).toISOString();
 
   return {
     appVersion: async () => "0.1.0",
@@ -465,6 +489,150 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
     locks: async (workspace, mine) => {
       const table = locksOf(workspace).map((l) => ({ ...l, mine: l.workspace === workspace }));
       return { locks: mine ? table.filter((l) => l.mine) : table };
+    },
+    shelve: async (workspace, req) => {
+      const st = statusFor(workspace);
+      const table = shelvesOf(workspace);
+      const list = req.changelist ? (req.changelist === "default" ? null : listsFor(workspace).find((l) => l.name === req.changelist)) : null;
+      if (req.changelist && req.changelist !== "default" && !list) fail("not_found", `no changelist \`${req.changelist}\``);
+      const existing = req.update === null ? null : shelfOf(workspace, req.update);
+      if (existing && (existing.owner.name !== "alice" || existing.state !== "open")) {
+        fail("permission_denied", `shelf ${existing.id} is not an open shelf of yours`);
+      }
+      const description = (req.message ?? list?.description ?? existing?.description ?? "").trim();
+      if (!description) fail("usage", "a shelf needs a description: pass -m");
+      const files = st.files.filter(
+        (f) =>
+          f.status !== "untracked" &&
+          f.status !== "unchanged" &&
+          (req.changelist ? (f.changelist ?? "default") === req.changelist : req.paths.length === 0 || req.paths.includes(f.path)),
+      );
+      if (files.length === 0) {
+        fail("nothing_to_shelve", req.changelist ? `nothing to shelve in changelist ${req.changelist}` : "nothing to shelve");
+      }
+      for (let i = 1; i <= files.length; i++) {
+        await pause();
+        emit({ label: "Uploading", done: i, total: files.length, bytes: i * 800_000, finished: i === files.length });
+      }
+      const changes = files.map((f) => ({
+        path: f.path,
+        action: f.status === "added" ? ("add" as const) : f.status === "deleted" ? ("delete" as const) : ("modify" as const),
+        kind: "file",
+      }));
+      const diff = files.map((f) => {
+        const d = demoWorkingDiff(f.path, f.status);
+        return d && !d.binary ? { path: f.path, patch: d.patch } : { path: f.path, skipped: "binary" };
+      });
+      let shelf: MockShelf;
+      if (existing) {
+        existing.version += 1;
+        existing.description = description;
+        existing.changes = changes;
+        existing.diff = diff;
+        existing.updated_at = now();
+        existing.base_rev = st.rev;
+        delete existing.unmet;
+        shelf = existing;
+      } else {
+        shelf = {
+          id: Math.max(0, ...table.map((x) => x.id)) + 1,
+          version: 1,
+          branch: st.branch,
+          base_rev: st.rev,
+          owner: { name: "alice", kind: "user" },
+          description,
+          state: "open",
+          created_at: now(),
+          updated_at: now(),
+          changes,
+          diff,
+        };
+        table.unshift(shelf);
+      }
+      if (!req.keep) st.files = st.files.filter((f) => !files.includes(f));
+      return { shelf: shelf.id, version: shelf.version, files: files.length, kept: req.keep, updated: !!existing };
+    },
+    shelves: async (workspace, mine, state) => {
+      const want = state ?? "open";
+      const list = shelvesOf(workspace).filter((s) => s.state === want && (!mine || s.owner.name === "alice"));
+      return { shelves: list.map(({ changes: _c, diff: _d, unmet: _u, ...s }) => ({ ...s })) };
+    },
+    shelf: async (workspace, id) => {
+      const { unmet: _u, ...s } = shelfOf(workspace, id);
+      return { ...s, changes: s.changes.map((c) => ({ ...c })), diff: s.diff.map((d) => ({ ...d })) };
+    },
+    shelfSubmit: async (workspace, id, version, message) => {
+      const s = shelfOf(workspace, id);
+      if (s.state === "deleted") fail("not_found", `shelf ${id} was deleted`);
+      if (s.state === "submitted") fail("conflict", `shelf ${id} was already submitted as r${s.submitted_rev}`);
+      if (s.version !== version) {
+        const e: OpError = {
+          code: "conflict",
+          message: `the shelf was changed since that version; it is at version ${s.version} now: review it again`,
+          details: { version: s.version },
+        };
+        throw e;
+      }
+      if (s.unmet?.length) {
+        const lines = s.unmet.map((m) =>
+          m.reason === "absent" ? `${m.name}: not reported yet (expected from ${m.reporter})` : `${m.name}: ${m.state ?? "?"}`,
+        );
+        const e: OpError = {
+          code: "checks_required",
+          message: `shelf ${id} version ${version} cannot be submitted until these checks pass:\n  ${lines.join("\n  ")}`,
+          details: { shelf_id: id, shelf_version: version, missing: s.unmet },
+        };
+        throw e;
+      }
+      const info = workspaces.get(workspace);
+      const head = Math.max(statusFor(workspace).rev, ...shelvesOf(workspace).map((x) => x.submitted_rev ?? 0));
+      s.state = "submitted";
+      s.submitted_rev = head + 1;
+      s.updated_at = now();
+      if (message?.trim()) s.description = message.trim();
+      return { rev: head + 1, branch: info?.branch ?? s.branch, shelf: id, version };
+    },
+    shelfDelete: async (workspace, id) => {
+      const s = shelfOf(workspace, id);
+      if (s.owner.name !== "alice" && !opts.admin) {
+        fail("permission_denied", `shelf ${id} belongs to ${s.owner.name}; only its owner or a depot admin may delete it`);
+      }
+      s.state = "deleted";
+      s.updated_at = now();
+    },
+    unshelve: async (workspace, id) => {
+      const s = shelfOf(workspace, id);
+      if (s.state === "deleted") fail("not_found", `shelf ${id} was deleted`);
+      const st = statusFor(workspace);
+      const files = s.changes.map((c) => {
+        const here = st.files.find((f) => f.path === c.path && f.status !== "untracked");
+        if (here) {
+          // A file changed here too: text merges, except Boat.cpp, which the demo leaves in conflict.
+          const conflicted = c.path.endsWith("Boat.cpp") || s.diff.find((d) => d.path === c.path)?.skipped !== undefined;
+          if (conflicted) here.status = "conflicted";
+          return { path: c.path, outcome: conflicted ? "conflicted" : "merged" };
+        }
+        st.files.push({
+          path: c.path,
+          status: c.action === "add" ? "added" : c.action === "delete" ? "deleted" : "modified",
+          copy_from: null,
+          moved: false,
+          changelist: null,
+          locked: false,
+          needs_lock: false,
+          lock_required: false,
+        });
+        return { path: c.path, outcome: "applied" };
+      });
+      const counts: Record<string, number> = {};
+      for (const f of files) counts[f.outcome] = (counts[f.outcome] ?? 0) + 1;
+      changed.forEach((l) => l(workspace));
+      return { shelf: id, version: s.version, files, counts };
+    },
+    bumpShelf: (workspace, id) => {
+      const s = shelfOf(workspace, id);
+      s.version += 1;
+      s.updated_at = now();
     },
     watch: async () => {},
     unwatch: async () => {},

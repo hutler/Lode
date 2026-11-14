@@ -3,11 +3,13 @@
 
 use std::sync::{Arc, Mutex};
 
+use lode_desk::desk::ShelveRequest;
 use lode_desk::desk::{Desk, RecentWorkspace};
 use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
+use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
 use lode_proto::PrincipalKind;
-use lode_testkit::TestServer;
+use lode_testkit::{TestServer, TestServerOptions};
 
 #[derive(Default)]
 struct Events(Mutex<Vec<(String, u64, u64, bool)>>);
@@ -33,7 +35,11 @@ struct Setup {
 /// A server with a depot `game` of three files and a user `alice` (password `correct horse`) who may
 /// write it, and an app whose lode config lives in a temporary home.
 async fn setup() -> Setup {
-    let server = TestServer::start().await;
+    setup_on(TestServer::start().await).await
+}
+
+/// [`setup`] on a server started by the caller.
+async fn setup_on(server: TestServer) -> Setup {
     server.create_depot("game").await;
     server
         .commit_files(
@@ -656,4 +662,208 @@ async fn changelists_group_and_commit_one_group() {
         .await
         .unwrap();
     assert_eq!(del["files"], 0, "{del}");
+}
+
+#[tokio::test]
+async fn shelves_are_made_shown_unshelved_and_submitted() {
+    let s = setup().await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    std::fs::write(dir.join("a.txt"), "apricot\n").unwrap();
+    std::fs::write(dir.join("b.txt"), "blueberry\n").unwrap();
+
+    // Shelving one file reverts it and leaves the other alone.
+    let made = s
+        .desk
+        .shelve(
+            root.clone(),
+            ShelveRequest {
+                paths: vec!["a.txt".into()],
+                message: Some("Apricot".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let id = made["shelf"].as_u64().unwrap();
+    assert_eq!(
+        (made["version"].as_u64(), made["files"].as_u64()),
+        (Some(1), Some(1)),
+        "{made}"
+    );
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"apple\n");
+    let st = s.desk.status(root.clone()).await.unwrap();
+    assert_eq!(paths(&st), [("b.txt".to_owned(), "modified".to_owned())]);
+
+    let mine = s.desk.shelves(root.clone(), true, None).await.unwrap();
+    assert_eq!(mine["shelves"].as_array().unwrap().len(), 1, "{mine}");
+    assert_eq!(mine["shelves"][0]["description"], "Apricot");
+    assert_eq!(mine["shelves"][0]["owner"]["name"], "alice");
+
+    let shown = s.desk.shelf(root.clone(), id).await.unwrap();
+    assert_eq!(shown["changes"][0]["path"], "a.txt", "{shown}");
+    assert_eq!(shown["changes"][0]["action"], "modify", "{shown}");
+    let patch = shown["diff"][0]["patch"].as_str().unwrap();
+    assert!(
+        patch.contains("-apple") && patch.contains("+apricot"),
+        "{patch}"
+    );
+
+    // Unshelving brings it back, with the outcome per file.
+    let back = s.desk.unshelve(root.clone(), id).await.unwrap();
+    assert_eq!(
+        back["files"],
+        serde_json::json!([{ "path": "a.txt", "outcome": "applied" }])
+    );
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"apricot\n");
+
+    // Updating the shelf, keeping the change here, raises its version.
+    std::fs::write(dir.join("a.txt"), "avocado\n").unwrap();
+    let updated = s
+        .desk
+        .shelve(
+            root.clone(),
+            ShelveRequest {
+                paths: vec!["a.txt".into()],
+                keep: true,
+                update: Some(id),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated["version"], 2, "{updated}");
+    assert_eq!(updated["kept"], true);
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"avocado\n");
+
+    // Submitting the version reviewed before the update is refused.
+    let stale = s
+        .desk
+        .shelf_submit(root.clone(), id, 1, None)
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code, "conflict", "{stale:?}");
+    assert!(stale.message.contains("version 2"), "{stale:?}");
+
+    let done = s
+        .desk
+        .shelf_submit(root.clone(), id, 2, None)
+        .await
+        .unwrap();
+    let rev = done["rev"].as_u64().unwrap();
+    let log = s.desk.log(root.clone(), None, None, 1).await.unwrap();
+    assert_eq!(log["revisions"][0]["rev"].as_u64(), Some(rev));
+    assert_eq!(log["revisions"][0]["message"], "Apricot");
+    let submitted = s
+        .desk
+        .shelves(root.clone(), true, Some("submitted".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        submitted["shelves"][0]["submitted_rev"].as_u64(),
+        Some(rev),
+        "{submitted}"
+    );
+
+    // A second shelf, deleted.
+    let other = s
+        .desk
+        .shelve(
+            root.clone(),
+            ShelveRequest {
+                paths: vec!["b.txt".into()],
+                message: Some("Blueberry".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let other = other["shelf"].as_u64().unwrap();
+    s.desk.shelf_delete(root.clone(), other).await.unwrap();
+    let open = s.desk.shelves(root.clone(), false, None).await.unwrap();
+    assert!(open["shelves"].as_array().unwrap().is_empty(), "{open}");
+    let err = s.desk.unshelve(root.clone(), other).await.unwrap_err();
+    assert_eq!(err.code, "not_found", "{err:?}");
+}
+
+#[tokio::test]
+async fn a_submit_refused_by_checks_lists_the_missing_checks() {
+    let server = TestServer::start_with(TestServerOptions {
+        configure: Box::new(|c| c.modules.checks = true),
+    })
+    .await;
+    let s = setup_on(server).await;
+    s.server
+        .commit_files(
+            "game",
+            "main",
+            &[(
+                ".lodeconfig",
+                br#"[checks]
+branches = ["main"]
+required = [{ name = "ci/build", reporter = "ci" }, { name = "ci/test", reporter = "ci" }]
+"#,
+            )],
+        )
+        .await;
+    let ci = s.server.create_user("ci", &["read", "checks"]).await;
+    s.server
+        .acl("game", "ci", "*", "**", AclEffect::Allow, AccessLevel::Read)
+        .await;
+    let root = checked_out(&s).await;
+    std::fs::write(std::path::Path::new(&root).join("a.txt"), "apricot\n").unwrap();
+    let made = s
+        .desk
+        .shelve(
+            root.clone(),
+            ShelveRequest {
+                message: Some("Apricot".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let id = made["shelf"].as_u64().unwrap();
+    s.server
+        .client(&ci)
+        .report_check(
+            "game",
+            &ReportCheckRequest {
+                target: CheckTarget {
+                    kind: CheckTargetKind::Shelf,
+                    id,
+                    version: Some(1),
+                },
+                name: "ci/test".into(),
+                state: CheckState::Failure,
+                summary: Some("2 tests failed".into()),
+                url: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let err = s
+        .desk
+        .shelf_submit(root.clone(), id, 1, None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "checks_required", "{err:?}");
+    let missing: Vec<(&str, &str)> = err.details["missing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            (
+                m["name"].as_str().unwrap(),
+                m["state"].as_str().unwrap_or(""),
+            )
+        })
+        .collect();
+    assert_eq!(missing[0].0, "ci/build", "{err:?}");
+    assert_eq!(missing[1], ("ci/test", "failure"), "{err:?}");
+    assert!(
+        err.message.contains("ci/build: not reported yet"),
+        "{err:?}"
+    );
 }

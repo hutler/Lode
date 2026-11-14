@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lode_ops::cmd::{
-    changelist, checkout, commit, diff, files, history, info, locks, login, revert, status,
+    changelist, checkout, commit, diff, files, history, info, locks, login, revert, shelve, status,
 };
 use lode_ops::context::{Ctx, Globals};
 use lode_ops::error::{OpError, OpResult};
@@ -51,6 +51,22 @@ pub struct RecentWorkspace {
     pub server: String,
     /// Branch when last opened.
     pub branch: String,
+}
+
+/// What to shelve, as the window sends it.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ShelveRequest {
+    /// Depot paths; all changes when empty (and no changelist).
+    pub paths: Vec<String>,
+    /// Only the files of this changelist.
+    pub changelist: Option<String>,
+    /// Description; the changelist's or the updated shelf's when None.
+    pub message: Option<String>,
+    /// Leave the changes in the workspace.
+    pub keep: bool,
+    /// Replace the content of this open shelf of mine.
+    pub update: Option<u64>,
 }
 
 /// How many workspaces the welcome page remembers.
@@ -577,6 +593,96 @@ impl Desk {
             move || async move { locks::locks(&ctx, locks::LocksArgs { path: None, mine }).await },
         )
         .await
+    }
+
+    /// `lode shelve`: the changes to `paths` (depot paths; all when empty), or to the files of
+    /// `changelist`, onto a new shelf, or onto shelf `update` when given. `keep` leaves them in
+    /// the workspace.
+    pub async fn shelve(
+        &self,
+        workspace: String,
+        request: ShelveRequest,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            shelve::shelve(
+                &ctx,
+                shelve::ShelveArgs {
+                    paths: request.paths.into_iter().map(PathBuf::from).collect(),
+                    message: request.message.filter(|m| !m.trim().is_empty()),
+                    changelist: request.changelist,
+                    keep: request.keep,
+                    update: request.update,
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// `lode shelves` of the depot: `mine` keeps the signed-in user's; `state` is `open`
+    /// (the default), `submitted` or `deleted`.
+    pub async fn shelves(
+        &self,
+        workspace: String,
+        mine: bool,
+        state: Option<String>,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move {
+            shelve::shelves(
+                &ctx,
+                shelve::ShelvesArgs {
+                    mine,
+                    state,
+                    ..Default::default()
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// One shelf with its changes and each file's diff against the shelf's base.
+    pub async fn shelf(&self, workspace: String, id: u64) -> Result<Value, ErrorView> {
+        self.shelf_command(workspace, shelve::ShelfCommand::Diff { id })
+            .await
+    }
+
+    /// Submits version `version` of shelf `id`; a shelf changed since is refused (`conflict`).
+    pub async fn shelf_submit(
+        &self,
+        workspace: String,
+        id: u64,
+        version: u64,
+        message: Option<String>,
+    ) -> Result<Value, ErrorView> {
+        let spec = format!("{id}@{version}");
+        self.shelf_command(workspace, shelve::ShelfCommand::Submit { spec, message })
+            .await
+    }
+
+    /// Deletes shelf `id`.
+    pub async fn shelf_delete(&self, workspace: String, id: u64) -> Result<Value, ErrorView> {
+        self.shelf_command(workspace, shelve::ShelfCommand::Delete { id })
+            .await
+    }
+
+    async fn shelf_command(
+        &self,
+        workspace: String,
+        command: shelve::ShelfCommand,
+    ) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { shelve::shelf(&ctx, shelve::ShelfArgs { command }).await })
+            .await
+    }
+
+    /// `lode unshelve`: applies shelf `id` to the workspace, with each file's outcome.
+    pub async fn unshelve(&self, workspace: String, id: u64) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        run_op(move || async move { shelve::unshelve(&ctx, shelve::UnshelveArgs { id }).await })
+            .await
     }
 
     /// Watches `workspace` for changes until [`Desk::unwatch`]; a second call is a no-op.

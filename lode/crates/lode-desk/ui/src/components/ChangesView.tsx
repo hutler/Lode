@@ -11,6 +11,7 @@ import {
   type WorkspaceInfo,
 } from "../api";
 import { ErrorBanner } from "./ErrorBanner";
+import { ShelveDialog, type ShelveWhat } from "./ShelveDialog";
 import { ChangelistDialogs, type ChangelistAsk } from "./ChangelistDialogs";
 import { LockDialog } from "./LockDialog";
 import { Modal } from "./Modal";
@@ -118,6 +119,7 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
   const [lockPaths, setLockPaths] = useState<string[] | null>(null);
   const [lists, setLists] = useState<ChangelistInfo[]>([]);
   const [listAsk, setListAsk] = useState<ChangelistAsk | null>(null);
+  const [shelving, setShelving] = useState<ShelveWhat | null>(null);
   // Files being dragged, and the group under the pointer.
   const dragged = useRef<string[]>([]);
   const [dropOn, setDropOn] = useState<string | null>(null);
@@ -342,6 +344,16 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                       </button>
                       <button
                         className="link"
+                        disabled={!!busy || g.files.length === 0}
+                        onClick={() =>
+                          setShelving({ kind: "changelist", name: g.changelist!, description: g.description ?? "", files: g.files.length })
+                        }
+                        aria-label={`Shelve changelist ${g.changelist}`}
+                      >
+                        Shelve…
+                      </button>
+                      <button
+                        className="link"
                         disabled={!!busy}
                         onClick={() => setListAsk({ kind: "delete", name: g.changelist!, files: g.files.length })}
                         aria-label={`Delete changelist ${g.changelist}`}
@@ -441,6 +453,19 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
                 {done}
               </span>
             )}
+            <button
+              type="button"
+              disabled={!!busy || pickedFiles.length === 0}
+              onClick={() =>
+                setShelving({
+                  kind: "files",
+                  paths: pickedFiles.filter((p) => byPath.get(p)?.status !== "untracked"),
+                  untracked: pickedFiles.filter((p) => byPath.get(p)?.status === "untracked"),
+                })
+              }
+            >
+              Shelve…
+            </button>
             <button
               className="primary"
               type="submit"
@@ -603,6 +628,19 @@ export function ChangesView({ info, onStatus, onError, onHistory, onBlame, onDif
           onClose={() => setListAsk(null)}
           onDone={(msg) => {
             if (msg) setDone(msg);
+            void refresh();
+          }}
+        />
+      )}
+
+      {shelving && (
+        <ShelveDialog
+          workspace={root}
+          what={shelving}
+          onClose={() => setShelving(null)}
+          onDone={(msg) => {
+            setDone(msg);
+            setPicked(new Set());
             void refresh();
           }}
         />

@@ -42,7 +42,7 @@ function text(path: string, status: FileDiff["status"], body: string): FileDiff 
   };
 }
 
-const BOAT_PATCH = `@@ -9,13 +9,17 @@
+export const BOAT_PATCH = `@@ -9,13 +9,17 @@
 
  void ABoat::Tick(float DeltaTime)
  {
