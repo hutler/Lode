@@ -70,6 +70,41 @@ pub struct ShelveRequest {
     pub update: Option<u64>,
 }
 
+/// Images larger than this are not shown in an image diff (64 MB).
+pub const IMAGE_LIMIT: u64 = 64 * 1024 * 1024;
+
+/// Which side of a diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    /// Before the change.
+    Old,
+    /// After the change.
+    New,
+}
+
+/// One side of an image diff as the window receives it, raw rather than JSON so large images
+/// stay cheap: one byte (0 no file, 1 too large to show, 2 content follows), the size as eight
+/// little-endian bytes, then the content.
+pub fn encode_side(side: Option<diff::Content>) -> Vec<u8> {
+    match side {
+        None => {
+            let mut out = vec![0];
+            out.extend_from_slice(&0u64.to_le_bytes());
+            out
+        }
+        Some(c) => {
+            let mut out = Vec::with_capacity(9 + c.bytes.as_ref().map_or(0, Vec::len));
+            out.push(if c.bytes.is_some() { 2 } else { 1 });
+            out.extend_from_slice(&c.size.to_le_bytes());
+            if let Some(b) = c.bytes {
+                out.extend_from_slice(&b);
+            }
+            out
+        }
+    }
+}
+
 /// How many workspaces the welcome page remembers.
 pub const RECENT_MAX: usize = 20;
 
@@ -103,10 +138,11 @@ impl std::fmt::Debug for Desk {
 /// Runs an operation on a thread of its own with a single-threaded runtime. Operations hold
 /// the workspace database across awaits, which cannot move between threads, so they never
 /// run on the app's shared runtime.
-pub async fn run_op<F, Fut>(f: F) -> Result<Value, ErrorView>
+pub async fn run_op<F, Fut, T>(f: F) -> Result<T, ErrorView>
 where
     F: FnOnce() -> Fut + Send + 'static,
-    Fut: Future<Output = OpResult<Value>>,
+    Fut: Future<Output = OpResult<T>>,
+    T: Send + 'static,
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let spawned = std::thread::Builder::new()
@@ -422,33 +458,7 @@ impl Desk {
         rev: u64,
         path: String,
     ) -> Result<Value, ErrorView> {
-        let r = self.revision(workspace.clone(), rev).await?;
-        let not_found = || ErrorView {
-            code: "not_found".into(),
-            message: format!("r{rev} did not change {path}"),
-            details: Value::Null,
-        };
-        let change = r["changes"]
-            .as_array()
-            .and_then(|cs| {
-                cs.iter()
-                    .find(|c| c["path"].as_str() == Some(path.as_str()))
-            })
-            .ok_or_else(not_found)?;
-        let parent = r["parent"].as_u64();
-        let copy = change["copy_from"].as_object().and_then(|c| {
-            Some(format!(
-                "{}@{}",
-                c.get("path")?.as_str()?,
-                c.get("rev")?.as_u64()?
-            ))
-        });
-        let at = |rev: u64| format!("{path}@{rev}");
-        let (old, new) = match change["action"].as_str() {
-            Some("add") => (copy, Some(at(rev))),
-            Some("delete") => (parent.map(at), None),
-            _ => (copy.or(parent.map(at)), Some(at(rev))),
-        };
+        let (old, new) = self.revision_sides(workspace.clone(), rev, &path).await?;
         let ctx = self.ctx(Path::new(&workspace), None)?;
         run_op(move || async move {
             diff::diff_versions(
@@ -462,6 +472,80 @@ impl Desk {
             .await
         })
         .await
+    }
+
+    /// The two versions (`path@rev`) that revision `rev` changed `path` between: the parent
+    /// revision's, or the source of a copy or move, and its own. None on a side that has no
+    /// file (an add, or a delete).
+    async fn revision_sides(
+        &self,
+        workspace: String,
+        rev: u64,
+        path: &str,
+    ) -> Result<(Option<String>, Option<String>), ErrorView> {
+        let r = self.revision(workspace, rev).await?;
+        let not_found = || ErrorView {
+            code: "not_found".into(),
+            message: format!("r{rev} did not change {path}"),
+            details: Value::Null,
+        };
+        let change = r["changes"]
+            .as_array()
+            .and_then(|cs| cs.iter().find(|c| c["path"].as_str() == Some(path)))
+            .ok_or_else(not_found)?;
+        let parent = r["parent"].as_u64();
+        let copy = change["copy_from"].as_object().and_then(|c| {
+            Some(format!(
+                "{}@{}",
+                c.get("path")?.as_str()?,
+                c.get("rev")?.as_u64()?
+            ))
+        });
+        let at = |rev: u64| format!("{path}@{rev}");
+        Ok(match change["action"].as_str() {
+            Some("add") => (copy, Some(at(rev))),
+            Some("delete") => (parent.map(at), None),
+            _ => (copy.or(parent.map(at)), Some(at(rev))),
+        })
+    }
+
+    /// One side of an image diff: a working file (`rev` None) against its base, or a file as
+    /// revision `rev` changed it. None when that side has no file; no bytes when it is over
+    /// [`IMAGE_LIMIT`].
+    pub async fn image_side(
+        &self,
+        workspace: String,
+        path: String,
+        rev: Option<u64>,
+        side: Side,
+    ) -> Result<Option<diff::Content>, ErrorView> {
+        let ctx = self.ctx(Path::new(&workspace), None)?;
+        match rev {
+            None => {
+                run_op(move || async move {
+                    match side {
+                        Side::Old => diff::base_content(&ctx, &path, IMAGE_LIMIT).await,
+                        Side::New => diff::working_content(&ctx, &path, IMAGE_LIMIT),
+                    }
+                })
+                .await
+            }
+            Some(rev) => {
+                let (old, new) = self.revision_sides(workspace, rev, &path).await?;
+                let Some(spec) = (match side {
+                    Side::Old => old,
+                    Side::New => new,
+                }) else {
+                    return Ok(None);
+                };
+                run_op(move || async move {
+                    diff::stored_content(&ctx, &history::Source::default(), &spec, IMAGE_LIMIT)
+                        .await
+                        .map(Some)
+                })
+                .await
+            }
+        }
     }
 
     /// `lode commit -c NAME`: exactly the files of one changelist (`default` for files in
@@ -850,7 +934,29 @@ pub fn open_link(url: &str) -> Result<(), ErrorView> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_web_link;
+    #![allow(clippy::unwrap_used)]
+    use super::{encode_side, is_web_link};
+    use lode_ops::cmd::diff::Content;
+
+    #[test]
+    fn image_sides_are_tagged_with_their_size() {
+        assert_eq!(encode_side(None), [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let big = encode_side(Some(Content {
+            size: 70_000_000,
+            bytes: None,
+        }));
+        assert_eq!(big[0], 1);
+        assert_eq!(
+            u64::from_le_bytes(big[1..9].try_into().unwrap()),
+            70_000_000
+        );
+        assert_eq!(big.len(), 9);
+        let small = encode_side(Some(Content {
+            size: 3,
+            bytes: Some(vec![7, 8, 9]),
+        }));
+        assert_eq!(small, [2, 3, 0, 0, 0, 0, 0, 0, 0, 7, 8, 9]);
+    }
 
     #[test]
     fn only_plain_web_links_are_opened() {

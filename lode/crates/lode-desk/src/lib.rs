@@ -18,7 +18,7 @@ use lode_ops::output::{ProgressEvent, Ui};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::desk::{Desk, ErrorView, RecentWorkspace, ShelveRequest};
+use crate::desk::{Desk, ErrorView, RecentWorkspace, ShelveRequest, Side};
 
 /// Forwards an operation's reports to the window as events.
 struct WindowUi {
@@ -283,6 +283,19 @@ fn open_link(url: String) -> Result<(), ErrorView> {
     desk::open_link(&url)
 }
 
+/// Raw bytes in the format of [`desk::encode_side`].
+#[tauri::command]
+async fn image_side(
+    desk: State<'_, Desk>,
+    workspace: String,
+    path: String,
+    rev: Option<u64>,
+    side: Side,
+) -> Result<tauri::ipc::Response, ErrorView> {
+    let content = desk.image_side(workspace, path, rev, side).await?;
+    Ok(tauri::ipc::Response::new(desk::encode_side(content)))
+}
+
 #[tauri::command]
 fn watch(desk: State<'_, Desk>, workspace: String) -> Result<(), ErrorView> {
     desk.watch(workspace)
@@ -349,6 +362,7 @@ pub fn run() -> Result<(), tauri::Error> {
             unshelve,
             checks,
             open_link,
+            image_side,
             watch,
             unwatch,
         ])

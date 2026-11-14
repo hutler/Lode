@@ -387,6 +387,96 @@ pub async fn diff_versions(ctx: &Ctx, args: VersionsArgs) -> OpResult<Value> {
     Ok(entry(&d, true))
 }
 
+/// One version of a file as bytes, for viewers that need the content itself (Lode Desk's image
+/// diff). `bytes` is None when the file is larger than the limit the caller gave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Content {
+    /// Size in bytes.
+    pub size: u64,
+    /// The content, when it is within the limit.
+    pub bytes: Option<Vec<u8>>,
+}
+
+/// The one depot path `path` names in the workspace.
+fn one_path(ctx: &Ctx, ws: &lode_workspace::Workspace, path: &str) -> OpResult<DepotPath> {
+    local::depot_paths(ctx, ws, &[PathBuf::from(path)])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| OpError::usage(format!("`{path}` is not a file in the workspace")))
+}
+
+/// What a working file was before the local change: its base, or for a copied or moved file
+/// its source's base. None for a new file.
+pub async fn base_content(ctx: &Ctx, path: &str, limit: u64) -> OpResult<Option<Content>> {
+    let ws = local::open(ctx)?;
+    let p = one_path(ctx, &ws, path)?;
+    let Some(row) = ws.db().file(&p)? else {
+        return Ok(None);
+    };
+    let src = match (&row.state, &row.copy_from) {
+        (FileState::Added, Some(c)) => ws.db().file(&c.path)?,
+        (FileState::Added, None) => None,
+        _ => Some(row),
+    };
+    let Some((id, size)) = src.and_then(|r| r.base_id.map(|id| (id, r.size))) else {
+        return Ok(None);
+    };
+    if size > limit {
+        return Ok(Some(Content { size, bytes: None }));
+    }
+    let bytes = Bases::new(ctx, &ws)?.read(&id).await?;
+    Ok(Some(Content {
+        size: bytes.len() as u64,
+        bytes: Some(bytes),
+    }))
+}
+
+/// A working file as it is on disk now. None when it is not there (deleted or missing).
+pub fn working_content(ctx: &Ctx, path: &str, limit: u64) -> OpResult<Option<Content>> {
+    let ws = local::open(ctx)?;
+    let p = one_path(ctx, &ws, path)?;
+    let local = ws.local_path(&p);
+    let meta = match fs::symlink_metadata(&local) {
+        Ok(m) if m.is_file() => m,
+        Ok(_) => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let size = meta.len();
+    let bytes = if size > limit {
+        None
+    } else {
+        Some(fs::read(&local)?)
+    };
+    Ok(Some(Content { size, bytes }))
+}
+
+/// A file as stored at a revision: `spec` is `path@rev` as for [`diff_versions`].
+pub async fn stored_content(
+    ctx: &Ctx,
+    source: &Source,
+    spec: &str,
+    limit: u64,
+) -> OpResult<Content> {
+    let t = history::target(ctx, source)?;
+    let (p, given) = history::split_rev(spec)?;
+    let path = t
+        .path(ctx, p)?
+        .ok_or_else(|| OpError::usage("name a file to read"))?;
+    let rev = t.rev(given).await?;
+    let file = t.client.file(&t.depot, rev, &path).await?;
+    if let Some(size) = file.size.filter(|n| *n > limit) {
+        return Ok(Content { size, bytes: None });
+    }
+    let mut buf = Vec::new();
+    file.write_to(&mut buf).await?;
+    let size = buf.len() as u64;
+    Ok(Content {
+        size,
+        bytes: (size <= limit).then_some(buf),
+    })
+}
+
 /// A file as stored at a revision; files over [`TEXT_LIMIT`] are left unread.
 async fn stored(ctx: &Ctx, t: &history::Target, spec: &str) -> OpResult<(Side, DepotPath)> {
     let (p, given) = history::split_rev(spec)?;

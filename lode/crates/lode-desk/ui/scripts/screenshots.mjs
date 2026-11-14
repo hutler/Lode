@@ -98,6 +98,26 @@ const scenes = {
     await page.getByRole("option", { name: /^r1481 / }).click();
     await page.getByRole("list", { name: "Checks" }).waitFor();
   },
+  async "image-side"(page) {
+    // The harbor map as the night lighting pass repainted it.
+    await scenes.workspace(page);
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByRole("option", { name: /^r1479 / }).click();
+    await page.getByRole("button", { name: "Diff of Content/UI/HarborMap.png" }).click();
+    await page.getByRole("img", { name: "After" }).waitFor();
+    await page.getByText("640 × 400").first().waitFor();
+  },
+  async "image-swipe"(page) {
+    await scenes["image-side"](page);
+    await page.getByRole("button", { name: "Swipe" }).click();
+    await page.getByRole("slider", { name: "Swipe position" }).fill("42");
+    await page.getByText("640 × 400").first().waitFor();
+  },
+  async "image-onion"(page) {
+    await scenes["image-side"](page);
+    await page.getByRole("button", { name: "Onion skin" }).click();
+    await page.getByText("640 × 400").first().waitFor();
+  },
   async "history-release"(page) {
     // A release branch: its own revisions, then main's below the branch point.
     await page.getByText("D:\\Work\\Skyfall-release", { exact: true }).click();

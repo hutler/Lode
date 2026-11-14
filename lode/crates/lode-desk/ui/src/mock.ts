@@ -18,7 +18,9 @@ import type {
 } from "./api";
 import { demoRevisionDiff, demoWorkingDiff } from "./mockDiff";
 import { demoBlame, demoHead, demoLog, demoRevision } from "./mockHistory";
+import { imageType } from "./api";
 import { demoChecks } from "./mockChecks";
+import { demoImage } from "./mockImages";
 import { demoShelves, type MockShelf } from "./mockShelves";
 
 export interface MockOptions {
@@ -639,6 +641,23 @@ export function createMockBackend(opts: MockOptions = {}): MockBackend {
       const checks: Record<string, ReturnType<typeof demoChecks>> = {};
       for (const t of targets) if (info.depot === "skyfall") checks[t] = demoChecks(t);
       return { available: true, checks };
+    },
+    imageSide: async (workspace, path, rev, side) => {
+      if (!imageType(path)) fail("usage", `${path} is not an image`);
+      // Files named Huge* stand for images over 64 MB.
+      const size = path.includes("/Huge") ? 80_000_000 : side === "old" ? 1_802_340 : 1_874_211;
+      const image = (night: boolean) => ({ size, url: size > 64 * 1024 * 1024 ? null : demoImage(night) });
+      let action: string | undefined;
+      if (rev === null) {
+        const f = statusFor(workspace).files.find((x) => x.path === path);
+        action = f?.status === "added" ? "add" : f?.status === "deleted" ? "delete" : f ? "modify" : undefined;
+      } else {
+        const info = workspaces.get(workspace);
+        action = demoRevision(info?.branch ?? "main", rev)?.changes?.find((c) => c.path === path)?.action;
+      }
+      if (!action) fail("not_found", rev === null ? `${path} has no changes` : `r${rev} did not change ${path}`);
+      if (side === "old") return action === "add" ? null : image(false);
+      return action === "delete" ? null : image(true);
     },
     openLink: async () => {},
     bumpShelf: (workspace, id) => {

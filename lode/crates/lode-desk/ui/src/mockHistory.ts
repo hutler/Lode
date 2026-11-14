@@ -89,6 +89,8 @@ function changesOf(rev: number): ChangeView[] {
     if (out.some((c) => c.path === path)) continue;
     out.push({ path, action: i === 2 && rev % 5 === 0 ? "add" : "modify", size: 1000 + rev * 7 });
   }
+  // The night lighting pass repainted the harbor map.
+  if (rev === 1479) out.push({ path: "Content/UI/HarborMap.png", action: "modify", size: 1_874_211 });
   return out;
 }
 

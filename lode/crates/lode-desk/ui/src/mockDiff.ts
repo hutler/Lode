@@ -3,7 +3,7 @@
 
 import type { FileDiff } from "./api";
 
-const BINARY = /\.(uasset|umap|png|wav|fbx)$/;
+const BINARY = /\.(uasset|umap|png|jpe?g|gif|webp|bmp|wav|fbx)$/;
 
 function binary(path: string, old: number | null, now: number | null): FileDiff {
   return {

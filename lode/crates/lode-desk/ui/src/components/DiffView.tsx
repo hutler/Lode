@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 
-import { asOpError, backend, type FileDiff, type OpError, type WorkspaceInfo } from "../api";
+import { asOpError, backend, imageType, type FileDiff, type OpError, type WorkspaceInfo } from "../api";
 import { PLAIN_LIMIT, parsePatch, splitRows, type DiffLine, type Hunk, type Segment } from "../diff";
 import { ErrorBanner } from "./ErrorBanner";
+import { IMAGE_LIMIT, ImageDiff } from "./ImageDiff";
 import { humanBytes } from "./ProgressBar";
 
 /** What to compare: a working file against its base, or a file as one revision changed it. */
@@ -91,19 +92,21 @@ export function DiffView({ info, source, onBack, backLabel }: Props) {
             <span className="ins">+{diff.insertions}</span> <span className="del">−{diff.deletions}</span>
           </span>
         )}
-        <div className="segmented" role="group" aria-label="Layout">
-          <button aria-pressed={layout === "unified"} onClick={() => choose("unified")}>
-            Unified
-          </button>
-          <button aria-pressed={layout === "split"} onClick={() => choose("split")}>
-            Side by side
-          </button>
-        </div>
+        {!diff?.binary && (
+          <div className="segmented" role="group" aria-label="Layout">
+            <button aria-pressed={layout === "unified"} onClick={() => choose("unified")}>
+              Unified
+            </button>
+            <button aria-pressed={layout === "split"} onClick={() => choose("split")}>
+              Side by side
+            </button>
+          </div>
+        )}
       </header>
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
       <div className="diff-body">
         {none && <p className="empty">This file has no changes.</p>}
-        {diff && <FileDiffBody diff={diff} layout={layout} />}
+        {diff && <FileDiffBody diff={diff} layout={layout} image={{ workspace: info.root, rev }} />}
       </div>
     </section>
   );
@@ -115,44 +118,69 @@ function extension(path: string): string {
   return dot > 0 ? name.slice(dot + 1) : "";
 }
 
-/** A diff's content: a note for binary files and changes too big to lay out, the hunks
- * otherwise. */
-export function FileDiffBody({ diff, layout }: { diff: FileDiff; layout: Layout }) {
+/** The note shown for a binary file: its sizes and mode, and why there is no diff. */
+function BinaryNote({ diff, why }: { diff: FileDiff; why?: string }) {
+  const ext = extension(diff.path);
+  const size = (n: number | null) => (n === null ? "none" : humanBytes(n));
+  const tooBig = (diff.old_size ?? 0) > TEXT_LIMIT || (diff.new_size ?? 0) > TEXT_LIMIT;
+  return (
+    <div className="diff-note" role="note">
+      <div className="diff-note-title">
+        {why && imageType(diff.path) ? "Image" : tooBig ? "Too large to compare as text" : "Binary file"}
+        {ext && <span className="tag">.{ext}</span>}
+      </div>
+      <dl className="facts compact">
+        <dt>Before</dt>
+        <dd>{size(diff.old_size)}</dd>
+        <dt>After</dt>
+        <dd>{size(diff.new_size)}</dd>
+        {diff.old_mode !== diff.new_mode && diff.old_mode && diff.new_mode && (
+          <>
+            <dt>Mode</dt>
+            <dd className="mono">
+              {diff.old_mode} → {diff.new_mode}
+            </dd>
+          </>
+        )}
+      </dl>
+      <p className="muted small">
+        {why ?? (tooBig ? "Lode compares files over 16 MB by size only." : "Binary content is not shown as a diff.")}
+      </p>
+    </div>
+  );
+}
+
+/** A diff's content: an image diff for images when `image` says where they come from, a note
+ * for other binary files and changes too big to lay out, the hunks otherwise. */
+export function FileDiffBody({
+  diff,
+  layout,
+  image,
+}: {
+  diff: FileDiff;
+  layout: Layout;
+  /** Where to read images from: the working copy (`rev` null) or a revision. */
+  image?: { workspace: string; rev: number | null };
+}) {
   const patch = diff.patch ?? "";
   const large = patch.length > PLAIN_LIMIT;
   const hunks = useMemo(() => (diff.binary || large ? [] : parsePatch(patch)), [diff.binary, large, patch]);
 
   if (diff.binary) {
-    const ext = extension(diff.path);
-    const size = (n: number | null) => (n === null ? "none" : humanBytes(n));
-    const tooBig = (diff.old_size ?? 0) > TEXT_LIMIT || (diff.new_size ?? 0) > TEXT_LIMIT;
-    return (
-      <div className="diff-note" role="note">
-        <div className="diff-note-title">
-          {tooBig ? "Too large to compare as text" : "Binary file"}
-          {ext && <span className="tag">.{ext}</span>}
-        </div>
-        <dl className="facts compact">
-          <dt>Before</dt>
-          <dd>{size(diff.old_size)}</dd>
-          <dt>After</dt>
-          <dd>{size(diff.new_size)}</dd>
-          {diff.old_mode !== diff.new_mode && diff.old_mode && diff.new_mode && (
-            <>
-              <dt>Mode</dt>
-              <dd className="mono">
-                {diff.old_mode} → {diff.new_mode}
-              </dd>
-            </>
-          )}
-        </dl>
-        <p className="muted small">
-          {tooBig
-            ? "Lode compares files over 16 MB by size only."
-            : "Binary content is not shown as a diff."}
-        </p>
-      </div>
-    );
+    if (image && imageType(diff.path)) {
+      if ((diff.old_size ?? 0) > IMAGE_LIMIT || (diff.new_size ?? 0) > IMAGE_LIMIT) {
+        return <BinaryNote diff={diff} why="Images over 64 MB are compared by size only." />;
+      }
+      return (
+        <ImageDiff
+          workspace={image.workspace}
+          path={diff.path}
+          rev={image.rev}
+          fallback={(why) => <BinaryNote diff={diff} why={why} />}
+        />
+      );
+    }
+    return <BinaryNote diff={diff} />;
   }
   if (large) {
     return (

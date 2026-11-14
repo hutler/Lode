@@ -257,6 +257,13 @@ export interface ChecksResult {
   checks: Record<string, CheckInfo[]>;
 }
 
+/** One side of an image diff. */
+export interface ImageSide {
+  size: number;
+  /** Where the window can load it from; null when it is over 64 MB and not read. */
+  url: string | null;
+}
+
 /** `lode checkout --json`. */
 export interface CheckoutResult {
   workspace: string;
@@ -321,6 +328,9 @@ export interface Backend {
   unshelve(workspace: string, id: number): Promise<UnshelveResult>;
   /** The checks of each target: `rN` for a revision, `ID@VERSION` for a shelf. */
   checks(workspace: string, targets: string[]): Promise<ChecksResult>;
+  /** One side of an image diff: a working file (`rev` null) against its base, or a file as
+   * revision `rev` changed it; null when that side has no file. */
+  imageSide(workspace: string, path: string, rev: number | null, side: "old" | "new"): Promise<ImageSide | null>;
   /** Opens a web link in the system browser. */
   openLink(url: string): Promise<void>;
   /** Reports changes to files in `workspace` through `onChanged` until `unwatch`. */
@@ -332,6 +342,34 @@ export interface Backend {
   pickFolder(title: string): Promise<string | null>;
   /** Calls `listener` for each progress update until the returned function is called. */
   onProgress(listener: (e: ProgressEvent) => void): () => void;
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+};
+
+/** The MIME type of an image the window can show, by the file's extension; null otherwise. */
+export function imageType(path: string): string | null {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? (IMAGE_TYPES[name.slice(dot + 1).toLowerCase()] ?? null) : null;
+}
+
+/** Reads the `image_side` answer: a tag byte (0 no file, 1 too large, 2 content), the size as
+ * eight little-endian bytes, then the content, which becomes an object URL. */
+export function decodeImageSide(raw: ArrayBuffer, path: string): ImageSide | null {
+  const view = new DataView(raw);
+  const tag = view.getUint8(0);
+  if (tag === 0) return null;
+  const size = Number(view.getBigUint64(1, true));
+  if (tag === 1) return { size, url: null };
+  const blob = new Blob([raw.slice(9)], { type: imageType(path) ?? "application/octet-stream" });
+  return { size, url: URL.createObjectURL(blob) };
 }
 
 /** Whether `e` looks like an operation error. */
@@ -397,6 +435,10 @@ async function tauriBackend(): Promise<Backend> {
     },
     unshelve: (workspace, id) => invoke("unshelve", { workspace, id }),
     checks: (workspace, targets) => invoke("checks", { workspace, targets }),
+    imageSide: async (workspace, path, rev, side) => {
+      const raw = await invoke<ArrayBuffer>("image_side", { workspace, path, rev, side });
+      return decodeImageSide(raw, path);
+    },
     openLink: async (url) => {
       await invoke("open_link", { url });
     },

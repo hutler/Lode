@@ -3,8 +3,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use lode_desk::desk::ShelveRequest;
-use lode_desk::desk::{Desk, RecentWorkspace};
+use lode_desk::desk::{Desk, RecentWorkspace, ShelveRequest, Side};
 use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
 use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
@@ -955,4 +954,75 @@ async fn without_the_checks_module_there_are_no_badges_and_no_error() {
     let root = checked_out(&s).await;
     let r = s.desk.checks(root, vec!["r1".into()]).await.unwrap();
     assert_eq!(r, serde_json::json!({ "available": false, "checks": {} }));
+}
+
+#[tokio::test]
+async fn image_sides_of_a_working_file_and_of_a_revision() {
+    let s = setup().await;
+    const DAY: &[u8] = b"\x89PNG\r\n\x1a\n\0day";
+    const NIGHT: &[u8] = b"\x89PNG\r\n\x1a\n\0night";
+    s.server
+        .commit_files("game", "main", &[("ui/map.png", DAY)])
+        .await;
+    let root = checked_out(&s).await;
+    let dir = std::path::PathBuf::from(&root);
+    std::fs::write(dir.join("ui/map.png"), NIGHT).unwrap();
+    std::fs::write(dir.join("ui/new.png"), DAY).unwrap();
+    s.desk
+        .add(root.clone(), vec!["ui/new.png".into()])
+        .await
+        .unwrap();
+
+    let side = |path: &str, rev: Option<u64>, side: Side| {
+        s.desk.image_side(root.clone(), path.to_owned(), rev, side)
+    };
+    let old = side("ui/map.png", None, Side::Old).await.unwrap().unwrap();
+    assert_eq!(
+        (old.size, old.bytes.as_deref()),
+        (DAY.len() as u64, Some(DAY))
+    );
+    let new = side("ui/map.png", None, Side::New).await.unwrap().unwrap();
+    assert_eq!(new.bytes.as_deref(), Some(NIGHT));
+    // A new file has no old side.
+    assert!(side("ui/new.png", None, Side::Old).await.unwrap().is_none());
+
+    let done = s
+        .desk
+        .commit(
+            root.clone(),
+            vec!["ui/map.png".into(), "ui/new.png".into()],
+            "Night".into(),
+        )
+        .await
+        .unwrap();
+    let rev = done["rev"].as_u64().unwrap();
+    let old = side("ui/map.png", Some(rev), Side::Old)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.bytes.as_deref(), Some(DAY));
+    let new = side("ui/map.png", Some(rev), Side::New)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(new.bytes.as_deref(), Some(NIGHT));
+    assert!(side("ui/new.png", Some(rev), Side::Old)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        side("ui/new.png", Some(rev), Side::New)
+            .await
+            .unwrap()
+            .unwrap()
+            .bytes
+            .as_deref(),
+        Some(DAY)
+    );
+    let err = s
+        .desk
+        .image_side(root.clone(), "a.txt".into(), Some(rev), Side::New)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, "not_found", "{err:?}");
 }
