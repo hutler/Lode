@@ -4,9 +4,10 @@
 import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
 import { SignInDialog, SignInState } from "sign_in.slint";
+import { ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget, NewChangelistDialog, RenameChangelistDialog, CommitChangelistDialog, ConfirmDialog, MoveDialog, MessagesDialog } from "changes.slint";
 import { CheckoutDialog, CheckoutState } from "checkout.slint";
 
-export { ErrorInfo, SignInState, CheckoutState }
+export { ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
 
 /// A workspace opened before.
 export struct Recent {
@@ -25,7 +26,7 @@ export struct WorkspaceTab {
     server: string,
 }
 
-export enum Dialog { none, sign-in, check-out, about }
+export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages }
 
 component Tab inherits Rectangle {
     in property <string> text;
@@ -184,10 +185,28 @@ component Field inherits HorizontalLayout {
 component WorkspacePage inherits Rectangle {
     in property <WorkspaceTab> ws;
     in property <ErrorInfo> error;
+    in property <ChangesState> changes;
+    in property <[ChangeRow]> rows;
+    in-out property <string> message;
     callback dismiss-error();
+    callback toggle-file(string);
+    callback toggle-group(string);
+    callback toggle-all();
+    callback select-file(string);
+    callback refresh();
+    callback new-changelist();
+    callback commit-changelist(string);
+    callback rename-changelist(string);
+    callback delete-changelist(string);
+    callback commit();
+    callback recent-messages();
+    callback add-selected();
+    callback revert-selected();
+    callback move-selected();
+    callback dismiss-changes-error();
     HorizontalLayout {
         Rectangle {
-            width: 240px;
+            width: 220px;
             background: Palette.alternate-background;
             VerticalLayout {
                 padding: 16px;
@@ -201,18 +220,36 @@ component WorkspacePage inherits Rectangle {
             }
         }
         VerticalLayout {
-            padding: 24px;
-            spacing: 12px;
-            alignment: start;
-            if root.error.shown: ErrorBanner {
-                error: root.error;
-                dismissable: true;
-                dismissed => { root.dismiss-error(); }
+            if root.error.shown: Rectangle {
+                height: banner.preferred-height + 16px;
+                banner := ErrorBanner {
+                    x: 16px;
+                    y: 8px;
+                    width: parent.width - 32px;
+                    error: root.error;
+                    dismissable: true;
+                    dismissed => { root.dismiss-error(); }
+                }
             }
-            Title { text: "Workspace"; }
-            Muted {
-                text: "This build of the native app opens workspaces and checks out depots. Pending changes, history, locks, shelves and branches come next.";
-                wrap: word-wrap;
+            ChangesView {
+                state: root.changes;
+                rows: root.rows;
+                message <=> root.message;
+                toggle-file(p) => { root.toggle-file(p); }
+                toggle-group(k) => { root.toggle-group(k); }
+                toggle-all => { root.toggle-all(); }
+                select-file(p) => { root.select-file(p); }
+                refresh => { root.refresh(); }
+                new-changelist => { root.new-changelist(); }
+                commit-changelist(n) => { root.commit-changelist(n); }
+                rename-changelist(n) => { root.rename-changelist(n); }
+                delete-changelist(n) => { root.delete-changelist(n); }
+                commit => { root.commit(); }
+                recent-messages => { root.recent-messages(); }
+                add-selected => { root.add-selected(); }
+                revert-selected => { root.revert-selected(); }
+                move-selected => { root.move-selected(); }
+                dismiss-error => { root.dismiss-changes-error(); }
             }
         }
     }
@@ -256,6 +293,13 @@ export component AppWindow inherits Window {
     in-out property <ErrorInfo> workspace-error;
     in-out property <SignInState> sign-in;
     in-out property <CheckoutState> checkout;
+    // The open workspace's pending changes (T131).
+    in-out property <ChangesState> changes;
+    in property <[ChangeRow]> change-rows;
+    in-out property <string> commit-message;
+    in-out property <ListDialogState> list-dialog;
+    in property <[MoveTarget]> move-targets;
+    in property <[string]> recent-messages;
 
     callback open-recent(string);
     callback forget-recent(string);
@@ -269,6 +313,22 @@ export component AppWindow inherits Window {
     callback pick-checkout-folder();
     callback check-out();
     callback close-dialog();
+    // The changes view.
+    callback tab-shown(int);
+    callback files-changed(string);
+    callback toggle-file(string);
+    callback toggle-group(string);
+    callback toggle-all();
+    callback select-file(string);
+    callback refresh-changes();
+    callback commit();
+    callback show-dialog(Dialog, string);
+    callback submit-dialog();
+    callback move-to(string);
+    callback use-message(string);
+    callback add-selected();
+
+    changed current-tab => { root.tab-shown(self.current-tab); }
 
     /// Light or dark instead of the system's choice (the screenshots use it).
     public function use-dark(dark: bool) {
@@ -326,7 +386,25 @@ export component AppWindow inherits Window {
             if root.current-tab > 0 && root.current-tab <= root.workspaces.length: WorkspacePage {
                 ws: root.workspaces[root.current-tab - 1];
                 error: root.workspace-error;
+                changes: root.changes;
+                rows: root.change-rows;
+                message <=> root.commit-message;
                 dismiss-error => { root.workspace-error.shown = false; }
+                toggle-file(p) => { root.toggle-file(p); }
+                toggle-group(k) => { root.toggle-group(k); }
+                toggle-all => { root.toggle-all(); }
+                select-file(p) => { root.select-file(p); }
+                refresh => { root.refresh-changes(); }
+                new-changelist => { root.show-dialog(Dialog.new-changelist, ""); }
+                commit-changelist(n) => { root.show-dialog(Dialog.commit-changelist, n); }
+                rename-changelist(n) => { root.show-dialog(Dialog.rename-changelist, n); }
+                delete-changelist(n) => { root.show-dialog(Dialog.delete-changelist, n); }
+                commit => { root.commit(); }
+                recent-messages => { root.show-dialog(Dialog.messages, ""); }
+                add-selected => { root.add-selected(); }
+                revert-selected => { root.show-dialog(Dialog.revert, ""); }
+                move-selected => { root.show-dialog(Dialog.move-to, ""); }
+                dismiss-changes-error => { root.changes.error.shown = false; root.changes.refused = ""; }
             }
         }
     }
@@ -353,6 +431,71 @@ export component AppWindow inherits Window {
             pick-folder => { root.pick-checkout-folder(); }
             submit => { root.check-out(); }
             sign-in(server) => { root.show-sign-in(server); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.new-changelist: NewChangelistDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            state <=> root.list-dialog;
+            submit => { root.submit-dialog(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.rename-changelist: RenameChangelistDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            state <=> root.list-dialog;
+            submit => { root.submit-dialog(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.commit-changelist: CommitChangelistDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            state <=> root.list-dialog;
+            submit => { root.submit-dialog(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.delete-changelist: ConfirmDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            title: "Delete changelist " + root.list-dialog.name + "?";
+            body: root.list-dialog.files > 0
+                ? "Its " + root.list-dialog.files + (root.list-dialog.files == 1 ? " file goes" : " files go") + " back to Changes. No change is lost."
+                : "It holds no files. No change is lost.";
+            confirm: "Delete";
+            state: root.list-dialog;
+            submit => { root.submit-dialog(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.revert: ConfirmDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            title: "Revert changes?";
+            body: "The local changes to " + root.list-dialog.what + " will be lost. This cannot be undone.";
+            confirm: "Revert";
+            state: root.list-dialog;
+            submit => { root.submit-dialog(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.move-to: MoveDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            targets: root.move-targets;
+            state: root.list-dialog;
+            move(n) => { root.move-to(n); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.messages: MessagesDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            messages: root.recent-messages;
+            pick(m) => { root.use-message(m); }
             close => { root.close-dialog(); }
         }
         if root.dialog == Dialog.about: AboutDialog {

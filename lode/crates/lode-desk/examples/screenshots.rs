@@ -8,9 +8,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use std::collections::BTreeSet;
+
 use lode_desk::app::{
-    self, CheckoutState, Dialog, ErrorInfo, Options, Recent, SignInState, WorkspaceTab,
+    self, ChangesState, CheckoutState, Dialog, ErrorInfo, ListDialogState, Options, Recent,
+    SignInState, WorkspaceTab,
 };
+use lode_desk::changes::{self, FileEntry, ListInfo, Pending};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
 use slint::platform::{Platform, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, ModelRc, PhysicalSize, Rgb8Pixel, VecModel};
@@ -137,6 +141,52 @@ fn main() {
         ]))));
         w.set_current_tab(1);
         shot("workspace");
+
+        // T131: the changes view, a refused commit and changelists.
+        let pending = sample_pending();
+        let picked: BTreeSet<String> = ["Content/Maps/Harbor.umap", "Source/Game/Boat.cpp"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let selected = "Source/Game/Boat.cpp";
+        w.set_change_rows(ModelRc::from(Rc::new(VecModel::from(changes::rows(
+            &pending,
+            &picked,
+            Some(selected),
+        )))));
+        let state = ChangesState {
+            loaded: true,
+            total: 7,
+            picked: 2,
+            details: changes::details(pending.file(selected).unwrap()),
+            ..ChangesState::default()
+        };
+        w.set_changes(state.clone());
+        w.set_commit_message("Harbor lights: boats bob with the tide".into());
+        shot("changes");
+
+        w.set_changes(ChangesState {
+            error: app::error_info(&lode_desk::desk::ErrorView {
+                code: "locked".into(),
+                message: "Content/Maps/Harbor.umap is locked by bob".into(),
+                details: serde_json::Value::Null,
+            }),
+            refused: "Content/Maps/Harbor.umap".into(),
+            ..state.clone()
+        });
+        shot("changes-refused");
+
+        w.set_changes(state);
+        w.set_list_dialog(ListDialogState {
+            value: "harbor-lights".into(),
+            description: "Lights and boats for the harbor level".into(),
+            picked: 2,
+            move_picked: true,
+            ..ListDialogState::default()
+        });
+        w.set_dialog(Dialog::NewChangelist);
+        shot("changelist-new");
+        w.set_dialog(Dialog::None);
         w.set_workspaces(ModelRc::default());
 
         w.set_current_tab(0);
@@ -144,6 +194,37 @@ fn main() {
         shot("about");
     }
     println!("screenshots in {}", out.display());
+}
+
+fn sample_pending() -> Pending {
+    let file = |path: &str, status: &str, list: Option<&str>| FileEntry {
+        path: path.into(),
+        status: status.into(),
+        changelist: list.map(String::from),
+        copy_from: None,
+        moved: false,
+        locked: false,
+        needs_lock: path.ends_with(".umap"),
+        lock_required: false,
+    };
+    Pending {
+        branch: "main".into(),
+        rev: Some(1482),
+        files: vec![
+            file("Content/Maps/Harbor.umap", "modified", None),
+            file("Source/Game/Boat.cpp", "modified", None),
+            file("Source/Game/Boat.h", "modified", None),
+            file("Docs/tide.md", "deleted", None),
+            file("Content/Textures/Lamp_D.png", "added", Some("lamps")),
+            file("Content/Audio/Waves.wav", "modified", Some("lamps")),
+            file("Content/Textures/Lamp_N.png", "untracked", None),
+        ],
+        lists: vec![ListInfo {
+            name: "lamps".into(),
+            description: "Street lamps along the pier".into(),
+        }],
+        merges: Vec::new(),
+    }
 }
 
 fn recent(depot: &str, branch: &str, path: &str, host: &str) -> Recent {

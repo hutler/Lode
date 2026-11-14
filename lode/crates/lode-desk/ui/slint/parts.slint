@@ -92,3 +92,36 @@ export component FormLabel inherits Text {
     font-weight: 600;
     accessible-role: none;
 }
+
+/// A check box drawn here rather than the style's, so that it always shows the state it is
+/// given (the window owns what is picked).
+export component Check inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled();
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.checked ? Palette.accent-background : Palette.foreground.transparentize(0.5);
+    background: root.checked ? Palette.accent-background : transparent;
+    opacity: root.enabled ? 1 : 0.4;
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if (root.enabled) { root.toggled(); } }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.toggled(); }
+    }
+    if root.checked: Text {
+        text: "✓";
+        font-size: 13px;
+        font-weight: 700;
+        color: Palette.accent-foreground;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}

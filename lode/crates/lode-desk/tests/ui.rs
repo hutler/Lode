@@ -11,7 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use i_slint_backend_testing::{AccessibleRole, ElementHandle};
-use lode_desk::app::{self, AppWindow, Dialog, Options};
+use lode_desk::app::{self, AppWindow, ChangeRow, Dialog, Options};
+use lode_desk::changes::{self, FileEntry, Pending};
+use lode_desk::desk::Desk;
+use lode_ops::output::{ProgressEvent, Ui};
 use lode_proto::admin::{AccessLevel, AclEffect, CreatePrincipalRequest};
 use lode_proto::PrincipalKind;
 use lode_server::{OidcConfig, PasswordLogin};
@@ -87,6 +90,17 @@ async fn start(rt: Handle) -> World {
         )
         .await;
     add_user(&server, "alice", Some("correct horse"), None).await;
+    add_user(&server, "bob", Some("battery staple"), None).await;
+    server
+        .acl(
+            "game",
+            "bob",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Write,
+        )
+        .await;
     server
         .acl(
             "game",
@@ -162,7 +176,86 @@ fn find_as(w: &AppWindow, label: &str, roles: &[AccessibleRole]) -> ElementHandl
 }
 
 fn button(w: &AppWindow, label: &str) -> ElementHandle {
-    find_as(w, label, &[AccessibleRole::Button, AccessibleRole::Tab])
+    find_as(
+        w,
+        label,
+        &[
+            AccessibleRole::Button,
+            AccessibleRole::Tab,
+            AccessibleRole::Checkbox,
+            AccessibleRole::ListItem,
+        ],
+    )
+}
+
+/// Clicks the button labelled `label` inside the dialog labelled `dialog`.
+fn click_in(w: &AppWindow, dialog: &str, label: &str) {
+    let label = label.to_owned();
+    let d = find_as(w, dialog, &[AccessibleRole::Groupbox]);
+    let b = d
+        .query_descendants()
+        .match_predicate(move |e| {
+            e.accessible_label().is_some_and(|l| l == label.as_str())
+                && e.accessible_role() == Some(AccessibleRole::Button)
+        })
+        .find_first()
+        .unwrap_or_else(|| panic!("no such button in {dialog}"));
+    b.invoke_accessible_default_action();
+}
+
+fn rows(w: &AppWindow) -> Vec<ChangeRow> {
+    w.get_change_rows().iter().collect()
+}
+
+fn row(w: &AppWindow, key: &str, group: bool) -> Option<ChangeRow> {
+    rows(w)
+        .into_iter()
+        .find(|r| r.key == key && r.is_group == group)
+}
+
+/// The group a file is listed under.
+fn group_of(w: &AppWindow, path: &str) -> Option<String> {
+    let mut group = None;
+    for r in rows(w) {
+        if r.is_group {
+            group = Some(r.key.to_string());
+        } else if r.key == path {
+            return group;
+        }
+    }
+    None
+}
+
+struct Quiet;
+
+impl Ui for Quiet {
+    fn line(&self, _text: &str) {}
+    fn warn(&self, _text: &str) {}
+    fn progress(&self, _event: &ProgressEvent<'_>) {}
+}
+
+/// Bob, in his own app and workspace of `game`.
+async fn bob(world: &World) -> (tempfile::TempDir, Desk, String) {
+    let home = tempfile::tempdir().unwrap();
+    let desk = Desk::new(
+        home.path().to_path_buf(),
+        &home.path().join("app"),
+        Arc::new(Quiet),
+    )
+    .with_config_dir(home.path().join("config"));
+    desk.sign_in(world.url.clone(), "bob".into(), "battery staple".into())
+        .await
+        .unwrap();
+    let dir = home.path().join("game");
+    desk.checkout(
+        format!("{}/game", world.url),
+        dir.display().to_string(),
+        "main".into(),
+    )
+    .await
+    .unwrap();
+    let root = desk.recent()[0].path.clone();
+    (home, desk, root)
 }
 
 fn shown(w: &AppWindow, label: &str) -> bool {
@@ -451,6 +544,252 @@ async fn check_out_before_signing_in(world: &World) {
     println!("check out before signing in ... ok");
 }
 
+async fn changes_pick_commit_revert_and_changelists(world: &World) {
+    let home = Home::new();
+    let folder = home.path().join("ws");
+    let w = home.window(world, Some(folder.clone()));
+    signed_in(world, &w).await;
+    click(&w, "Check out a depot…");
+    type_into(&w, "Depot", &format!("{}/game", world.url));
+    click(&w, "Browse…");
+    click(&w, "Check out");
+    until("the workspace opens", || w.get_dialog() == Dialog::None).await;
+    until("its changes load", || w.get_changes().loaded).await;
+    assert_eq!(w.get_changes().total, 0);
+    let root = std::fs::canonicalize(&folder).unwrap();
+
+    // Edits show up by themselves: the app watches the folder.
+    std::fs::write(root.join("a.txt"), "apricot\n").unwrap();
+    std::fs::write(root.join("notes.md"), "todo\n").unwrap();
+    until("the edits show", || w.get_changes().total == 2).await;
+    let a = row(&w, "a.txt", false).unwrap();
+    assert_eq!(
+        (a.status.as_str(), a.file_kind.as_str()),
+        ("modified", "text")
+    );
+    assert_eq!(group_of(&w, "a.txt").as_deref(), Some("default"));
+    assert_eq!(
+        group_of(&w, "notes.md").as_deref(),
+        Some(changes::NEW_FILES)
+    );
+
+    // Pick one file and commit it.
+    click(&w, "Pick a.txt");
+    assert_eq!(w.get_changes().picked, 1);
+    assert!(row(&w, "a.txt", false).unwrap().picked);
+    type_into(&w, "Commit message", "Apricot instead");
+    click(&w, "Commit 1 file");
+    until("the commit is done", || {
+        value_or_empty(&w, "Done").starts_with("Committed r")
+    })
+    .await;
+    assert_eq!(
+        value(&w, "Done"),
+        format!("Committed r{} (1 file).", world.head + 1)
+    );
+    assert!(w.get_commit_message().is_empty(), "the message is cleared");
+    until("the list is loaded again", || w.get_changes().total == 1).await;
+    assert_eq!(w.get_changes().picked, 0);
+
+    // The message is remembered.
+    click(&w, "Recent messages…");
+    click(&w, "Use message Apricot instead");
+    assert_eq!(w.get_commit_message(), "Apricot instead");
+    assert_eq!(w.get_dialog(), Dialog::None);
+    w.set_commit_message("".into());
+
+    // Add a new file from the details panel.
+    click(&w, "notes.md");
+    assert_eq!(value(&w, "Status"), "New, not added");
+    click(&w, "Add");
+    until("the file is added", || {
+        row(&w, "notes.md", false).is_some_and(|r| r.status == "added")
+    })
+    .await;
+
+    // A new changelist takes the picked file, then is renamed and committed.
+    std::fs::write(root.join("d/c.txt"), "cranberry\n").unwrap();
+    until("the edit shows", || row(&w, "d/c.txt", false).is_some()).await;
+    click(&w, "Pick d/c.txt");
+    click(&w, "New changelist…");
+    type_into(&w, "Name", "two words");
+    click_in(&w, "New changelist", "Create");
+    assert_eq!(
+        w.get_list_dialog().error.code,
+        "usage",
+        "a bad name is refused"
+    );
+    type_into(&w, "Name", "ui");
+    type_into(&w, "Description", "Cranberry");
+    click_in(&w, "New changelist", "Create");
+    until("the changelist shows", || {
+        group_of(&w, "d/c.txt").as_deref() == Some("ui")
+    })
+    .await;
+    assert_eq!(w.get_dialog(), Dialog::None);
+    assert_eq!(row(&w, "ui", true).unwrap().description, "Cranberry");
+
+    click(&w, "Rename changelist ui");
+    type_into(&w, "New name", "fruit");
+    click_in(&w, "Rename changelist", "Rename");
+    until("it is renamed", || {
+        group_of(&w, "d/c.txt").as_deref() == Some("fruit")
+    })
+    .await;
+    assert!(row(&w, "ui", true).is_none());
+    assert_eq!(row(&w, "fruit", true).unwrap().description, "Cranberry");
+
+    click(&w, "Commit changelist fruit");
+    assert_eq!(
+        value(&w, "Message"),
+        "Cranberry",
+        "the description is the message"
+    );
+    click_in(&w, "Commit changelist", "Commit 1 file");
+    until("the changelist is committed", || {
+        value_or_empty(&w, "Done").ends_with("from fruit.")
+    })
+    .await;
+    until("it leaves the list", || row(&w, "d/c.txt", false).is_none()).await;
+
+    // Revert asks first.
+    std::fs::write(root.join("b.txt"), "blueberry\n").unwrap();
+    until("the edit shows", || row(&w, "b.txt", false).is_some()).await;
+    click(&w, "b.txt");
+    click(&w, "Revert…");
+    assert_eq!(w.get_dialog(), Dialog::Revert);
+    assert!(value(&w, "Question").contains("b.txt"));
+    click_in(&w, "Revert changes?", "Revert");
+    until("the file is back", || row(&w, "b.txt", false).is_none()).await;
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "banana\n"
+    );
+
+    // Move to a changelist, then delete the changelist: the file goes back to Changes.
+    std::fs::write(root.join("b.txt"), "blackberry\n").unwrap();
+    until("the edit shows", || row(&w, "b.txt", false).is_some()).await;
+    click(&w, "New changelist…");
+    type_into(&w, "Name", "later");
+    click_in(&w, "New changelist", "Create");
+    until("the empty changelist shows", || {
+        row(&w, "later", true).is_some()
+    })
+    .await;
+    click(&w, "b.txt");
+    click(&w, "Move to changelist");
+    click(&w, "Move to later");
+    until("the file moves", || {
+        group_of(&w, "b.txt").as_deref() == Some("later")
+    })
+    .await;
+    click(&w, "Delete changelist later");
+    assert!(value(&w, "Question").contains("1 file goes back"));
+    click_in(&w, "Delete changelist later?", "Delete");
+    until("the changelist goes", || row(&w, "later", true).is_none()).await;
+    assert_eq!(group_of(&w, "b.txt").as_deref(), Some("default"));
+
+    // A commit the server refuses names the files: Bob holds the lock on b.txt.
+    let (_bob_home, bob, bob_root) = bob(world).await;
+    bob.lock(bob_root.clone(), vec!["b.txt".into()], None)
+        .await
+        .unwrap();
+    click(&w, "Pick b.txt");
+    type_into(&w, "Commit message", "Blackberry");
+    click(&w, "Commit 1 file");
+    until("the commit is refused", || w.get_changes().error.shown).await;
+    assert_eq!(w.get_changes().error.code, "locked");
+    assert_eq!(value(&w, "Files the server refused"), "b.txt");
+    assert_eq!(
+        w.get_commit_message(),
+        "Blackberry",
+        "the message stays for another try"
+    );
+    click(&w, "Dismiss");
+    assert!(!w.get_changes().error.shown);
+    bob.unlock(bob_root.clone(), vec!["b.txt".into()], false)
+        .await
+        .unwrap();
+    click(&w, "b.txt");
+    click(&w, "Revert…");
+    click_in(&w, "Revert changes?", "Revert");
+    until("the file is back", || row(&w, "b.txt", false).is_none()).await;
+    w.set_commit_message("".into());
+
+    // A conflict stops the commit and says why.
+    std::fs::write(Path::new(&bob_root).join("a.txt"), "avocado\n").unwrap();
+    bob.commit(bob_root.clone(), vec!["a.txt".into()], "Avocado".into())
+        .await
+        .unwrap();
+    std::fs::write(root.join("a.txt"), "almond\n").unwrap();
+    let alice = Desk::new(
+        home.path().to_path_buf(),
+        &home.path().join("app"),
+        Arc::new(Quiet),
+    )
+    .with_config_dir(home.path().join("config"));
+    let _ = alice.update(root.display().to_string(), None).await;
+    click(&w, "Refresh");
+    until("the conflict shows", || w.get_changes().conflicted == 1).await;
+    assert_eq!(row(&w, "a.txt", false).unwrap().status, "conflicted");
+    assert_eq!(
+        value(&w, "Why commit is off"),
+        "Resolve the conflicted file before you commit."
+    );
+    click(&w, "Pick a.txt");
+    type_into(&w, "Commit message", "Almond");
+    assert_eq!(
+        button(&w, "Commit 1 file").accessible_enabled(),
+        Some(false),
+        "commit is off while a conflict remains"
+    );
+    w.hide().unwrap();
+    println!("changes: pick, commit, revert and changelists ... ok");
+}
+
+/// What the text labelled `label` says, or nothing when it is not on screen.
+fn value_or_empty(w: &AppWindow, label: &str) -> String {
+    all(w, label)
+        .into_iter()
+        .find(|e| e.accessible_role() == Some(AccessibleRole::Text))
+        .and_then(|e| e.accessible_value())
+        .map(|v| v.to_string())
+        .unwrap_or_default()
+}
+
+/// 20 000 changed files become rows and reach the window in under a second.
+async fn twenty_thousand_rows(world: &World) {
+    let home = Home::new();
+    let w = home.window(world, None);
+    let pending = Pending {
+        branch: "main".into(),
+        rev: Some(1),
+        files: (0..20_000)
+            .map(|i| FileEntry {
+                path: format!("Content/Level{:02}/Mesh_{i:05}.uasset", i % 40),
+                status: if i % 7 == 0 { "added" } else { "modified" }.into(),
+                changelist: (i % 3 == 0).then(|| "art".to_owned()),
+                copy_from: None,
+                moved: false,
+                locked: false,
+                needs_lock: false,
+                lock_required: false,
+            })
+            .collect(),
+        lists: Vec::new(),
+        merges: Vec::new(),
+    };
+    let picked = std::collections::BTreeSet::new();
+    let started = std::time::Instant::now();
+    let r = changes::rows(&pending, &picked, None);
+    w.set_change_rows(slint::ModelRc::new(slint::VecModel::from(r)));
+    let took = started.elapsed();
+    assert_eq!(w.get_change_rows().row_count(), 20_000 + 2);
+    assert!(took < Duration::from_secs(1), "took {took:?}");
+    w.hide().unwrap();
+    println!("20 000 rows in {took:?} ... ok");
+}
+
 async fn opening_a_folder_that_is_not_a_workspace(world: &World) {
     let home = Home::new();
     let plain = home.path().join("plain");
@@ -488,6 +827,8 @@ fn main() -> std::process::ExitCode {
         check_out_with_progress_then_reopen(&world).await;
         check_out_before_signing_in(&world).await;
         opening_a_folder_that_is_not_a_workspace(&world).await;
+        changes_pick_commit_revert_and_changelists(&world).await;
+        twenty_thousand_rows(&world).await;
         let _ = slint::quit_event_loop();
     })
     .unwrap();

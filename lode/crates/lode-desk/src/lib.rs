@@ -9,6 +9,7 @@
 #![deny(unsafe_code)]
 
 pub mod app;
+pub mod changes;
 pub mod desk;
 pub mod links;
 pub mod update;

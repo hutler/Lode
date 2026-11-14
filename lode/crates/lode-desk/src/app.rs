@@ -6,7 +6,8 @@
 //! of its own, so the UI thread only awaits the answer. Progress and the single sign-on
 //! address come from that thread and reach the window through `slint::invoke_from_event_loop`.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::rc::{Rc, Weak as RcWeak};
@@ -32,6 +33,10 @@ mod screens {
 }
 
 pub use screens::*;
+
+mod work;
+
+use work::WorkspaceState;
 
 /// The app's identifier; its data directory is named after it, as the Tauri app's was, so the
 /// recent list carries over.
@@ -90,7 +95,10 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         window: window.as_weak(),
         open_browser: options.open_browser,
     });
-    let mut desk = Desk::new(options.home, &options.data_dir, ui);
+    let changed = window.as_weak();
+    let mut desk = Desk::new(options.home, &options.data_dir, ui).with_change_hook(move |root| {
+        let _ = changed.upgrade_in_event_loop(move |w| w.invoke_files_changed(root.into()));
+    });
     if let Some(dir) = options.config_dir {
         desk = desk.with_config_dir(dir);
     }
@@ -99,6 +107,13 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     window.set_version(env!("CARGO_PKG_VERSION").into());
     window.set_recent(ModelRc::from(Rc::clone(&recent)));
     window.set_workspaces(ModelRc::from(Rc::clone(&workspaces)));
+    let change_rows = Rc::new(VecModel::<ChangeRow>::default());
+    let move_targets = Rc::new(VecModel::<MoveTarget>::default());
+    let messages_model = Rc::new(VecModel::<SharedString>::default());
+    window.set_change_rows(ModelRc::from(Rc::clone(&change_rows)));
+    window.set_move_targets(ModelRc::from(Rc::clone(&move_targets)));
+    window.set_recent_messages(ModelRc::from(Rc::clone(&messages_model)));
+    let messages_file = options.data_dir.join("messages.json");
     let app = Rc::new(App {
         window: window.as_weak(),
         desk,
@@ -108,9 +123,20 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         sign_in_generation: Cell::new(0),
         sso_offer_generation: Cell::new(0),
         back_to_checkout: Cell::new(false),
+        change_rows,
+        move_targets,
+        messages_model,
+        messages: RefCell::new(work::load_messages(&messages_file)),
+        messages_file,
+        work: RefCell::new(HashMap::new()),
+        shown_root: RefCell::new(None),
+        dialog_paths: RefCell::new(Vec::new()),
+        this: RefCell::new(RcWeak::new()),
     });
+    *app.this.borrow_mut() = Rc::downgrade(&app);
     app.refresh_recent();
     connect(&window, &app);
+    work::connect(&window, &app);
     Ok(window)
 }
 
@@ -131,8 +157,14 @@ impl Ui for WindowUi {
             let mut state = w.get_checkout();
             if state.busy {
                 state.progress = fraction;
-                state.progress_text = text.into();
+                state.progress_text = text.as_str().into();
                 w.set_checkout(state);
+            }
+            let mut changes = w.get_changes();
+            if changes.busy == "Committing" {
+                changes.progress = fraction;
+                changes.progress_text = text.into();
+                w.set_changes(changes);
             }
         });
     }
@@ -165,6 +197,24 @@ struct App {
     sso_offer_generation: Cell<u64>,
     /// The sign-in dialog was opened from the check-out dialog, which comes back after it.
     back_to_checkout: Cell<bool>,
+    /// The rows of the changes view.
+    change_rows: Rc<VecModel<ChangeRow>>,
+    /// The changelists the move dialog offers.
+    move_targets: Rc<VecModel<MoveTarget>>,
+    /// The recent commit messages, for their dialog.
+    messages_model: Rc<VecModel<SharedString>>,
+    /// The recent commit messages, newest first.
+    messages: RefCell<Vec<String>>,
+    /// `messages.json` in the app's data directory.
+    messages_file: PathBuf,
+    /// What each open workspace shows, by root.
+    work: RefCell<HashMap<String, WorkspaceState>>,
+    /// The workspace the changes view shows now.
+    shown_root: RefCell<Option<String>>,
+    /// The files a revert or move dialog acts on.
+    dialog_paths: RefCell<Vec<String>>,
+    /// This controller, for tasks that outlive a call.
+    this: RefCell<RcWeak<App>>,
 }
 
 fn connect(window: &AppWindow, app: &Rc<App>) {
@@ -246,7 +296,13 @@ impl App {
         };
         w.set_home_error(ErrorInfo::default());
         w.set_workspace_error(ErrorInfo::default());
+        let root = text(&info["root"]);
+        if let Err(e) = self.desk.watch(root.clone()) {
+            w.set_workspace_error(error_info(&e));
+        }
         w.set_current_tab(tab_number(index));
+        // Shown at once, not only when the tab changes (it may be the current one already).
+        self.show_root(w, Some(root));
     }
 
     fn forget(&self, path: &str) {
@@ -279,6 +335,10 @@ impl App {
         };
         if i >= self.workspaces.row_count() {
             return;
+        }
+        if let Some(tab) = self.workspaces.row_data(i) {
+            self.desk.unwatch(&tab.root);
+            self.work.borrow_mut().remove(tab.root.as_str());
         }
         self.workspaces.remove(i);
         let current = w.get_current_tab();
@@ -523,6 +583,13 @@ impl App {
         };
         match w.get_dialog() {
             Dialog::CheckOut if w.get_checkout().busy => {}
+            Dialog::NewChangelist
+            | Dialog::RenameChangelist
+            | Dialog::CommitChangelist
+            | Dialog::DeleteChangelist
+            | Dialog::Revert
+            | Dialog::MoveTo
+                if w.get_list_dialog().busy => {}
             Dialog::SignIn => {
                 let state = w.get_sign_in();
                 if state.busy && !state.waiting {
