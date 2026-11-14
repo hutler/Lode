@@ -1,0 +1,94 @@
+// Small building blocks shared by the screens.
+
+import { Palette } from "std-widgets.slint";
+
+/// An operation's error as the window shows it.
+export struct ErrorInfo {
+    shown: bool,
+    message: string,
+    /// What to do next, for errors where the message alone leaves the user stuck.
+    next: string,
+    code: string,
+}
+
+export component Muted inherits Text {
+    color: Palette.foreground.transparentize(0.4);
+}
+
+export component Title inherits Text {
+    font-size: 20px;
+    font-weight: 700;
+    color: Palette.foreground;
+}
+
+export component Badge inherits Rectangle {
+    in property <string> text;
+    height: 20px;
+    width: label.preferred-width + 14px;
+    border-radius: 10px;
+    background: Palette.accent-background.transparentize(0.8);
+    label := Text {
+        text: root.text;
+        font-size: 11px;
+        color: Palette.foreground;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component Card inherits Rectangle {
+    background: Palette.background;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: Palette.border;
+    drop-shadow-blur: 12px;
+    drop-shadow-color: #00000030;
+}
+
+/// The message, the next step when there is one, and the code.
+export component ErrorBanner inherits Rectangle {
+    in property <ErrorInfo> error;
+    in property <bool> dismissable;
+    callback dismissed();
+    background: #dc262620;
+    border-color: #dc2626;
+    border-width: 1px;
+    border-radius: 6px;
+    accessible-role: text;
+    accessible-label: "Error";
+    accessible-value: root.error.message;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            spacing: 4px;
+            Text { text: root.error.message; wrap: word-wrap; color: Palette.foreground; font-weight: 600; }
+            if root.error.next != "": Text {
+                text: root.error.next;
+                wrap: word-wrap;
+                color: Palette.foreground;
+                accessible-role: text;
+                accessible-label: "Next step";
+                accessible-value: self.text;
+            }
+            Muted { text: root.error.code; font-size: 11px; }
+        }
+        if root.dismissable: Rectangle {
+            width: 24px;
+            height: 24px;
+            accessible-role: button;
+            accessible-label: "Dismiss";
+            accessible-action-default => { root.dismissed(); }
+            TouchArea { clicked => { root.dismissed(); } }
+            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground; }
+        }
+    }
+}
+
+/// A field's name above it in a form. The field carries the same accessible label, so the
+/// name itself is not announced twice.
+export component FormLabel inherits Text {
+    color: Palette.foreground;
+    font-weight: 600;
+    accessible-role: none;
+}

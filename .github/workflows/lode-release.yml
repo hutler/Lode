@@ -322,7 +322,7 @@ jobs:
           if [ -n "${WINDOWS_THUMBPRINT:-}" ]; then
             config=$(jq -c --arg t "$WINDOWS_THUMBPRINT" '.bundle.windows.certificateThumbprint = $t' <<< "$config")
           fi
-          ./ui/node_modules/.bin/tauri build --ci --bundles ${{ matrix.bundles }} ${{ matrix.args }} --config "$config"
+          ./ui/node_modules/.bin/tauri build --ci --features web --bundles ${{ matrix.bundles }} ${{ matrix.args }} --config "$config"
       - name: Collect the bundles
         run: |
           mkdir -p dist

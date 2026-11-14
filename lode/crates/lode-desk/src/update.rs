@@ -9,7 +9,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(feature = "web")]
 use tauri::{AppHandle, Runtime};
+#[cfg(feature = "web")]
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::desk::ErrorView;
@@ -107,6 +109,7 @@ pub fn off_reason(
     None
 }
 
+#[cfg(feature = "web")]
 /// The update public key built into the app; empty when there is none.
 fn pubkey<R: Runtime>(app: &AppHandle<R>) -> String {
     app.config()
@@ -120,6 +123,7 @@ fn pubkey<R: Runtime>(app: &AppHandle<R>) -> String {
         .to_owned()
 }
 
+#[cfg(feature = "web")]
 /// An updater error as the window shows it. A signature that does not match the key is
 /// `bad_signature`.
 pub fn error_view(e: tauri_plugin_updater::Error) -> ErrorView {
@@ -144,6 +148,7 @@ pub fn error_view(e: tauri_plugin_updater::Error) -> ErrorView {
     }
 }
 
+#[cfg(feature = "web")]
 /// Asks the feed for a newer version, returning it with what the window shows.
 pub async fn find<R: Runtime>(
     app: &AppHandle<R>,
@@ -181,6 +186,7 @@ pub async fn find<R: Runtime>(
     })
 }
 
+#[cfg(feature = "web")]
 /// Downloads `update` and checks its signature; the bytes can then be installed.
 pub async fn download(update: &Update) -> Result<Vec<u8>, ErrorView> {
     update.download(|_, _| {}, || {}).await.map_err(error_view)

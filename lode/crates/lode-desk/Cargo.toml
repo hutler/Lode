@@ -4,8 +4,8 @@ description = "Lode Desk, the Lode desktop client"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-# Tauri 2.12 needs 1.90; the rest of Lode stays on 1.88.
-rust-version = "1.90"
+# Slint 1.18 needs 1.92; the rest of Lode stays on 1.88.
+rust-version = "1.92"
 repository = "https://github.com/hutler/simpledevops"
 publish = false
 
@@ -20,35 +20,63 @@ name = "lode-desk"
 path = "src/main.rs"
 
 [lints.rust]
-unsafe_code = "forbid"
+# `deny`, not `forbid`: the code Slint generates for the screens allows itself `unsafe`.
+unsafe_code = "deny"
 
 [lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
 
+[features]
+# The former Tauri window with the React screens, until M13 replaces every screen.
+web = [
+  "dep:tauri",
+  "dep:tauri-build",
+  "dep:tauri-plugin-deep-link",
+  "dep:tauri-plugin-dialog",
+  "dep:tauri-plugin-single-instance",
+  "dep:tauri-plugin-updater",
+]
+# The Tauri window's own tests (its mock runtime).
+web-test = ["web", "tauri/test"]
+
 [build-dependencies]
-tauri-build = { version = "2.7", features = [] }
+slint-build = "1.18"
+tauri-build = { version = "2.7", features = [], optional = true }
 
 [dependencies]
 lode-client = { path = "../lode-client" }
 lode-ops = { path = "../lode-ops" }
+directories = "6"
 notify = "8.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2.12", features = [] }
-tauri-plugin-deep-link = "2"
-tauri-plugin-dialog = "2.8"
-tauri-plugin-single-instance = "2"
-tauri-plugin-updater = "2"
+rfd = "0.18"
+# Slint under its Royalty-free License 2.0 (desktop apps; the About dialog carries the notice).
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility"] }
+tauri = { version = "2.12", features = [], optional = true }
+tauri-plugin-deep-link = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2.8", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
 time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 
 [dev-dependencies]
 base64 = "0.22"
+i-slint-backend-testing = "=1.18.1"
+png = "0.17"
 lode-proto = { path = "../lode-proto" }
+lode-server = { path = "../lode-server" }
 lode-testkit = { path = "../lode-testkit" }
 minisign = "0.10.0"
-tauri = { version = "2", features = ["test"] }
 tempfile = "3"
-tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
+
+[[test]]
+name = "ui"
+harness = false
+
+[[example]]
+name = "screenshots"

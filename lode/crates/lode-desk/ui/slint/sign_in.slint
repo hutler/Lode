@@ -1,0 +1,119 @@
+// Sign in with a name and password, or through the company's sign-in page when the server
+// offers single sign-on. The token goes where `lode login` keeps it, so the command line is
+// signed in too.
+
+import { Button, LineEdit, Palette } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel } from "parts.slint";
+
+export struct SignInState {
+    server: string,
+    name: string,
+    password: string,
+    busy: bool,
+    error: ErrorInfo,
+    /// The provider's label when the server offers single sign-on, else empty.
+    sso-label: string,
+    /// Whether password sign-in is open to everyone (false: server administrators only).
+    password-login: bool,
+    /// Waiting for the browser sign-in to finish.
+    waiting: bool,
+    /// The sign-in address, for when no browser opened.
+    sso-url: string,
+    /// "Signed in to … as …" once done.
+    done: string,
+}
+
+export component SignInDialog inherits Card {
+    in-out property <SignInState> state;
+    callback server-edited(string);
+    callback submit();
+    callback sso();
+    callback close();
+    width: 460px;
+    accessible-role: groupbox;
+    accessible-label: "Sign in";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: "Sign in"; }
+        if root.state.done != "": VerticalLayout {
+            spacing: 16px;
+            Text {
+                text: root.state.done;
+                wrap: word-wrap;
+                color: Palette.foreground;
+                accessible-role: text;
+                accessible-label: "Signed in";
+                accessible-value: self.text;
+            }
+            HorizontalLayout {
+                alignment: end;
+                Button { text: "Done"; primary: true; clicked => { root.close(); } }
+            }
+        }
+        if root.state.done == "": VerticalLayout {
+            spacing: 10px;
+            FormLabel { text: "Server"; }
+            LineEdit {
+                accessible-label: "Server";
+                placeholder-text: "https://lode.example.com";
+                text: root.state.server;
+                enabled: !root.state.busy;
+                edited(t) => { root.state.server = t; root.server-edited(t); }
+                accepted => { root.submit(); }
+            }
+            if root.state.sso-label != "": VerticalLayout {
+                spacing: 6px;
+                Button {
+                    text: "Sign in with " + root.state.sso-label;
+                    primary: true;
+                    enabled: !root.state.busy;
+                    clicked => { root.sso(); }
+                }
+                if root.state.waiting: Text {
+                    text: root.state.sso-url == ""
+                        ? "Finish signing in in your browser."
+                        : "Finish signing in in your browser. If it did not open, open this address on this computer: " + root.state.sso-url;
+                    wrap: word-wrap;
+                    color: Palette.foreground;
+                    accessible-role: text;
+                    accessible-label: "Browser sign-in";
+                    accessible-value: self.text;
+                }
+                Muted {
+                    text: root.state.password-login ? "Or sign in with a password:" : "Password sign-in is for server administrators only.";
+                    wrap: word-wrap;
+                }
+            }
+            FormLabel { text: "Name"; }
+            LineEdit {
+                accessible-label: "Name";
+                text: root.state.name;
+                enabled: !root.state.busy;
+                edited(t) => { root.state.name = t; }
+                accepted => { root.submit(); }
+            }
+            FormLabel { text: "Password"; }
+            LineEdit {
+                accessible-label: "Password";
+                input-type: password;
+                text: root.state.password;
+                enabled: !root.state.busy;
+                edited(t) => { root.state.password = t; }
+                accepted => { root.submit(); }
+            }
+            if root.state.error.shown: ErrorBanner { error: root.state.error; }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                Button { text: "Cancel"; enabled: !root.state.busy || root.state.waiting; clicked => { root.close(); } }
+                Button {
+                    text: root.state.busy && !root.state.waiting ? "Signing in…" : "Sign in";
+                    primary: root.state.sso-label == "";
+                    enabled: !root.state.busy;
+                    clicked => { root.submit(); }
+                }
+            }
+        }
+    }
+}

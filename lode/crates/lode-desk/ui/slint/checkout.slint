@@ -1,0 +1,89 @@
+// Creates a workspace from a depot: `lode checkout <server>/<depot> <folder> -b <branch>`.
+
+import { Button, LineEdit, ProgressIndicator, Palette } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel } from "parts.slint";
+
+export struct CheckoutState {
+    target: string,
+    branch: string,
+    folder: string,
+    busy: bool,
+    /// 0..1, or -1 while the total is not known yet.
+    progress: float,
+    progress-text: string,
+    error: ErrorInfo,
+    /// The server to sign in to when the error says nobody is signed in, else empty.
+    sign-in-server: string,
+}
+
+export component CheckoutDialog inherits Card {
+    in-out property <CheckoutState> state;
+    callback pick-folder();
+    callback submit();
+    callback sign-in(string);
+    callback close();
+    width: 520px;
+    accessible-role: groupbox;
+    accessible-label: "Check out a depot";
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: "Check out a depot"; }
+        FormLabel { text: "Depot"; }
+        LineEdit {
+            accessible-label: "Depot";
+            placeholder-text: "https://lode.example.com/game";
+            text: root.state.target;
+            enabled: !root.state.busy;
+            edited(t) => { root.state.target = t; }
+            accepted => { root.submit(); }
+        }
+        Muted { text: "The server address followed by the depot name."; font-size: 11px; }
+        FormLabel { text: "Branch"; }
+        LineEdit {
+            accessible-label: "Branch";
+            text: root.state.branch;
+            enabled: !root.state.busy;
+            edited(t) => { root.state.branch = t; }
+            accepted => { root.submit(); }
+        }
+        FormLabel { text: "Folder"; }
+        HorizontalLayout {
+            spacing: 8px;
+            LineEdit {
+                accessible-label: "Folder";
+                placeholder-text: "Where the files go";
+                text: root.state.folder;
+                enabled: !root.state.busy;
+                edited(t) => { root.state.folder = t; }
+                accepted => { root.submit(); }
+            }
+            Button { text: "Browse…"; enabled: !root.state.busy; clicked => { root.pick-folder(); } }
+        }
+        if root.state.busy: VerticalLayout {
+            spacing: 4px;
+            ProgressIndicator {
+                indeterminate: root.state.progress < 0;
+                progress: max(root.state.progress, 0);
+                accessible-label: "Progress";
+            }
+            Muted { text: root.state.progress-text; }
+        }
+        if root.state.error.shown: ErrorBanner { error: root.state.error; }
+        if root.state.sign-in-server != "": Button {
+            text: "Sign in to " + root.state.sign-in-server;
+            clicked => { root.sign-in(root.state.sign-in-server); }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Cancel"; enabled: !root.state.busy; clicked => { root.close(); } }
+            Button {
+                text: root.state.busy ? "Checking out…" : "Check out";
+                primary: true;
+                enabled: !root.state.busy;
+                clicked => { root.submit(); }
+            }
+        }
+    }
+}

@@ -1,32 +1,47 @@
 # Lode Desk
 
-The Lode desktop client for Windows, macOS and Linux: Tauri 2 with a React and TypeScript
-window (`ui/`). It runs the same `lode-ops` operations as the `lode` command, and keeps its
-sign-ins in the same place, so signing in with either one signs in both.
+The Lode desktop client for Windows, macOS and Linux. It runs the same `lode-ops` operations as
+the `lode` command, and keeps its sign-ins in the same place, so signing in with either one
+signs in both.
 
 How to use it: [the Lode Desk guide](../../docs/desk-guide.md).
 
-This folder is its own Cargo workspace, so building the CLI and server never needs the system
-web view libraries. It needs Rust 1.90 or newer (Tauri's minimum; the rest of Lode needs 1.88)
-and Node.js 22.
+The app is moving from Tauri (a web view with React) to [Slint](https://slint.dev), a native
+Rust UI (milestone M13). The Slint window is the default build: Home with recent workspaces,
+sign-in (password and single sign-on), check out and workspace tabs (T130). The rest of the
+screens, the `lode://` links and updates are still in the Tauri window, which is built with
+`--features web` until T135 removes it.
+
+This folder is its own Cargo workspace, so building the CLI and server never needs the GUI
+libraries. It needs Rust 1.92 or newer (Slint's minimum; the rest of Lode needs 1.88).
 
 ## Build and run
 
-Linux needs the WebKitGTK development packages first (Ubuntu and Debian:
+```
+cargo run                      # the Slint window
+cargo build --release          # an optimized binary in target/release
+```
+
+The screens are `.slint` files in `ui/slint/`, compiled by `build.rs` with the `fluent` style
+(Windows 11 controls) on Windows and Linux and `cupertino` on macOS; light or dark follows the
+system. Linux needs the fontconfig and xkbcommon development packages (Ubuntu and Debian:
+`libfontconfig1-dev libxkbcommon-dev`). Folder pickers are the system's, through `rfd`.
+
+Slint is used under the Slint Royalty-free License 2.0; the About dialog carries the notice it
+asks for. See [THIRD-PARTY.md](THIRD-PARTY.md).
+
+### The Tauri window (until T135)
+
+Needs Node.js 22, and on Linux the WebKitGTK development packages (Ubuntu and Debian:
 `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
 libsoup-3.0-dev`). Windows uses the WebView2 runtime that ships with Windows 10 and 11.
 
 ```
-cd ui && npm ci && cd ..
-./ui/node_modules/.bin/tauri dev                 # the app with live reload
-./ui/node_modules/.bin/tauri build --no-bundle   # an optimized binary in target/release
-./ui/node_modules/.bin/tauri build --bundles deb # an installer (see below)
+cd ui && npm ci && npm run build && cd ..
+cargo run --features web,tauri/custom-protocol   # serves ui/dist
+./ui/node_modules/.bin/tauri dev --features web  # with live reload
+./ui/node_modules/.bin/tauri build --features web --bundles deb  # an installer (see below)
 ```
-
-On Windows, use `ui\node_modules\.bin\tauri` in the same way.
-
-`cargo build` alone also works once `npm run build` has filled `ui/dist`; add
-`--features tauri/custom-protocol` to serve that folder instead of the dev server.
 
 ## `lode://` links
 
@@ -54,20 +69,27 @@ Linux (a `.desktop` file), and so does an AppImage; on macOS only a bundled app 
 
 ## Tests
 
-- `cargo test`: every command the window calls, against a test server, the link rules, and
-  update checks (an update signed with another key is refused).
+- `cargo test`: every operation the window calls, against a test server; the link rules; and
+  `tests/ui.rs`, the Slint window driven headless through Slint's testing backend against test
+  servers (sign-in with a wrong and a right password, single sign-on with the test playing the
+  browser, check out with progress, reopening from the recent list, errors with their advice,
+  Ctrl+O and Ctrl+Shift+O). Controls are found by their accessible labels.
+- `cargo run --example screenshots -- DIR`: renders the Slint screens in light and dark into
+  PNG files with the software renderer (default `target/screenshots`).
+- `cargo test --features web-test`: adds the Tauri window's update checks (an update signed
+  with another key is refused).
 - `node --test packaging/feed.test.mjs`: the update feed.
-- `npm test` in `ui/`: the screens, against the mocked backend (`ui/src/mock.ts`).
+- `npm test` in `ui/`: the React screens, against the mocked backend (`ui/src/mock.ts`).
 - `cargo test --test acceptance`: the guide followed end to end by two people against a real
   server; [docs/desk-acceptance.md](../../docs/desk-acceptance.md) is the checklist for what
   needs a person (installers, an update, links from other apps).
 - `npm run guide-screens` in `ui/`: the guide's pictures, into `docs/desk-guide/`.
-- `npm run screenshots` in `ui/`: renders each screen in light and dark into
+- `npm run screenshots` in `ui/`: renders each React screen in light and dark into
   `ui/screenshots/` with Playwright (`SCENES=branches,switched` renders only those). `npm run mock` opens the same mocked app in a browser.
 
 ## Installers and updates
 
-`tauri build` makes the installers of the system it runs on: an MSI and an NSIS setup on Windows
+`tauri build --features web` makes the installers of the system it runs on: an MSI and an NSIS setup on Windows
 (the MSI needs WiX, which the build downloads), a `.app` and `.dmg` on macOS
 (`--target universal-apple-darwin` for both chips), and `.deb`, `.rpm` and AppImage on Linux.
 Each registers `lode://` links. The release workflow builds them all; see

@@ -113,7 +113,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libsoup-3.0-dev
+            libayatana-appindicator3-dev libsoup-3.0-dev libfontconfig1-dev libxkbcommon-dev
       - run: npm ci
         working-directory: lode/crates/lode-desk/ui
       - run: npm test
@@ -122,8 +122,18 @@ jobs:
       - run: npm run build
         working-directory: lode/crates/lode-desk/ui
       - run: cargo fmt --check
+      # The Slint window (default) and the Tauri window (feature `web`, until T135).
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --features web-test -- -D warnings
       - run: cargo test
+      - run: cargo test --features web-test --test update
+      # The Slint screens, light and dark, for visual review.
+      - run: cargo run --example screenshots -- target/screenshots
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: lode-desk-slint-screenshots
+          path: lode/crates/lode-desk/target/screenshots/
       # Screens of the app against the mocked backend, light and dark, for visual review.
       - name: Screenshots
         if: runner.os == 'Linux'

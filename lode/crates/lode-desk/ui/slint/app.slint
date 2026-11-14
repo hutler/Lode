@@ -1,0 +1,366 @@
+// Lode Desk's main window (T130): Home with recent workspaces, sign-in, check out, and one tab
+// per open workspace. The Rust side (src/app.rs) runs the operations and fills the properties.
+
+import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
+import { SignInDialog, SignInState } from "sign_in.slint";
+import { CheckoutDialog, CheckoutState } from "checkout.slint";
+
+export { ErrorInfo, SignInState, CheckoutState }
+
+/// A workspace opened before.
+export struct Recent {
+    path: string,
+    depot: string,
+    branch: string,
+    host: string,
+}
+
+/// An open workspace, for its tab and sidebar.
+export struct WorkspaceTab {
+    root: string,
+    depot: string,
+    branch: string,
+    rev: string,
+    server: string,
+}
+
+export enum Dialog { none, sign-in, check-out, about }
+
+component Tab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    in property <bool> closable;
+    callback clicked();
+    callback close();
+    height: 36px;
+    min-width: 110px;
+    background: root.selected ? Palette.background : transparent;
+    border-radius: 6px;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+    TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: root.closable ? 4px : 12px;
+        spacing: 4px;
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-weight: root.selected ? 600 : 400;
+            color: Palette.foreground;
+            overflow: elide;
+        }
+        if root.closable: Rectangle {
+            width: 24px;
+            accessible-role: button;
+            accessible-label: "Close " + root.text;
+            accessible-action-default => { root.close(); }
+            close-touch := TouchArea { clicked => { root.close(); } }
+            background: close-touch.has-hover ? Palette.alternate-background : transparent;
+            border-radius: 4px;
+            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground; }
+        }
+    }
+}
+
+component RecentRow inherits Rectangle {
+    in property <Recent> item;
+    callback open();
+    callback forget();
+    height: 64px;
+    background: touch.has-hover ? Palette.alternate-background : transparent;
+    border-radius: 6px;
+    accessible-role: button;
+    accessible-label: "Open " + root.item.depot + " at " + root.item.path;
+    accessible-action-default => { root.open(); }
+    touch := TouchArea { clicked => { root.open(); } }
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: root.item.depot; font-weight: 600; color: Palette.foreground; }
+                Badge { text: root.item.branch; }
+                Rectangle {}
+            }
+            Muted { text: root.item.path; overflow: elide; }
+            Muted { text: root.item.host; font-size: 11px; }
+        }
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            y: (parent.height - self.height) / 2;
+            accessible-role: button;
+            accessible-label: "Forget " + root.item.path;
+            accessible-action-default => { root.forget(); }
+            forget-touch := TouchArea { clicked => { root.forget(); } }
+            background: forget-touch.has-hover ? Palette.background : transparent;
+            border-radius: 4px;
+            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground; }
+        }
+    }
+}
+
+component Home inherits Rectangle {
+    in property <[Recent]> recent;
+    in property <string> version;
+    in property <ErrorInfo> error;
+    callback open(string);
+    callback forget(string);
+    callback open-folder();
+    callback check-out();
+    callback sign-in();
+    callback about();
+    callback dismiss-error();
+    HorizontalLayout {
+        padding: 24px;
+        spacing: 24px;
+        VerticalLayout {
+            spacing: 12px;
+            Title { text: "Recent workspaces"; }
+            if root.error.shown: ErrorBanner {
+                error: root.error;
+                dismissable: true;
+                dismissed => { root.dismiss-error(); }
+            }
+            if root.recent.length == 0: Muted {
+                text: "Nothing here yet. Check out a depot or open a folder that already holds a workspace.";
+                wrap: word-wrap;
+            }
+            ListView {
+                for r in root.recent: RecentRow {
+                    item: r;
+                    open => { root.open(r.path); }
+                    forget => { root.forget(r.path); }
+                }
+            }
+        }
+        VerticalLayout {
+          alignment: start;
+          Card {
+            width: 300px;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                alignment: start;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 8px;
+                        background: @linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+                    }
+                    VerticalLayout {
+                        Text { text: "Lode Desk"; font-size: 18px; font-weight: 700; color: Palette.foreground; }
+                        Muted { text: "Version " + root.version; font-size: 11px; }
+                    }
+                }
+                Rectangle { height: 8px; }
+                Button { text: "Check out a depot…"; primary: true; clicked => { root.check-out(); } }
+                Button { text: "Open a workspace folder…"; clicked => { root.open-folder(); } }
+                Button { text: "Sign in to a server…"; clicked => { root.sign-in(); } }
+                Rectangle { height: 8px; }
+                Button { text: "About Lode Desk"; clicked => { root.about(); } }
+            }
+          }
+        }
+    }
+}
+
+component Field inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 8px;
+    Muted { text: root.label; width: 70px; accessible-role: none; }
+    Text { text: root.value; color: Palette.foreground; overflow: elide; accessible-role: text; accessible-label: root.label; accessible-value: root.value; }
+}
+
+component WorkspacePage inherits Rectangle {
+    in property <WorkspaceTab> ws;
+    in property <ErrorInfo> error;
+    callback dismiss-error();
+    HorizontalLayout {
+        Rectangle {
+            width: 240px;
+            background: Palette.alternate-background;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                alignment: start;
+                Text { text: root.ws.depot; font-size: 18px; font-weight: 700; color: Palette.foreground; }
+                Field { label: "Branch"; value: root.ws.branch; }
+                Field { label: "Revision"; value: root.ws.rev; }
+                Field { label: "Server"; value: root.ws.server; }
+                Muted { text: root.ws.root; wrap: word-wrap; font-size: 11px; }
+            }
+        }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 12px;
+            alignment: start;
+            if root.error.shown: ErrorBanner {
+                error: root.error;
+                dismissable: true;
+                dismissed => { root.dismiss-error(); }
+            }
+            Title { text: "Workspace"; }
+            Muted {
+                text: "This build of the native app opens workspaces and checks out depots. Pending changes, history, locks, shelves and branches come next.";
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+component AboutDialog inherits Card {
+    in property <string> version;
+    callback close();
+    width: 420px;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Title { text: "About Lode Desk"; }
+        Text { text: "Lode Desk " + root.version; color: Palette.foreground; }
+        Muted { text: "The desktop client for Lode, a version control system for teams with large files. Apache License 2.0."; wrap: word-wrap; }
+        // The notice the Slint Royalty-free License 2.0 asks for.
+        Muted { text: "Made with Slint (slint.dev), used under the Slint Royalty-free License 2.0."; wrap: word-wrap; }
+        HorizontalLayout {
+            alignment: end;
+            Button { text: "Close"; primary: true; clicked => { root.close(); } }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Lode Desk";
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 900px;
+    min-height: 560px;
+    background: Palette.background;
+    default-font-size: 13px;
+
+    in property <string> version;
+    in property <[Recent]> recent;
+    in property <[WorkspaceTab]> workspaces;
+    /// 0 is Home; 1.. are the workspaces.
+    in-out property <int> current-tab: 0;
+    in-out property <Dialog> dialog: Dialog.none;
+    in-out property <ErrorInfo> home-error;
+    in-out property <ErrorInfo> workspace-error;
+    in-out property <SignInState> sign-in;
+    in-out property <CheckoutState> checkout;
+
+    callback open-recent(string);
+    callback forget-recent(string);
+    callback open-folder();
+    callback show-sign-in(string);
+    callback show-check-out();
+    callback close-workspace(int);
+    callback sign-in-server-edited(string);
+    callback sign-in-password();
+    callback sign-in-sso();
+    callback pick-checkout-folder();
+    callback check-out();
+    callback close-dialog();
+
+    /// Light or dark instead of the system's choice (the screenshots use it).
+    public function use-dark(dark: bool) {
+        Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "o" || event.text == "O")) {
+                if (event.modifiers.shift) { root.show-check-out(); } else { root.open-folder(); }
+                return accept;
+            }
+            if (event.text == Key.Escape && root.dialog != Dialog.none) {
+                root.close-dialog();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            // The tab bar.
+            Rectangle {
+                height: 44px;
+                background: Palette.alternate-background;
+                HorizontalLayout {
+                    padding: 4px;
+                    spacing: 4px;
+                    alignment: start;
+                    Tab {
+                        text: "Home";
+                        selected: root.current-tab == 0;
+                        clicked => { root.current-tab = 0; }
+                    }
+                    for w[i] in root.workspaces: Tab {
+                        text: w.depot;
+                        selected: root.current-tab == i + 1;
+                        closable: true;
+                        clicked => { root.current-tab = i + 1; }
+                        close => { root.close-workspace(i); }
+                    }
+                }
+            }
+            if root.current-tab == 0: Home {
+                recent: root.recent;
+                version: root.version;
+                error: root.home-error;
+                open(path) => { root.open-recent(path); }
+                forget(path) => { root.forget-recent(path); }
+                open-folder => { root.open-folder(); }
+                check-out => { root.show-check-out(); }
+                sign-in => { root.show-sign-in(""); }
+                about => { root.dialog = Dialog.about; }
+                dismiss-error => { root.home-error.shown = false; }
+            }
+            if root.current-tab > 0 && root.current-tab <= root.workspaces.length: WorkspacePage {
+                ws: root.workspaces[root.current-tab - 1];
+                error: root.workspace-error;
+                dismiss-error => { root.workspace-error.shown = false; }
+            }
+        }
+    }
+
+    // Dialogs, over a dimmed window.
+    if root.dialog != Dialog.none: Rectangle {
+        background: #00000080;
+        TouchArea {}
+        if root.dialog == Dialog.sign-in: SignInDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            state <=> root.sign-in;
+            server-edited(s) => { root.sign-in-server-edited(s); }
+            submit => { root.sign-in-password(); }
+            sso => { root.sign-in-sso(); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.check-out: CheckoutDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            state <=> root.checkout;
+            pick-folder => { root.pick-checkout-folder(); }
+            submit => { root.check-out(); }
+            sign-in(server) => { root.show-sign-in(server); }
+            close => { root.close-dialog(); }
+        }
+        if root.dialog == Dialog.about: AboutDialog {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            height: self.preferred-height;
+            version: root.version;
+            close => { root.close-dialog(); }
+        }
+    }
+}

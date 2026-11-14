@@ -1,5 +1,7 @@
 //! T114: update checks, the settings that turn them off, and signature checking. A package
 //! signed with any key but the one built into the app is refused.
+// The updater is part of the Tauri window until T135.
+#![cfg(feature = "web-test")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::io::{Read, Write};
