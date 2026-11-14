@@ -143,7 +143,9 @@ describe("creating a branch", () => {
     expect(screen.getByRole("button", { name: "Branch fix/docks at r1400: change branch" })).toBeInTheDocument();
 
     const again = await openPicker(user);
-    expect(within(again).getByRole("option", { name: /^fix\/docks/ })).toHaveTextContent("r1400 · from release-1.2@r1400");
+    expect(within(again).getByRole("option", { name: /^fix\/docks/ })).toHaveTextContent(
+      "r1400 · from release-1.2@r1400",
+    );
   });
 
   it("without switching, from the workspace, and refuses a name that exists", async () => {
@@ -235,5 +237,17 @@ describe("an update that stopped", () => {
     expect(alert).toHaveTextContent("update_incomplete");
     await user.click(within(alert).getByRole("button", { name: "Finish the update" }));
     expect(await screen.findByRole("dialog", { name: "Updated to r1482" })).toBeInTheDocument();
+  });
+});
+
+describe("updating", () => {
+  it("brings the workspace to the head of its branch from the picker", async () => {
+    const { b, user } = await openSkyfall();
+    const update = vi.spyOn(b, "update");
+    const dialog = await openPicker(user);
+    expect(within(dialog).queryByRole("button", { name: "Switch" })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Update to r1482" }));
+    expect(update).toHaveBeenCalledWith(WS, null);
+    expect(await screen.findByRole("dialog", { name: /^Updated to r\d+$/ })).toBeInTheDocument();
   });
 });

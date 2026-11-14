@@ -4,6 +4,8 @@ The Lode desktop client for Windows, macOS and Linux: Tauri 2 with a React and T
 window (`ui/`). It runs the same `lode-ops` operations as the `lode` command, and keeps its
 sign-ins in the same place, so signing in with either one signs in both.
 
+How to use it: [the Lode Desk guide](../../docs/desk-guide.md).
+
 This folder is its own Cargo workspace, so building the CLI and server never needs the system
 web view libraries. It needs Rust 1.90 or newer (Tauri's minimum; the rest of Lode needs 1.88)
 and Node.js 22.
@@ -56,6 +58,10 @@ Linux (a `.desktop` file), and so does an AppImage; on macOS only a bundled app 
   update checks (an update signed with another key is refused).
 - `node --test packaging/feed.test.mjs`: the update feed.
 - `npm test` in `ui/`: the screens, against the mocked backend (`ui/src/mock.ts`).
+- `cargo test --test acceptance`: the guide followed end to end by two people against a real
+  server; [docs/desk-acceptance.md](../../docs/desk-acceptance.md) is the checklist for what
+  needs a person (installers, an update, links from other apps).
+- `npm run guide-screens` in `ui/`: the guide's pictures, into `docs/desk-guide/`.
 - `npm run screenshots` in `ui/`: renders each screen in light and dark into
   `ui/screenshots/` with Playwright (`SCENES=branches,switched` renders only those). `npm run mock` opens the same mocked app in a browser.
 

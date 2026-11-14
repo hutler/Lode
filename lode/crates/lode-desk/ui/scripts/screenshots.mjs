@@ -5,7 +5,7 @@
 import { createServer } from "node:http";
 import { mkdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -13,7 +13,8 @@ const { chromium } = require("playwright");
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const dist = join(here, "..", "dist-mock");
-const out = join(here, "..", "screenshots");
+// OUT, SCALE and SCHEMES change where the pictures go, their pixel density and which themes.
+const out = process.env.OUT ? resolve(process.env.OUT) : join(here, "..", "screenshots");
 const SERVER = "https://lode.example.com";
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
@@ -313,10 +314,10 @@ const url = `http://127.0.0.1:${server.address().port}/`;
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try {
-  for (const scheme of ["light", "dark"]) {
+  for (const scheme of (process.env.SCHEMES ?? "light,dark").split(",")) {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
-      deviceScaleFactor: 2,
+      deviceScaleFactor: Number(process.env.SCALE ?? 2),
       colorScheme: scheme,
     });
     // SCENES=a,b renders only those scenes.

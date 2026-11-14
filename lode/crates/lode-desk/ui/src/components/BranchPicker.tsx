@@ -106,6 +106,19 @@ export function BranchPicker({ info, onClose, onSwitched, onCreate, initial, onM
     }
   };
 
+  /** Brings the workspace to the head of its own branch. */
+  const doUpdate = async () => {
+    setBusy("Updating…");
+    setError(null);
+    try {
+      const result = await (await backend()).update(info.root, null);
+      onSwitched(result);
+    } catch (err) {
+      setError(asOpError(err));
+      setBusy(null);
+    }
+  };
+
   const doArchive = async (name: string) => {
     setArchiving(null);
     setBusy(`Archiving ${name}…`);
@@ -226,8 +239,13 @@ export function BranchPicker({ info, onClose, onSwitched, onCreate, initial, onM
             </button>
           )}
           {(!pick || isCurrent) && (
-            <button className="primary" type="button" onClick={onClose} disabled={!!busy}>
+            <button type="button" onClick={onClose} disabled={!!busy}>
               Close
+            </button>
+          )}
+          {isCurrent && pick && (
+            <button className="primary" type="button" onClick={() => void doUpdate()} disabled={!!busy}>
+              Update to r{pick.head_rev}
             </button>
           )}
         </form>

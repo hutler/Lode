@@ -9,6 +9,7 @@
     "mock": "vite --mode mock",
     "test": "vitest run",
     "screenshots": "vite build --mode mock --outDir dist-mock && node scripts/screenshots.mjs",
+    "guide-screens": "vite build --mode mock --outDir dist-mock && OUT=../../../docs/desk-guide SCALE=1 SCHEMES=light SCENES=welcome,sign-in,check-out,workspace,changes-picked,commit-refused,locks,lock-refused,changelists,history,file-history,blame,diff,image-swipe,shelves,shelve,shelf-checks,branches,new-branch,switched,merged,three-way,view-editor,link-choose,link-none,link-refused,update,open-error node scripts/screenshots.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

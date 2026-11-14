@@ -9,6 +9,7 @@ and large binary files. Part of SimpleDevOps.
 - Rules for contributors and agents: [AGENTS.md](AGENTS.md)
 - Using and running it: [docs/user-guide.html](docs/user-guide.html)
   ([PDF](docs/Lode-User-Guide.pdf))
+- The desktop app, Lode Desk: [docs/desk-guide.md](docs/desk-guide.md)
 - Robustness tests and their findings: [docs/HARDENING.md](docs/HARDENING.md)
 - Performance against the SPEC targets: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 
