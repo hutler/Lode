@@ -1,0 +1,585 @@
+{
+ "calls": [
+  {
+   "args": [
+    "--version"
+   ],
+   "exit": 0,
+   "stdout": {
+    "api": "1",
+    "ok": true,
+    "version": "0.2.0"
+   }
+  },
+  {
+   "args": [
+    "whoami"
+   ],
+   "exit": 0,
+   "stdout": {
+    "kind": "user",
+    "name": "alice",
+    "ok": true,
+    "owner": null,
+    "scopes": [
+     "admin",
+     "lock",
+     "read",
+     "shelve",
+     "write"
+    ],
+    "server": "http://127.0.0.1:36313/"
+   }
+  },
+  {
+   "args": [
+    "log",
+    "-n",
+    "1"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "depot": "game",
+    "more": true,
+    "ok": true,
+    "revisions": [
+     {
+      "author": {
+       "kind": "user",
+       "name": "admin"
+      },
+      "branch": "main",
+      "created_at": "2026-11-14T22:59:35.949Z",
+      "message": "Import",
+      "parent": 1,
+      "provenance": {
+       "client": "lode-cli/0.2.0 lode-client/0.2.0",
+       "via": "api"
+      },
+      "rev": 2,
+      "root_tree": "f17ec49e3d97fea59166c1622f05444df0e40565681944af821fe18930dd8431",
+      "submitter": {
+       "kind": "user",
+       "name": "admin"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "status",
+    "--unchanged",
+    "--remote",
+    "*"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "files": [
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": true,
+      "locked": false,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Content/Hero/Hero.uasset",
+      "status": "unchanged"
+     },
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": true,
+      "locked": false,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Content/Maps/Main.umap",
+      "status": "unchanged"
+     },
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": false,
+      "locked": false,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Game.uproject",
+      "status": "unchanged"
+     }
+    ],
+    "invalid": [],
+    "merges": [],
+    "ok": true,
+    "remote": {
+     "files": [
+      {
+       "deleted_at_head": false,
+       "lock_workspace": "5b7d6440-6e7f-4310-b9d5-1aab2f0b4d8b",
+       "locked_by": {
+        "kind": "user",
+        "name": "bob"
+       },
+       "mine": false,
+       "newer": false,
+       "path": "Content/Hero/Hero.uasset"
+      }
+     ],
+     "head_rev": 2
+    },
+    "rev": 2
+   }
+  },
+  {
+   "args": [
+    "status",
+    "--unchanged",
+    "*"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "files": [
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": true,
+      "locked": false,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Content/Hero/Hero.uasset",
+      "status": "unchanged"
+     },
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": true,
+      "locked": false,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Content/Maps/Main.umap",
+      "status": "unchanged"
+     },
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": false,
+      "locked": false,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Game.uproject",
+      "status": "unchanged"
+     }
+    ],
+    "invalid": [],
+    "merges": [],
+    "ok": true,
+    "rev": 2
+   }
+  },
+  {
+   "args": [
+    "lock",
+    "Content/Hero/Hero.uasset"
+   ],
+   "exit": 1,
+   "stdout": {
+    "error": {
+     "code": "locked",
+     "details": {
+      "locks": [
+       {
+        "branch": "main",
+        "comment": "lighting",
+        "created_at": "2026-11-14T22:59:36.042Z",
+        "owner": {
+         "kind": "user",
+         "name": "bob"
+        },
+        "path": "Content/Hero/Hero.uasset",
+        "workspace": "5b7d6440-6e7f-4310-b9d5-1aab2f0b4d8b"
+       }
+      ],
+      "paths": [
+       "Content/Hero/Hero.uasset"
+      ]
+     },
+     "message": "Content/Hero/Hero.uasset is locked by bob (workspace 5b7d6440-6e7f-4310-b9d5-1aab2f0b4d8b): Content/Hero/Hero.uasset; held by someone else (see `lode locks`)"
+    },
+    "ok": false
+   }
+  },
+  {
+   "args": [
+    "lock",
+    "*"
+   ],
+   "exit": 0,
+   "stdout": {
+    "locked": [
+     "Content/Maps/Main.umap"
+    ],
+    "ok": true
+   }
+  },
+  {
+   "args": [
+    "locks"
+   ],
+   "exit": 0,
+   "stdout": {
+    "locks": [
+     {
+      "branch": "main",
+      "created_at": "2026-11-14T22:59:36.175Z",
+      "mine": true,
+      "owner": {
+       "kind": "user",
+       "name": "alice"
+      },
+      "path": "Content/Maps/Main.umap",
+      "workspace": "5432cbea-0bac-4c54-a64e-7a8ca8a93620"
+     }
+    ],
+    "ok": true
+   }
+  },
+  {
+   "args": [
+    "status"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "files": [
+     {
+      "changelist": null,
+      "copy_from": null,
+      "lock_required": true,
+      "locked": true,
+      "moved": false,
+      "needs_lock": false,
+      "path": "Content/Maps/Main.umap",
+      "status": "modified"
+     }
+    ],
+    "invalid": [],
+    "merges": [],
+    "ok": true,
+    "rev": 2
+   }
+  },
+  {
+   "args": [
+    "commit",
+    "-F",
+    "?",
+    "*"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "files": 1,
+    "ok": true,
+    "replayed": false,
+    "resumed": false,
+    "rev": 3,
+    "uploaded": 1
+   }
+  },
+  {
+   "args": [
+    "log",
+    "?",
+    "-v",
+    "--follow",
+    "-n",
+    "?"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "depot": "game",
+    "more": false,
+    "ok": true,
+    "revisions": [
+     {
+      "author": {
+       "kind": "user",
+       "name": "alice"
+      },
+      "branch": "main",
+      "changes": [
+       {
+        "action": "modify",
+        "kind": "file",
+        "new_id": "d5eaa5a7535b2b9e7298478811f41c0d4babafa47ac48df6ceb4f687bded2ab8",
+        "old_id": "930976e2f191e8c7ed3f26292a3a677024b189d2fec361a9ab74819784432a3c",
+        "path": "Content/Maps/Main.umap",
+        "size": 2004
+       }
+      ],
+      "created_at": "2026-11-14T22:59:36.255Z",
+      "message": "Brighter sky\n\nMore light in the main map.",
+      "parent": 2,
+      "provenance": {
+       "client": "lode-cli/0.2.0 lode-client/0.2.0",
+       "via": "api"
+      },
+      "rev": 3,
+      "root_tree": "81f5ab869ad45ea8dee26d03b268868c96ef01aa0b22f05068cd3599e2589732",
+      "submitter": {
+       "kind": "user",
+       "name": "alice"
+      }
+     },
+     {
+      "author": {
+       "kind": "user",
+       "name": "admin"
+      },
+      "branch": "main",
+      "changes": [
+       {
+        "action": "add",
+        "kind": "file",
+        "new_id": "4d6e116367d9e472c7834077e142bb055d4cc782f5674e2dd94792ab33f223d5",
+        "path": ".lodeconfig",
+        "size": 241
+       },
+       {
+        "action": "add",
+        "kind": "file",
+        "new_id": "f05ddecbb1002873e7598af3d49ee24dd016a63d1303df7f610d8352ba314f63",
+        "path": ".lodeignore",
+        "size": 278
+       },
+       {
+        "action": "add",
+        "kind": "file",
+        "new_id": "3e83774519ce60a79dd0161d7c8085af964d06dcfac60b3b0bd40253eb5645fa",
+        "path": "Config/DefaultEngine.ini",
+        "size": 17
+       },
+       {
+        "action": "add",
+        "kind": "file",
+        "new_id": "7d5f9c44d978fcfa15f75856dc0f0bd6a8ba430f896a04c1752a1f9d26b6fbcc",
+        "path": "Content/Hero/Hero.uasset",
+        "size": 3000
+       },
+       {
+        "action": "add",
+        "kind": "file",
+        "new_id": "930976e2f191e8c7ed3f26292a3a677024b189d2fec361a9ab74819784432a3c",
+        "path": "Content/Maps/Main.umap",
+        "size": 2000
+       },
+       {
+        "action": "add",
+        "kind": "file",
+        "new_id": "67ee61e55ccc58be4cf782bbe6abcdab52189a4ae926a79b44b703d0cc2d5d07",
+        "path": "Game.uproject",
+        "size": 18
+       }
+      ],
+      "created_at": "2026-11-14T22:59:35.949Z",
+      "message": "Import",
+      "parent": 1,
+      "provenance": {
+       "client": "lode-cli/0.2.0 lode-client/0.2.0",
+       "via": "api"
+      },
+      "rev": 2,
+      "root_tree": "f17ec49e3d97fea59166c1622f05444df0e40565681944af821fe18930dd8431",
+      "submitter": {
+       "kind": "user",
+       "name": "admin"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "cat",
+    "?",
+    "-o",
+    "?"
+   ],
+   "exit": 0,
+   "stdout": {
+    "id": "930976e2f191e8c7ed3f26292a3a677024b189d2fec361a9ab74819784432a3c",
+    "ok": true,
+    "output": "/tmp/lode-record-ydg4sten/cat.out",
+    "path": "Content/Maps/Main.umap",
+    "rev": 2,
+    "size": 2000
+   },
+   "write": {
+    "after": "-o",
+    "content": "map at r2"
+   }
+  },
+  {
+   "args": [
+    "changelist",
+    "list"
+   ],
+   "exit": 0,
+   "stdout": {
+    "changelists": [
+     {
+      "description": "",
+      "files": [],
+      "name": "default"
+     },
+     {
+      "description": "Art pass",
+      "files": [
+       "Config/DefaultEngine.ini"
+      ],
+      "name": "Art"
+     }
+    ],
+    "ok": true
+   }
+  },
+  {
+   "args": [
+    "shelve",
+    "-c",
+    "?",
+    "--keep",
+    "*"
+   ],
+   "exit": 0,
+   "stdout": {
+    "files": 1,
+    "kept": true,
+    "merged_from": [],
+    "ok": true,
+    "shelf": 1,
+    "updated": false,
+    "uploaded": 1,
+    "version": 1
+   }
+  },
+  {
+   "args": [
+    "shelves",
+    "--state",
+    "open"
+   ],
+   "exit": 0,
+   "stdout": {
+    "ok": true,
+    "shelves": [
+     {
+      "base_rev": 3,
+      "branch": "main",
+      "created_at": "2026-11-14T22:59:36.357Z",
+      "description": "Art pass",
+      "id": 1,
+      "owner": {
+       "kind": "user",
+       "name": "alice"
+      },
+      "provenance": {
+       "via": "api"
+      },
+      "state": "open",
+      "updated_at": "2026-11-14T22:59:36.357Z",
+      "version": 1
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "shelf",
+    "show",
+    "?"
+   ],
+   "exit": 0,
+   "stdout": {
+    "base_rev": 3,
+    "branch": "main",
+    "changes": [
+     {
+      "action": "modify",
+      "base_id": "3e83774519ce60a79dd0161d7c8085af964d06dcfac60b3b0bd40253eb5645fa",
+      "kind": "file",
+      "new_id": "cd5bca0e4d81fe433b14fa3315b32b2d6ff1cd388647581a764fa717703c384f",
+      "path": "Config/DefaultEngine.ini",
+      "size": 30
+     }
+    ],
+    "created_at": "2026-11-14T22:59:36.357Z",
+    "description": "Art pass",
+    "id": 1,
+    "ok": true,
+    "owner": {
+     "kind": "user",
+     "name": "alice"
+    },
+    "provenance": {
+     "via": "api"
+    },
+    "state": "open",
+    "updated_at": "2026-11-14T22:59:36.357Z",
+    "version": 1
+   }
+  },
+  {
+   "args": [
+    "unshelve",
+    "?"
+   ],
+   "exit": 0,
+   "stdout": {
+    "counts": {
+     "applied": 1
+    },
+    "files": [
+     {
+      "outcome": "applied",
+      "path": "Config/DefaultEngine.ini"
+     }
+    ],
+    "merged_from": [],
+    "ok": true,
+    "shelf": 1,
+    "version": 1
+   }
+  },
+  {
+   "args": [
+    "update"
+   ],
+   "exit": 0,
+   "stdout": {
+    "branch": "main",
+    "counts": {
+     "updated": 1
+    },
+    "downloaded": 1,
+    "files": [
+     {
+      "outcome": "updated",
+      "path": "Content/Maps/Main.umap"
+     }
+    ],
+    "from": 2,
+    "full": false,
+    "locks_left": [],
+    "obliterated": [],
+    "ok": true,
+    "rev": 3,
+    "switched_from": null
+   }
+  }
+ ],
+ "recorded_with": "0.2.0"
+}

@@ -1,0 +1,468 @@
+{
+ "comment": "Answers for the provider tests (unreal T03 to T06). Hand-written in the shapes recorded in workspace.json. Main.umap becomes locked here once a `lock` for it was logged.",
+ "calls": [
+  {
+   "args": [
+    "--version"
+   ],
+   "stdout": {
+    "ok": true,
+    "version": "0.2.0",
+    "api": "1"
+   }
+  },
+  {
+   "args": [
+    "whoami"
+   ],
+   "stdout": {
+    "ok": true,
+    "name": "alice",
+    "kind": "user",
+    "owner": null,
+    "scopes": [
+     "read",
+     "write",
+     "lock",
+     "shelve"
+    ],
+    "server": "http://127.0.0.1:7480/"
+   }
+  },
+  {
+   "args": [
+    "log",
+    "-n",
+    "1"
+   ],
+   "stdout": {
+    "ok": true,
+    "depot": "game",
+    "branch": "main",
+    "more": true,
+    "revisions": [
+     {
+      "rev": 3,
+      "branch": "main",
+      "message": "Import",
+      "created_at": "2026-11-14T22:59:35.949Z",
+      "author": {
+       "name": "admin",
+       "kind": "user"
+      },
+      "submitter": {
+       "name": "admin",
+       "kind": "user"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "status",
+    "--unchanged",
+    "--remote",
+    "*"
+   ],
+   "after": [
+    "lock",
+    "*Main.umap"
+   ],
+   "stdout": {
+    "ok": true,
+    "branch": "main",
+    "rev": 3,
+    "files": [
+     {
+      "path": "Content/Hero/Hero.uasset",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Content/Maps/Main.umap",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": true,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Config/DefaultGame.ini",
+      "status": "modified",
+      "lock_required": false,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     }
+    ],
+    "invalid": [],
+    "merges": [],
+    "remote": {
+     "head_rev": 4,
+     "files": [
+      {
+       "path": "Content/Hero/Hero.uasset",
+       "locked_by": {
+        "name": "bob",
+        "kind": "user"
+       },
+       "mine": false,
+       "newer": false,
+       "deleted_at_head": false
+      },
+      {
+       "path": "Content/Maps/Main.umap",
+       "locked_by": {
+        "name": "alice",
+        "kind": "user"
+       },
+       "mine": true,
+       "newer": true,
+       "deleted_at_head": false
+      }
+     ]
+    }
+   }
+  },
+  {
+   "args": [
+    "status",
+    "--unchanged",
+    "*"
+   ],
+   "after": [
+    "lock",
+    "*Main.umap"
+   ],
+   "stdout": {
+    "ok": true,
+    "branch": "main",
+    "rev": 3,
+    "files": [
+     {
+      "path": "Content/Hero/Hero.uasset",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Content/Maps/Main.umap",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": true,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Config/DefaultGame.ini",
+      "status": "modified",
+      "lock_required": false,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     }
+    ],
+    "invalid": [],
+    "merges": []
+   }
+  },
+  {
+   "args": [
+    "status",
+    "--unchanged",
+    "--remote",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "branch": "main",
+    "rev": 3,
+    "files": [
+     {
+      "path": "Content/Hero/Hero.uasset",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Content/Maps/Main.umap",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Config/DefaultGame.ini",
+      "status": "modified",
+      "lock_required": false,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     }
+    ],
+    "invalid": [],
+    "merges": [],
+    "remote": {
+     "head_rev": 4,
+     "files": [
+      {
+       "path": "Content/Hero/Hero.uasset",
+       "locked_by": {
+        "name": "bob",
+        "kind": "user"
+       },
+       "mine": false,
+       "newer": false,
+       "deleted_at_head": false
+      },
+      {
+       "path": "Content/Maps/Main.umap",
+       "locked_by": null,
+       "mine": false,
+       "newer": true,
+       "deleted_at_head": false
+      }
+     ]
+    }
+   }
+  },
+  {
+   "args": [
+    "status",
+    "--unchanged",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "branch": "main",
+    "rev": 3,
+    "files": [
+     {
+      "path": "Content/Hero/Hero.uasset",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Content/Maps/Main.umap",
+      "status": "unchanged",
+      "lock_required": true,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     },
+     {
+      "path": "Config/DefaultGame.ini",
+      "status": "modified",
+      "lock_required": false,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     }
+    ],
+    "invalid": [],
+    "merges": []
+   }
+  },
+  {
+   "args": [
+    "status",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "branch": "main",
+    "rev": 3,
+    "files": [
+     {
+      "path": "Config/DefaultGame.ini",
+      "status": "modified",
+      "lock_required": false,
+      "locked": false,
+      "needs_lock": false,
+      "moved": false,
+      "copy_from": null,
+      "changelist": null
+     }
+    ],
+    "invalid": [],
+    "merges": []
+   }
+  },
+  {
+   "args": [
+    "lock",
+    "*Hero.uasset"
+   ],
+   "exit": 1,
+   "stdout": {
+    "ok": false,
+    "error": {
+     "code": "locked",
+     "message": "Content/Hero/Hero.uasset is locked by bob",
+     "details": {
+      "paths": [
+       "Content/Hero/Hero.uasset"
+      ],
+      "locks": [
+       {
+        "path": "Content/Hero/Hero.uasset",
+        "owner": {
+         "name": "bob",
+         "kind": "user"
+        },
+        "comment": "lighting",
+        "created_at": "2026-11-14T22:59:36.042Z",
+        "branch": "main"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "args": [
+    "lock",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "locked": [
+     "Content/Maps/Main.umap"
+    ]
+   }
+  },
+  {
+   "args": [
+    "unlock",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "unlocked": [
+     "Content/Maps/Main.umap"
+    ]
+   }
+  },
+  {
+   "args": [
+    "revert",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "reverted": [
+     "Config/DefaultGame.ini"
+    ]
+   }
+  },
+  {
+   "args": [
+    "log",
+    "?",
+    "-v",
+    "--follow",
+    "-n",
+    "?"
+   ],
+   "stdout": {
+    "ok": true,
+    "depot": "game",
+    "branch": "main",
+    "more": false,
+    "revisions": [
+     {
+      "rev": 3,
+      "branch": "main",
+      "message": "Import",
+      "created_at": "2026-11-14T22:59:35.949Z",
+      "author": {
+       "name": "admin",
+       "kind": "user"
+      },
+      "submitter": {
+       "name": "admin",
+       "kind": "user"
+      },
+      "changes": [
+       {
+        "action": "add",
+        "kind": "file",
+        "path": "Content/Maps/Main.umap",
+        "size": 2000
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "args": [
+    "commit",
+    "-F",
+    "?",
+    "*"
+   ],
+   "stdout": {
+    "ok": true,
+    "branch": "main",
+    "rev": 5,
+    "files": 1,
+    "uploaded": 1
+   }
+  },
+  {
+   "args": [
+    "changelist",
+    "list"
+   ],
+   "stdout": {
+    "ok": true,
+    "changelists": [
+     {
+      "name": "default",
+      "description": "",
+      "files": [
+       "Config/DefaultGame.ini"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

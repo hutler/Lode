@@ -1,0 +1,20 @@
+{
+ "comment": "Answers for the runner tests (unreal T02). Hand-written; the error shapes follow lode/docs/CLI-JSON.md.",
+ "calls": [
+  {"args": ["--version"], "stdout": {"ok": true, "version": "0.2.0", "api": "1"}},
+  {"args": ["refuse", "?"], "exit": 1, "stdout": {"ok": false, "error": {"code": "out_of_date", "message": "1 path(s) changed on the branch; update first", "details": {"paths": ["Content/A.uasset"]}}}},
+  {"args": ["usage"], "exit": 2, "stdout": {"ok": false, "error": {"code": "usage", "message": "unknown option"}}},
+  {"args": ["auth"], "exit": 3, "stdout": {"ok": false, "error": {"code": "unauthenticated", "message": "not signed in to http://127.0.0.1:7480/"}}},
+  {"args": ["network"], "exit": 4, "stdout": {"ok": false, "error": {"code": "network", "message": "connection refused"}}},
+  {"args": ["garbage"], "stdout_text": "this is not json\n"},
+  {"args": ["two-documents"], "stdout_text": "{\"ok\": true}\n{\"ok\": true}\n"},
+  {"args": ["empty"], "exit": 1, "stdout_text": "", "stderr": "lode crashed"},
+  {"args": ["ok-but-failed"], "exit": 1, "stdout": {"ok": true}},
+  {"args": ["slow"], "sleep": 30, "stdout": {"ok": true}},
+  {"args": ["noisy"], "flood": 262144, "stdout": {"ok": true, "noisy": true}},
+  {"args": ["echo-stdin"], "stdout": {"ok": true}},
+  {"args": ["unicode"], "stdout": {"ok": true, "message": "Ünïcödé ✓ 日本"}},
+  {"args": ["status", "--unchanged", "*"], "stdout": {"ok": true, "branch": "main", "rev": 1, "files": [], "invalid": [], "merges": []}},
+  {"args": ["resolve", "--mine", "*"], "stdout": {"ok": true, "resolved": [], "using": "mine"}}
+ ]
+}
