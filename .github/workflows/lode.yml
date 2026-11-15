@@ -92,6 +92,7 @@ jobs:
       - run: >-
           cargo test -p lode-meta -p lode-server -p lode-mod-locks -p lode-mod-shelves
           -p lode-mod-webhooks -p lode-mod-checks -p lode-mod-mcp -p lode-client -p lode-cli
+          -p lode-proxy
 
   msrv:
     name: minimum Rust version

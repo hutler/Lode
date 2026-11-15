@@ -1099,6 +1099,41 @@ whole. `LODE_TEST_NO_CHUNKING` forces whole transfers for tests.
   a big asset share most of their space.
 - Results report `bytes_uploaded`/`bytes_downloaded` and `bytes_reused` (CLI-JSON).
 
+### 10.7 Caching proxy (T154)
+
+`loded proxy --config proxy.toml` (crate `lode-proxy`) serves file content to a remote office
+from a disk cache and fetches each object from the main server ("upstream") once.
+
+- **Routes.** `GET /api/v1/depots/{d}/blobs/{id}` (whole, or one `Range`) and `…/chunks`,
+  answered as the server would (raw bytes, never zstd). `GET /api/v1/info` is the upstream's
+  plus `proxy: {upstream, version}`. `/admin/` and `/admin/metrics.json` show counters.
+  Anything else is `not_found` with `details.reason = "caching_proxy"`.
+- **Access.** No tokens are stored. Per (SHA-256 of the bearer token, depot) the proxy calls
+  the upstream's `GET /depots/{d}/obliterated-ids?after=` with the caller's token; success
+  means the caller may read the depot, a 4xx is passed on as it came. The answer, allowed or
+  refused, is kept for 60 s (injected clock). The same call refreshes the depot's obliterated
+  ids when they are older than 60 s: new ids are refused with `obliterated` and their cached
+  copies deleted. `after` is the previous answer's `now_ms` less five minutes, so an
+  obliteration committed just before that answer is not missed. Refreshes happen on demand;
+  a depot nobody asks for keeps its copies until someone does.
+- **Fetching.** On a miss the proxy asks for the blob; a raw answer of 16 MiB or more is
+  dropped unread and the chunk list asked for instead, so chunked files are cached chunk by
+  chunk and never whole. Chunks are fetched as a response reaches them. Each object is checked
+  against its BLAKE3 id before it is kept (`Client::fetch_content`, `download_blob_max`).
+  Requests for the same object wait on one per-object lock and then find it cached. A chunk
+  list cannot be checked on its own; when a whole chunked file is served, it is hashed on the
+  way and a mismatch drops the list and breaks the response off.
+- **Cache.** `<cache_dir>/objects/<depot as hex>/<ab>/<id>` (`.chunks` for lists), written
+  under `tmp/` and renamed in; `tmp/` is cleared at start and the index rebuilt from the files
+  in modification-time order (touched on each use). Entries are checked by hash on every read
+  and dropped if damaged. After each fill, the least recently used entries are removed until
+  the cache fits `cache_max_gib`.
+- **Client.** `ClientBuilder::proxy` sends blob and chunk-list downloads to the proxy and
+  everything else to the server. A transport error, a 5xx, or content that fails its hash
+  marks the proxy failed for that client (shared by its clones): one warning, then the
+  server. The proxy comes from `LODE_PROXY`, else `[proxies]` in `settings.toml` keyed by
+  server URL (`lode proxy set|clear|show`).
+
 ## 11. Maintenance
 
 - **GC** (`lode admin gc`): mark from every revision's root tree (walking tree objects, memoized

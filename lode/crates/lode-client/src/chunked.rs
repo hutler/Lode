@@ -141,12 +141,10 @@ impl Client {
     /// `GET /depots/{d}/blobs/{id}/chunks`: the chunk list of a chunked file, or `None` when
     /// the server keeps the file whole.
     pub async fn chunk_list(&self, depot: &str, id: &ObjectId) -> Result<Option<ChunkList>> {
-        let url = self.url(&["depots", depot, "blobs", &id.to_string(), "chunks"])?;
-        let resp = match self
-            .send(Retry::Yes, || Ok(self.request(Method::GET, url.clone())))
-            .await
-        {
-            Ok(r) => r,
+        let id_text = id.to_string();
+        let segments = ["depots", depot, "blobs", &id_text, "chunks"];
+        let resp = match self.send_content(Retry::Yes, &segments, |b| b).await {
+            Ok((r, _)) => r,
             Err(Error::Api(a))
                 if a.known_code() == Some(ErrorCode::NotFound)
                     && a.details.get("reason").and_then(|r| r.as_str()) == Some("not_chunked") =>

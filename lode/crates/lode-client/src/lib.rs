@@ -17,6 +17,7 @@ mod credentials;
 mod error;
 mod io;
 mod manifest;
+mod proxy;
 mod retry;
 mod sso;
 
@@ -54,11 +55,12 @@ use reqwest::{Method, RequestBuilder, Response, StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-pub use blobs::FileContent;
+pub use blobs::{FetchedContent, FileContent};
 pub use chunked::{ChunkCache, DownloadOpts, Transfer};
 pub use credentials::{read_token_file, CredentialStore};
 pub use error::{ApiError, Error, Result};
 pub use manifest::ManifestStream;
+pub use proxy::ProxyWarn;
 pub use reqwest::Url as ServerUrl;
 pub use retry::RetryPolicy;
 pub use sso::SsoLogin;
@@ -78,7 +80,7 @@ pub const MAX_JSON_RESPONSE: usize = 64 * 1024 * 1024;
 pub const DEFAULT_UPLOAD_LEVEL: i32 = 3;
 
 /// Configures a [`Client`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientBuilder {
     url: String,
     token: Option<String>,
@@ -89,6 +91,14 @@ pub struct ClientBuilder {
     root_certs_pem: Vec<Vec<u8>>,
     connect_timeout: Duration,
     read_timeout: Duration,
+    proxy: Option<String>,
+    proxy_warn: Option<proxy::ProxyWarn>,
+}
+
+impl std::fmt::Debug for proxy::ProxyRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.base.as_str())
+    }
 }
 
 impl ClientBuilder {
@@ -105,7 +115,22 @@ impl ClientBuilder {
             root_certs_pem: Vec::new(),
             connect_timeout: Duration::from_secs(15),
             read_timeout: DEFAULT_READ_TIMEOUT,
+            proxy: None,
+            proxy_warn: None,
         }
+    }
+
+    /// A caching proxy (T154) for content downloads: blobs and chunk lists go to it, the rest
+    /// to the server. The URL is checked like the server's.
+    pub fn proxy(mut self, url: Option<String>) -> Self {
+        self.proxy = url.filter(|u| !u.trim().is_empty());
+        self
+    }
+
+    /// Called once with a warning if the proxy fails and downloads turn to the server.
+    pub fn on_proxy_failure(mut self, warn: proxy::ProxyWarn) -> Self {
+        self.proxy_warn = Some(warn);
+        self
     }
 
     /// The bearer token to send.
@@ -162,6 +187,10 @@ impl ClientBuilder {
     /// Checks the URL and builds the client.
     pub fn build(self) -> Result<Client> {
         let base = parse_server_url(&self.url, self.allow_insecure)?;
+        let proxy = match &self.proxy {
+            Some(p) => Some(parse_server_url(p, self.allow_insecure)?),
+            None => None,
+        };
         let user_agent = match &self.product {
             Some(p) => format!("{p} {USER_AGENT}"),
             None => USER_AGENT.to_owned(),
@@ -179,7 +208,7 @@ impl ClientBuilder {
             .redirect(reqwest::redirect::Policy::none());
         if !self.allow_insecure {
             // Plain http is only allowed for loopback, which `parse_server_url` checked.
-            if base.scheme() == "https" {
+            if base.scheme() == "https" && proxy.as_ref().is_none_or(|p| p.scheme() == "https") {
                 http = http.https_only(true);
             }
         }
@@ -198,7 +227,18 @@ impl ClientBuilder {
             retry: self.retry,
             upload_level: self.upload_level,
             chunking: Arc::default(),
+            proxy: proxy.map(|p| Arc::new(proxy::ProxyRoute::new(p, self.proxy_warn.clone()))),
         })
+    }
+}
+
+impl std::fmt::Debug for ClientBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientBuilder")
+            .field("url", &self.url)
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .field("proxy", &self.proxy)
+            .finish_non_exhaustive()
     }
 }
 
@@ -260,6 +300,8 @@ pub struct Client {
     upload_level: Option<i32>,
     /// The server's chunking parameters once asked (`None` inside: the server sends whole).
     chunking: Arc<std::sync::OnceLock<Option<lode_proto::auth::ChunkingInfo>>>,
+    /// The caching proxy for content downloads, if any.
+    proxy: Option<Arc<proxy::ProxyRoute>>,
 }
 
 impl std::fmt::Debug for Client {
@@ -267,6 +309,7 @@ impl std::fmt::Debug for Client {
         f.debug_struct("Client")
             .field("base", &self.base.as_str())
             .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .field("proxy", &self.proxy)
             .finish_non_exhaustive()
     }
 }
@@ -295,7 +338,12 @@ impl Client {
     /// `base` + `/api/v1/` + `segments`, each percent-encoded as one segment (so a branch
     /// name's `/` becomes `%2F`).
     pub(crate) fn url(&self, segments: &[&str]) -> Result<Url> {
-        let mut url = self.base.clone();
+        Self::url_on(&self.base, segments)
+    }
+
+    /// [`Client::url`] on another base, such as the proxy's.
+    pub(crate) fn url_on(base: &Url, segments: &[&str]) -> Result<Url> {
+        let mut url = base.clone();
         url.path_segments_mut()
             .map_err(|()| Error::Protocol("server URL cannot take a path".into()))?
             .pop_if_empty()
@@ -304,7 +352,7 @@ impl Client {
         Ok(url)
     }
 
-    fn request(&self, method: Method, url: Url) -> RequestBuilder {
+    pub(crate) fn request(&self, method: Method, url: Url) -> RequestBuilder {
         let b = self.http.request(method, url);
         match &self.token {
             Some(t) => b.bearer_auth(t),

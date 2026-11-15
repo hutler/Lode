@@ -21,6 +21,18 @@ pub struct Info {
     /// (ARCHITECTURE §3.5). Absent on servers before 0.3: send files whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunking: Option<ChunkingInfo>,
+    /// Set when the answer comes from a caching proxy (T154) in front of the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyInfo>,
+}
+
+/// What a caching proxy adds to the upstream server's `GET /info`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxyInfo {
+    /// The server the proxy fetches from.
+    pub upstream: String,
+    /// The proxy's version.
+    pub version: String,
 }
 
 /// The chunking parameters `GET /info` reports. A client that cuts files the same way

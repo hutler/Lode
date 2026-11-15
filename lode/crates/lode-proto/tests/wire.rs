@@ -125,6 +125,7 @@ fn auth_types() {
             modules: vec!["locks".into(), "shelves".into(), "mcp".into()],
             sso: None,
             chunking: None,
+            proxy: None,
         }
     );
     snap!(
@@ -135,6 +136,7 @@ fn auth_types() {
             modules: vec![],
             sso: None,
             chunking: Some(lode_proto::auth::ChunkingInfo::current()),
+            proxy: None,
         }
     );
     snap!(
@@ -148,6 +150,7 @@ fn auth_types() {
                 password_login: false,
             }),
             chunking: None,
+            proxy: None,
         }
     );
     snap!(

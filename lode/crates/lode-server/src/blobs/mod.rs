@@ -39,6 +39,35 @@ pub fn routes() -> Router<AppState> {
                 .get(download_chunks)
                 .layer(axum::extract::DefaultBodyLimit::max(MAX_CHUNK_LIST_BODY)),
         )
+        .route(paths::OBLITERATED_IDS, axum::routing::get(obliterated_ids))
+}
+
+/// `GET /depots/{d}/obliterated-ids?after=`: what caching proxies must stop serving (T154).
+/// Any reader of the depot may ask; only ids are given, never paths or reasons.
+async fn obliterated_ids(
+    State(state): State<AppState>,
+    caller: Caller,
+    ApiPath(depot): ApiPath<String>,
+    q: crate::extract::ApiQuery,
+) -> ApiResult<Json<lode_proto::depot::ObliteratedIds>> {
+    caller.require_scope(SCOPE_READ)?;
+    let after = q
+        .u64("after")?
+        .map_or(i64::MIN, |a| i64::try_from(a).unwrap_or(i64::MAX));
+    let (d, _) = resolve(&state, &caller, &depot).await?;
+    let now_ms = state.clock().now_ms();
+    let rows = state
+        .meta()
+        .read(move |tx| lode_meta::Reads::obliterations(tx, d.id))
+        .await?;
+    let mut ids: Vec<ObjectId> = rows
+        .into_iter()
+        .filter(|r| r.at >= after)
+        .map(|r| r.id)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    Ok(Json(lode_proto::depot::ObliteratedIds { ids, now_ms }))
 }
 
 fn parse_id(s: &str) -> ApiResult<ObjectId> {

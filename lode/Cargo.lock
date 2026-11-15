@@ -1501,6 +1501,7 @@ dependencies = [
  "lode-meta",
  "lode-ops",
  "lode-proto",
+ "lode-proxy",
  "lode-server",
  "lode-store",
  "lode-testkit",
@@ -1733,6 +1734,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-proxy"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "blake3",
+ "bytes",
+ "futures",
+ "lode-client",
+ "lode-core",
+ "lode-proto",
+ "lode-server",
+ "lode-testkit",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "lode-server"
 version = "0.2.0"
 dependencies = [
@@ -1856,6 +1882,7 @@ dependencies = [
  "lode-mod-mcp",
  "lode-mod-shelves",
  "lode-mod-webhooks",
+ "lode-proxy",
  "lode-server",
  "lode-testkit",
  "rpassword",

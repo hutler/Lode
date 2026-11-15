@@ -80,6 +80,18 @@ is not allowed or a disabled user.
 
 `{ "server", "removed": bool, "revoked": bool }` (`revoked` absent when nothing was stored)
 
+### `lode proxy set <url>` / `clear` / `show`
+
+The caching proxy (0.3) used for the server's file content.
+
+- `set`: `{ "server", "proxy" }`. A URL that answers as a Lode server rather than a proxy is
+  a `usage` error; one that does not answer is saved with a warning.
+- `clear`: `{ "server", "removed": bool }`
+- `show`: `{ "server", "proxy": url|null, "source": "LODE_PROXY"|"settings", "reachable":
+  bool, "upstream": url|null }`
+
+`status --remote` reports the proxy as `remote.proxy` (null without one).
+
 ### `lode whoami`
 
 `{ "server", "name", "kind": "user"|"agent", "owner": name|null, "scopes": [..] }`
@@ -158,6 +170,7 @@ replaces the release list URL (a GitHub-style `releases` JSON).
   "invalid": [ { "local": "/abs/path", "reason": "…" } ],
   "remote": {
     "head_rev": 14,
+    "proxy": "https://lode-office.example.com/",
     "files": [
       { "path": "Content/Hero.uasset", "newer": false, "deleted_at_head": false,
         "locked_by": { "name": "bob", "kind": "user" }, "lock_workspace": "…", "mine": false }

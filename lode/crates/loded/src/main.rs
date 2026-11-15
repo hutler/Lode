@@ -96,6 +96,16 @@ enum Command {
         #[arg(long, hide = true)]
         service: bool,
     },
+    /// Run a caching proxy for a remote office: file content is fetched from the main server
+    /// once and served from a local cache (see proxy.toml in the operator guide).
+    Proxy {
+        /// Path to proxy.toml.
+        #[arg(long, required_unless_present = "example")]
+        config: Option<PathBuf>,
+        /// Print an example proxy.toml and exit.
+        #[arg(long, conflicts_with = "config")]
+        example: bool,
+    },
     /// First run: ask a few questions, write a checked loded.toml, initialize the data
     /// directory and set the admin password. Every answer can be given as a flag.
     Setup(setup::SetupArgs),
@@ -306,6 +316,23 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         } => {
             let cfg = ServerConfig::load(&config)?;
             serve(cfg, wait_for_lock, lode_server::shutdown_signal()).await
+        }
+        Command::Proxy { config, example } => {
+            if example {
+                print!("{}", lode_proxy::EXAMPLE_CONFIG);
+                return Ok(());
+            }
+            let config = config.context("--config is required")?;
+            let cfg = lode_proxy::ProxyConfig::load(&config)?;
+            let proxy = lode_proxy::BoundProxy::bind_default(&cfg).await?;
+            tracing::info!(
+                address = %proxy.local_addr(),
+                scheme = proxy.scheme(),
+                upstream = %cfg.upstream,
+                "caching proxy listening"
+            );
+            proxy.run(lode_server::shutdown_signal()).await?;
+            Ok(())
         }
         Command::Setup(args) => setup::run(args).await,
         Command::Service(cmd) => service::run(cmd),

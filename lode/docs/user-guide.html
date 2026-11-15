@@ -446,6 +446,11 @@ lode switch main -r 214       # exactly revision 214 of main</code></pre>
 <pre><code>cache_dir = "D:/lode-cache"
 cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 <p>Files are always copied out of the cache, so a build that edits them cannot damage it. Every entry is checked when read, and a damaged one is downloaded again. When the cache grows past its cap, the files used least recently are removed. Several <code>lode</code> processes can use it at the same time.</p>
+<p>In an office far from the server, an administrator can run a caching proxy there (chapter 3). Point Lode at it once per server and file content comes from the office copy, while everything else, such as history, commits and locks, still goes to the server:</p>
+<pre><code>lode proxy set https://lode-office.example.com
+lode proxy show               # which proxy, and whether it answers
+lode proxy clear              # download from the server again</code></pre>
+<p>The setting is kept per server in <code>settings.toml</code> under <code>[proxies]</code>; the variable <code>LODE_PROXY</code> overrides it for one shell or build agent (empty or <code>none</code> turns it off). If the proxy cannot be reached or fails, Lode warns once and downloads from the server instead. <code>lode status --remote</code> names the proxy in use. Lode Desk uses the same setting.</p>
 <p><code>lode --version --json</code> prints the client version and the server API version it speaks, for scripts that check compatibility.</p>
 <h3>Editors and other tools</h3>
 <p>A few options exist for programs that drive <code>lode</code>, such as editor plugins:</p>
@@ -648,6 +653,25 @@ connections = 8                           # read connections; writes use one mor
 <p>The connection is encrypted with TLS. <code>sslmode=verify-full</code> (or <code>verify-ca</code>) checks the database's certificate against the system's trusted roots and an optional <code>sslrootcert=/path/ca.pem</code>; <code>require</code> encrypts without checking the certificate, and <code>prefer</code>, the default, encrypts when the database offers it. Use <code>verify-full</code> for a database on another machine, and <code>disable</code> only on a private network.</p>
 <p><strong>One active server.</strong> A server holds a lock in the database while it runs, and a second <code>loded serve</code> on the same database refuses to start and names the active one. Started with <code>loded serve --wait-for-lock</code>, it waits instead and takes over within seconds when the active server stops or its connection to the database ends. Both servers must see the same file content: use S3 storage, or a data directory on a shared filesystem. If the active server loses its connection to the database, it stops, because the standby may already have taken over.</p>
 <p><strong>Backups.</strong> <code>loded backup</code> and scheduled backups copy <code>loded.toml</code> and the file content, but not the database; they write <code>DATABASE-BACKUP.txt</code> as a reminder. Back the database up with <code>pg_dump</code> or your provider's snapshots, and take the dump before the content is copied. <code>fsck</code>, garbage collection, obliterate and the admin pages work as before; the overview shows the Postgres version instead of the database size. <code>packaging/compose.postgres.yaml</code> is a ready example with Postgres in a container.</p>
+<h3>A caching proxy for a remote office</h3>
+<p>People far from the server download the same files over the same long link. A caching proxy in their office keeps a copy of each file the first time anyone there downloads it; after that, checkouts and updates get the content from the office. It runs from the same <code>loded</code> binary, needs no database and keeps no history:</p>
+<pre><code># proxy.toml
+listen = "0.0.0.0:443"
+data_dir = "/var/lib/lode-proxy"          # the Let's Encrypt account and certificate
+
+[tls]
+acme_domain = "lode-office.example.com"   # or cert = ... and key = ..., as in loded.toml
+
+[proxy]
+upstream = "https://lode.example.com"     # the main server
+cache_dir = "/var/cache/lode-proxy"
+cache_max_gib = 100                       # the default
+
+loded proxy --config /etc/lode/proxy.toml</code></pre>
+<p><code>loded proxy --example</code> prints a starting file, and <code>packaging/compose.proxy.yaml</code> runs it in a container. People then run <code>lode proxy set https://lode-office.example.com</code> (chapter 2).</p>
+<p><strong>What it caches.</strong> Only file content: whole files, and large files chunk by chunk, so a new version of a big asset fetches only the chunks that changed. Every object is checked against its hash before it is kept and again when it is served; a damaged copy is dropped and fetched again. When the cache passes its cap, the content used least recently is removed. Concurrent requests for the same file share one download. Everything else (history, commits, uploads, locks, shelves) is refused with a pointer to the main server, and clients send it there themselves.</p>
+<p><strong>Access stays with the server.</strong> The proxy stores no tokens. For each person and depot it asks the main server, with that person's own token, whether they may read the depot, and keeps the answer for a minute. The same request brings the depot's newly obliterated content, which the proxy then refuses and deletes from its cache. So a revoked reader, or an obliterated file, stops being served by the proxy within about a minute of the next request that needs it.</p>
+<p><strong>Watching it.</strong> <code>https://lode-office.example.com/admin/</code> shows the cache size, the hit rate, the bytes that did not cross the long link, and failed requests to the main server (<code>/admin/metrics.json</code> for monitoring). The page shows counts only, no names or paths. The counters start at zero when the proxy starts. To run it as a service, use a systemd unit or Windows service that runs <code>loded proxy --config …</code>; <code>loded service install</code> does not set up proxies yet.</p>
 
 <h1>4. TLS</h1>
 <p>Clients refuse unencrypted connections to remote servers, so one of these is required:</p>

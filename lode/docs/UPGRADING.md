@@ -107,7 +107,7 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   `GET /admin/acl/check` (`lode admin acl check --json`) gains the optional fields
   `depot_admin`, `matched` and `decided_by`; older clients ignore them.
 
-### 0.3.0: chunked large files, Postgres (M15)
+### 0.3.0: chunked large files, Postgres, caching proxy (M15)
 
 - Files of 16 MiB and more are stored as content-defined chunks (T150, T151). The file id
   does not change, so history, trees and older clients are unaffected: an 0.2 client still
@@ -119,3 +119,7 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   metadata in Postgres"). With Postgres, backups do not contain the database; use `pg_dump`.
 - Modules declare a Postgres form of each migration (`Migration::postgres`); a module without
   one cannot be enabled on a Postgres server. All modules shipped with Lode have one.
+- New `loded proxy` (T154): a caching proxy for remote offices, configured in its own
+  `proxy.toml`. Clients use it after `lode proxy set <url>` or with `LODE_PROXY`; nothing
+  changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
+  open to the depot's readers (ids only).

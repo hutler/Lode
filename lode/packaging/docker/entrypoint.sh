@@ -1,7 +1,8 @@
 #!/bin/sh
 # Entrypoint of the loded container image.
 #   serve (default)   set up $LODED_DATA on first start, then run the server
-#   anything else     passed to loded, e.g. `fsck --config /var/lib/lode/loded.toml`
+#   anything else     passed to loded, e.g. `fsck --config /var/lib/lode/loded.toml`, or
+#                     `proxy --config /etc/lode/proxy.toml` for a caching proxy
 #
 # First start:
 #   LODED_DOMAIN set            `loded setup` for built-in HTTPS on port 443 with a Let's

@@ -36,7 +36,7 @@ locks, which files in scope have a newer version and who holds their locks.
 
 With --json: {\"ok\":true,\"branch\",\"rev\",\"merges\":[{\"branch\",\"from_rev\",\"to_rev\"}],\"files\":[{\"path\",\"status\",\"copy_from\":{\"path\",\"rev\"}|null,
 \"moved\":bool,\"changelist\":name|null,\"locked\":bool,\"needs_lock\":bool,\"lock_required\":bool}],
-\"invalid\":[{\"local\",\"reason\"}]}, plus with --remote \"remote\":{\"head_rev\",\"files\":[{\"path\",
+\"invalid\":[{\"local\",\"reason\"}]}, plus with --remote \"remote\":{\"head_rev\",\"proxy\",\"files\":[{\"path\",
 \"newer\":bool,\"deleted_at_head\":bool,\"locked_by\":{\"name\",\"kind\"}|null,\"lock_workspace\"|null,\"mine\":bool}]}
 (only files with a newer version or a lock).
 `status` is one of modified, added, deleted, missing, conflicted, untracked, and unchanged with
@@ -302,5 +302,12 @@ async fn remote(ctx: &Ctx, ws: &Workspace, scope: &[DepotPath]) -> OpResult<Valu
         m.insert("path".into(), json!(path.as_str()));
         list.push(Value::Object(m));
     }
-    Ok(json!({ "head_rev": head, "files": list }))
+    let proxy = client.proxy_url().map(|u| u.to_string());
+    if let Some(p) = &proxy {
+        ctx.out.line("");
+        ctx.out.line(format!(
+            "File content is downloaded through the caching proxy {p}."
+        ));
+    }
+    Ok(json!({ "head_rev": head, "files": list, "proxy": proxy }))
 }
