@@ -6,10 +6,7 @@ F={'L':["X....","X....","X....","X....","X....","X....","XXXXX"],
    'D':["XXXX.","X...X","X...X","X...X","X...X","X...X","XXXX."],
    'E':["XXXXX","X....","X....","XXXX.","X....","X....","XXXXX"]}
 S=3  # font pixel size in base pixels
-sprite=Image.open('lode-mascot-64.png')
 Wd=64+8+4*(5*S+S)+4; H=64
-base=Image.new('RGBA',(Wd,H),(0,0,0,0))
-base.alpha_composite(sprite,(0,0))
 txt=Image.new('RGBA',(Wd,H),(0,0,0,0))
 x0=72; y0=(H-7*S)//2+4
 for i,ch in enumerate('LODE'):
@@ -27,8 +24,11 @@ for yy in range(H):
         if txt.getpixel((xx,yy))[3]==0:
             if any(0<=xx+dx<Wd and 0<=yy+dy<H and txt.getpixel((xx+dx,yy+dy))[3] for dx in (-1,0,1) for dy in (-1,0,1)):
                 out.putpixel((xx,yy),K)
-# drop shadow
-for yy in range(H-1,0,-1):
-    pass
-base.alpha_composite(out)
-base.resize((Wd*4,H*4),Image.NEAREST).save('lode-banner.png')
+# The README displays this at 592 px. Keep the wordmark on an integer grid
+# and sample the portrait from its master for high-density displays.
+scale = 8
+banner = out.resize((Wd * scale, H * scale), Image.Resampling.NEAREST)
+with Image.open('lode-mascot.png') as portrait:
+    sprite = portrait.convert('RGBA').resize((H * scale, H * scale), Image.Resampling.LANCZOS)
+banner.alpha_composite(sprite, (0, 0))
+banner.save('lode-banner.png')
