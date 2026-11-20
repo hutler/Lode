@@ -3,7 +3,7 @@
 [简体中文](README.zh-CN.md)
 
 <p align="center">
-  <img src="docs/logo/lode-banner.png" alt="Lode, a pixel-art miner with a helmet lamp and a gem" width="592">
+  <img src="docs/logo/lode-banner.png" alt="Lode wordmark beside a red-haired pixel-art miner holding a turquoise crystal" width="592">
 </p>
 
 Lode is a self-hosted version control system for teams that keep source code and large binary assets together. One server tracks revisions, file locks and reviewable shelves. Developers can work from the command line, artists from Lode Desk or Unreal Editor, and agents through the CLI or MCP.

@@ -3,7 +3,7 @@
 [English](README.md)
 
 <p align="center">
-  <img src="docs/logo/lode-banner.png" alt="Lode 吉祥物：戴着头灯、手持宝石的像素矿工" width="592">
+  <img src="docs/logo/lode-banner.png" alt="Lode 字标旁是一位手持青绿色水晶的红发像素矿工" width="592">
 </p>
 
 Lode 是一套可自行部署的版本控制系统，适合在同一项目中管理源代码和大型二进制资产的团队。服务器统一记录修订、文件锁以及供评审的搁置变更（shelf）。开发者可以使用命令行，美术人员可以使用 Lode Desk 或 Unreal 编辑器，智能体可以通过 CLI 或 MCP 访问项目。
