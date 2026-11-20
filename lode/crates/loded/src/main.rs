@@ -26,6 +26,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Print a shell completion script: bash, zsh, fish, powershell or elvish.
+    Completions {
+        /// The shell.
+        shell: clap_complete::Shell,
+    },
     /// Create a data directory: database, object store and a default loded.toml.
     Init {
         /// Directory to create or fill.
@@ -36,6 +41,10 @@ enum Command {
         /// Path to loded.toml.
         #[arg(long)]
         config: PathBuf,
+        /// Print a new random password instead of a token. It must be changed at the first
+        /// sign-in and stops working after 24 hours if unused.
+        #[arg(long)]
+        generate_password: bool,
     },
     /// Check depots for missing, damaged or inconsistent data. Exits with 1 on problems.
     Fsck {
@@ -47,6 +56,17 @@ enum Command {
         full: bool,
         /// Depots to check; all when none are given.
         depots: Vec<String>,
+    },
+    /// Check this server's setup: configuration, data directory, disk space, certificate,
+    /// domain, backups, database and store. It only reads. Exits with 0 when all is well, 2
+    /// on warnings only, 1 on a failure.
+    Doctor {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Copy the data directory to an empty directory while the server keeps running.
     Backup {
@@ -185,6 +205,11 @@ fn main() -> anyhow::Result<()> {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(shell, &mut Cli::command(), "loded", &mut std::io::stdout());
+            Ok(())
+        }
         Command::Init { data_dir } => {
             let report = lode_server::init(&data_dir).await?;
             println!(
@@ -200,7 +225,22 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             println!("{}", report.admin_token);
             Ok(())
         }
-        Command::ResetAdmin { config } => {
+        Command::ResetAdmin {
+            config,
+            generate_password: true,
+        } => {
+            let cfg = ServerConfig::load(&config)?;
+            let password = lode_server::generate_admin_password(&cfg).await?;
+            println!("Revoked every token of the admin user.");
+            println!(
+                "New admin password (shown only now; it must be changed at the first sign-in, \
+                 and it stops working after {} hours if unused):",
+                lode_server::GENERATED_PASSWORD_VALID.as_secs() / 3600
+            );
+            println!("{password}");
+            Ok(())
+        }
+        Command::ResetAdmin { config, .. } => {
             let cfg = ServerConfig::load(&config)?;
             let token = lode_server::reset_admin(&cfg).await?;
             println!("Revoked every token of the admin user.");
@@ -246,6 +286,21 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 std::process::exit(1);
             }
             Ok(())
+        }
+        Command::Doctor { config, json } => {
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let report = lode_server::doctor::run(&config, now).await;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                for line in report.lines() {
+                    println!("{line}");
+                }
+            }
+            match report.exit_code() {
+                0 => Ok(()),
+                code => std::process::exit(i32::from(code)),
+            }
         }
         Command::BackupCopy { config } => {
             let cfg = ServerConfig::load(&config)?;

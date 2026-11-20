@@ -1,4 +1,6 @@
-//! Admin sessions: a cookie holding an ordinary token, and the CSRF token of its forms.
+//! Web sessions: a cookie holding an ordinary token, and the CSRF token of its forms. The
+//! admin pages take an [`Admin`] (a session of a server administrator); the pages for
+//! everyone under `/web/` take a [`Viewer`] (any signed-in user, T173).
 //!
 //! Signing in issues a token named "web admin" that expires after [`SESSION_HOURS`] hours
 //! and puts it in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` when the server speaks
@@ -68,17 +70,33 @@ pub(crate) fn csrf_for(token: &str) -> String {
 
 /// The value of cookie `name`.
 pub(crate) fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    cookies(headers, name).into_iter().next()
+}
+
+/// Every value of cookie `name`: a browser that kept a session cookie of an older release
+/// (path `/admin`) sends it beside the current one (path `/`).
+fn cookies(headers: &HeaderMap, name: &str) -> Vec<String> {
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(k, _)| *k == name)
+        .filter(|(k, _)| *k == name)
         .map(|(_, v)| v.trim().to_owned())
+        .collect()
 }
 
-/// A `Set-Cookie` value for the admin pages. `max_age` 0 removes the cookie.
+/// Removes the session cookie of releases before T173, which lived under `/admin` only.
+pub(crate) fn clear_legacy_session(secure: bool) -> HeaderValue {
+    let secure = if secure { "; Secure" } else { "" };
+    let text =
+        format!("{SESSION_COOKIE}=; Path=/admin; Max-Age=0; HttpOnly; SameSite=Strict{secure}");
+    HeaderValue::from_str(&text).unwrap_or_else(|_| HeaderValue::from_static(""))
+}
+
+/// A `Set-Cookie` value for the web pages (`/admin/` and `/web/`). `max_age` 0 removes the
+/// cookie. The API never reads cookies, so the path `/` gives it no way in.
 pub(crate) fn set_cookie(
     name: &str,
     value: &str,
@@ -89,7 +107,7 @@ pub(crate) fn set_cookie(
     let same_site = if strict { "Strict" } else { "Lax" };
     let secure = if secure { "; Secure" } else { "" };
     let text = format!(
-        "{name}={value}; Path=/admin; Max-Age={max_age}; HttpOnly; SameSite={same_site}{secure}"
+        "{name}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite={same_site}{secure}"
     );
     // Names are constants and values are base64url, hex or percent-encoded text.
     HeaderValue::from_str(&text).unwrap_or_else(|_| HeaderValue::from_static(""))
@@ -132,7 +150,9 @@ pub(crate) fn redirect_with_note(ctx: &Ctx, to: &str, note: &str) -> Response {
 
 /// Where a visitor who is not signed in goes: the sign-in page, then back to `path`.
 fn to_sign_in(ctx: &Ctx, path: &str, clear: bool) -> Response {
-    let next = if path.starts_with("/admin/") && !path.starts_with("/admin/sign-") {
+    let next = if (path.starts_with("/admin/") && !path.starts_with("/admin/sign-"))
+        || path.starts_with("/web/")
+    {
         format!("{}?next={}", super::signin::SIGN_IN, html::encode(path))
     } else {
         super::signin::SIGN_IN.to_owned()
@@ -143,6 +163,8 @@ fn to_sign_in(ctx: &Ctx, path: &str, clear: bool) -> Response {
             header::SET_COOKIE,
             set_cookie(SESSION_COOKIE, "", 0, ctx.secure(), true),
         );
+        r.headers_mut()
+            .append(header::SET_COOKIE, clear_legacy_session(ctx.secure()));
     }
     r
 }
@@ -151,7 +173,8 @@ fn to_sign_in(ctx: &Ctx, path: &str, clear: bool) -> Response {
 fn not_admin(ctx: &Ctx, admin: &Admin) -> Response {
     let body = html!(
         "<h1>No access</h1><p class=\"error\">This account is not a server administrator.</p>\
-         <p>Signed in as <strong>{}</strong>. Sign out and sign in as a server administrator.</p>\
+         <p>Signed in as <strong>{}</strong>. <a href=\"/web/\">Browse your depots</a>, or sign out \
+         and sign in as a server administrator.</p>\
          <form method=\"post\" action=\"{}\">{}<button type=\"submit\">Sign out</button></form>",
         admin.name(),
         super::signin::SIGN_OUT,
@@ -165,10 +188,19 @@ fn not_admin(ctx: &Ctx, admin: &Admin) -> Response {
 /// The session of a request, if its cookie names a valid token. `Err(true)` when there was
 /// a cookie that no longer works.
 async fn session(parts: &Parts, ctx: &Ctx) -> Result<Admin, bool> {
-    let token = cookie(&parts.headers, SESSION_COOKIE)
-        .filter(|t| !t.is_empty())
-        .ok_or(false)?;
-    let caller = authenticate(&ctx.state, &token).await.map_err(|_| true)?;
+    let mut found = None;
+    let mut had_cookie = false;
+    for token in cookies(&parts.headers, SESSION_COOKIE) {
+        if token.is_empty() {
+            continue;
+        }
+        had_cookie = true;
+        if let Ok(caller) = authenticate(&ctx.state, &token).await {
+            found = Some((token, caller));
+            break;
+        }
+    }
+    let (token, caller) = found.ok_or(had_cookie)?;
     let note = cookie(&parts.headers, NOTE_COOKIE)
         .filter(|n| !n.is_empty())
         .map(|n| decode(&n));
@@ -189,6 +221,65 @@ impl FromRequestParts<Ctx> for Admin {
             Ok(admin) => Err(not_admin(ctx, &admin)),
             Err(had_cookie) => Err(to_sign_in(ctx, parts.uri.path(), had_cookie)),
         }
+    }
+}
+
+/// Any signed-in user, for the pages under `/web/`: what they see is what the API lets
+/// their token see.
+#[derive(Debug, Clone)]
+pub(crate) struct Viewer(pub(crate) Admin);
+
+impl Viewer {
+    /// Whether this user is also a server administrator (for a link to the admin pages).
+    pub(crate) fn is_admin(&self, ctx: &Ctx) -> bool {
+        ctx.state.permissions().is_server_admin(&self.0.caller)
+    }
+}
+
+impl FromRequestParts<Ctx> for Viewer {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, ctx: &Ctx) -> Result<Self, Response> {
+        match session(parts, ctx).await {
+            Ok(s) => Ok(Viewer(s)),
+            Err(had_cookie) => Err(to_sign_in(ctx, parts.uri.path(), had_cookie)),
+        }
+    }
+}
+
+impl OptionalFromRequestParts<Ctx> for Viewer {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        ctx: &Ctx,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(session(parts, ctx).await.ok().map(Viewer))
+    }
+}
+
+/// A form a signed-in user submitted on a `/web/` page, with its CSRF token checked.
+pub(crate) struct ViewerPost {
+    pub(crate) viewer: Viewer,
+    pub(crate) fields: Fields,
+}
+
+impl FromRequest<Ctx> for ViewerPost {
+    type Rejection = Response;
+
+    async fn from_request(req: Request, ctx: &Ctx) -> Result<Self, Response> {
+        let (mut parts, body) = req.into_parts();
+        let viewer = <Viewer as FromRequestParts<Ctx>>::from_request_parts(&mut parts, ctx).await?;
+        let req = Request::from_parts(parts, body);
+        let Form(pairs) = Form::<Vec<(String, String)>>::from_request(req, ctx)
+            .await
+            .map_err(|_| expired_form(ctx, None))?;
+        let fields = Fields(pairs);
+        let sent = fields.get("csrf").unwrap_or("");
+        if !ct_eq(sent.as_bytes(), viewer.0.csrf.as_bytes()) {
+            return Err(expired_form(ctx, None));
+        }
+        Ok(ViewerPost { viewer, fields })
     }
 }
 
@@ -308,7 +399,7 @@ mod tests {
         let v = set_cookie(SESSION_COOKIE, "t", 60, true, true);
         assert_eq!(
             v.to_str().unwrap_or(""),
-            "lode_admin=t; Path=/admin; Max-Age=60; HttpOnly; SameSite=Strict; Secure"
+            "lode_admin=t; Path=/; Max-Age=60; HttpOnly; SameSite=Strict; Secure"
         );
         let v = set_cookie(SIGN_IN_COOKIE, "t", 60, false, false);
         assert!(v.to_str().unwrap_or("").ends_with("SameSite=Lax"));

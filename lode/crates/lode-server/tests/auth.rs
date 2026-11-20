@@ -17,6 +17,7 @@ const T0: i64 = 1_800_000_000_000;
 
 struct H {
     router: Router,
+    state: lode_server::AppState,
     clock: ManualClock,
     admin: String,
     _dir: tempfile::TempDir,
@@ -36,7 +37,8 @@ async fn harness() -> H {
     .await
     .unwrap();
     H {
-        router: lode_server::router(state),
+        router: lode_server::router(state.clone()),
+        state,
         clock,
         admin: report.admin_token,
         _dir: dir,
@@ -152,6 +154,66 @@ async fn login_with_right_and_wrong_password() {
     let who = h.get("/api/v1/auth/whoami", &token).await;
     assert_eq!(who.body["principal"]["name"], "ana");
     assert_eq!(who.body["principal"]["kind"], "user");
+}
+
+#[tokio::test]
+async fn own_password_change_and_must_change_passwords() {
+    let h = harness().await;
+    h.add_user("ana", "correct horse").await;
+    let change = |name: &'static str, old: &'static str, new: &'static str| {
+        h.send(
+            "POST",
+            "/api/v1/auth/password",
+            None,
+            Some(json!({ "name": name, "password": old, "new_password": new })),
+            Some(ADDR),
+        )
+    };
+    let r = change("ana", "wrong horse", "battery staple").await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
+    let r = change("ana", "correct horse", "short").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let r = change("ana", "correct horse", "battery staple").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.body["name"], "ana");
+    assert_eq!(
+        h.login("ana", "correct horse", ADDR).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        h.login("ana", "battery staple", ADDR).await.status,
+        StatusCode::OK
+    );
+
+    // A must-change password signs in only through a change, until its deadline.
+    let mark = |by: i64| {
+        h.state.meta().write(move |tx| {
+            let p = lode_meta::Reads::principal_by_name(tx, "ana")?.unwrap();
+            tx.set_password(p.id, p.password_hash.as_deref(), Some(by))
+        })
+    };
+    mark(T0 + 60_000).await.unwrap();
+    let r = h.login("ana", "battery staple", ADDR).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(r.body["details"]["reason"], "password_change_required");
+    let r = change("ana", "battery staple", "staple battery").await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        h.login("ana", "staple battery", ADDR).await.status,
+        StatusCode::OK
+    );
+
+    mark(T0 + 60_000).await.unwrap();
+    h.clock.advance_ms(61_000);
+    let r = h.login("ana", "staple battery", ADDR).await;
+    assert_eq!(
+        r.body["details"]["reason"], "password_expired",
+        "{}",
+        r.text
+    );
+    let r = change("ana", "staple battery", "too late now").await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(r.body["details"]["reason"], "password_expired");
 }
 
 #[tokio::test]

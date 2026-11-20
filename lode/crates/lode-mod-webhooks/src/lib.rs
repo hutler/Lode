@@ -5,8 +5,13 @@
 //! touches the network, so a dead receiver cannot hold the outbox back. A background worker
 //! sends deliveries, one at a time per hook and oldest first, signing each body with the
 //! hook's secret, and retries failures on a fixed schedule for 24 hours.
+//!
+//! A hook's `format` (T175) picks the body: the signed JSON event (`lode`), or one line of
+//! text for a chat service (`slack`, `discord`, `telegram`, see [`chat`]).
 
 #![forbid(unsafe_code)]
+
+pub mod chat;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -22,8 +27,8 @@ use lode_meta::{vals, Row};
 use lode_meta::{MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads, WriteTx};
 use lode_proto::consts::paths;
 use lode_proto::webhooks::{
-    CreateWebhookRequest, CreatedWebhook, DeliveryList, DeliveryState, DeliveryView, WebhookList,
-    WebhookView, EVENTS, HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE, PING_EVENT,
+    CreateWebhookRequest, CreatedWebhook, DeliveryList, DeliveryState, DeliveryView, WebhookFormat,
+    WebhookList, WebhookView, EVENTS, HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE, PING_EVENT,
 };
 use lode_proto::PrincipalRef;
 use lode_server::auth::{ms_to_time, SCOPE_ADMIN};
@@ -121,6 +126,11 @@ const MIGRATIONS: &[Migration] = &[Migration {
           CREATE INDEX mod_webhooks_delivery_pending
               ON mod_webhooks_delivery (state, hook_id, id);
           CREATE INDEX mod_webhooks_delivery_created ON mod_webhooks_delivery (created_at);",
+}, Migration {
+    version: 2,
+    name: "format",
+    sql: "ALTER TABLE mod_webhooks_hook ADD COLUMN format TEXT NOT NULL DEFAULT 'lode';",
+    postgres: "ALTER TABLE mod_webhooks_hook ADD COLUMN format TEXT COLLATE \"C\" NOT NULL DEFAULT 'lode';",
 }];
 
 /// The webhooks module. Clones share one HTTP client and one wake-up signal.
@@ -427,6 +437,7 @@ fn principal_ref(tx: &dyn Reads, id: i64) -> Result<PrincipalRef, MetaError> {
 struct HookRow {
     id: i64,
     url: String,
+    format: WebhookFormat,
     events: String,
     branch_glob: Option<String>,
     active: bool,
@@ -434,9 +445,10 @@ struct HookRow {
     created_at: Millis,
 }
 
-const HOOK_COLS: &str = "id, url, events, branch_glob, active, created_by, created_at";
+const HOOK_COLS: &str = "id, url, events, branch_glob, active, created_by, created_at, format";
 
 fn hook_row(r: &Row) -> Result<HookRow, MetaError> {
+    let format: String = r.get(7)?;
     Ok(HookRow {
         id: r.get(0)?,
         url: r.get(1)?,
@@ -445,6 +457,7 @@ fn hook_row(r: &Row) -> Result<HookRow, MetaError> {
         active: r.get::<i64>(4)? != 0,
         created_by: r.get(5)?,
         created_at: r.get(6)?,
+        format: WebhookFormat::parse(&format).unwrap_or_default(),
     })
 }
 
@@ -455,6 +468,7 @@ fn hook_view(tx: &dyn Reads, depot: &str, h: HookRow) -> Result<WebhookView, Met
         url: h.url,
         events: serde_json::from_str(&h.events).unwrap_or_default(),
         branch: h.branch_glob,
+        format: h.format,
         active: h.active,
         created_by: principal_ref(tx, h.created_by)?,
         created_at: ms_to_time(h.created_at),
@@ -591,6 +605,12 @@ async fn create(
 ) -> ApiResult<(StatusCode, Json<CreatedWebhook>)> {
     let (depot_id, name) = admin_depot(&ctx, &caller, &depot).await?;
     check_url(&req.url, ctx.config().webhooks.allow_http)?;
+    if req.format == WebhookFormat::Telegram && chat::telegram_chat(&req.url).is_none() {
+        return Err(ApiError::invalid_request(
+            "a telegram hook's URL must name the chat: \
+             https://api.telegram.org/bot<token>/sendMessage?chat_id=<chat>",
+        ));
+    }
     let events = check_events(&req.events)?;
     let branch = match req.branch.as_deref().map(str::trim) {
         None | Some("") => None,
@@ -616,15 +636,26 @@ async fn create(
     let url = req.url.clone();
     let events_json = serde_json::to_string(&events).map_err(|_| ApiError::internal())?;
     let key = secret.clone().into_bytes();
+    let format = req.format.as_str();
     let hook = ctx
         .meta()
         .store()
         .write(move |tx| {
             let id: i64 = tx.conn().value(
                 "INSERT INTO mod_webhooks_hook
-                     (depot_id, url, secret, events, branch_glob, active, created_by, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7) RETURNING id",
-                vals![depot_id.0, &url, &key, &events_json, &branch, me, now],
+                     (depot_id, url, secret, events, branch_glob, active, created_by, created_at,
+                      format)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8) RETURNING id",
+                vals![
+                    depot_id.0,
+                    &url,
+                    &key,
+                    &events_json,
+                    &branch,
+                    me,
+                    now,
+                    format
+                ],
             )?;
             let row = tx.conn().query_one(
                 &format!("SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE id = ?1"),
@@ -717,23 +748,42 @@ async fn ping(
     let (depot_id, name) = admin_depot(&ctx, &caller, &depot).await?;
     let id = parse_id(&id)?;
     let now = ctx.clock().now_ms();
-    let body = json!({
+    let event = Event {
+        id: 0,
+        event: PING_EVENT.to_owned(),
+        depot: Some(name),
+        created_at: ms_to_time(now),
+        data: json!({ "hook_id": id }),
+    };
+    let lode_body = json!({
         "id": 0,
         "event": PING_EVENT,
-        "depot": name,
+        "depot": event.depot,
         "created_at": ms_to_time(now)
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap_or_default(),
         "data": { "hook_id": id },
     })
     .to_string();
+    let base = ctx.config().public_base();
     let view = ctx
         .meta()
         .store()
         .write(move |tx| {
-            if !hook_exists(tx, depot_id, id)? {
+            let Some(hook) = tx.conn().query_opt(
+                &format!(
+                    "SELECT {HOOK_COLS} FROM mod_webhooks_hook WHERE id = ?1 AND depot_id = ?2"
+                ),
+                vals![id, depot_id.0],
+                hook_row,
+            )?
+            else {
                 return Ok(None);
-            }
+            };
+            let body = match hook.format {
+                WebhookFormat::Lode => lode_body,
+                f => chat::body(f, &hook.url, &event, base.as_deref()),
+            };
             let did: i64 = tx.conn().value(
                 "INSERT INTO mod_webhooks_delivery
                      (hook_id, outbox_id, event, body, state, attempts, next_attempt_at, created_at)
@@ -753,7 +803,12 @@ async fn ping(
 }
 
 /// Records one pending delivery per matching hook. Returns how many were new.
-fn enqueue(tx: &WriteTx<'_>, event: &Event, now: Millis) -> Result<usize, MetaError> {
+fn enqueue(
+    tx: &WriteTx<'_>,
+    event: &Event,
+    now: Millis,
+    base: Option<&str>,
+) -> Result<usize, MetaError> {
     let Some(depot) = event.depot.as_deref() else {
         return Ok(0);
     };
@@ -778,11 +833,18 @@ fn enqueue(tx: &WriteTx<'_>, event: &Event, now: Millis) -> Result<usize, MetaEr
                 continue;
             }
         }
-        let body = match &body {
-            Some(b) => b,
-            None => body.insert(serde_json::to_string(event).map_err(|e| {
-                MetaError::BadValue(format!("cannot encode event {}: {e}", event.id))
-            })?),
+        let chat_body;
+        let body = match h.format {
+            WebhookFormat::Lode => match &body {
+                Some(b) => b,
+                None => body.insert(serde_json::to_string(event).map_err(|e| {
+                    MetaError::BadValue(format!("cannot encode event {}: {e}", event.id))
+                })?),
+            },
+            f => {
+                chat_body = chat::body(f, &h.url, event, base);
+                &chat_body
+            }
         };
         added += tx.conn().execute(
             "INSERT INTO mod_webhooks_delivery
@@ -797,6 +859,26 @@ fn enqueue(tx: &WriteTx<'_>, event: &Event, now: Millis) -> Result<usize, MetaEr
 impl Module for Webhooks {
     fn name(&self) -> &'static str {
         NAME
+    }
+
+    fn metrics(&self, tx: &dyn Reads) -> Result<Vec<lode_server::metrics::Sample>, MetaError> {
+        // Deliveries are kept for a while after they settle, so these are recent counts.
+        let rows = tx.db().query(
+            "SELECT state, count(*) FROM mod_webhooks_delivery GROUP BY state ORDER BY state",
+            vals![],
+            |r| Ok((r.get::<String>(0)?, r.get::<i64>(1)?)),
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|(state, n)| {
+                lode_server::metrics::Sample::gauge(
+                    "lode_webhook_deliveries",
+                    "Webhook deliveries kept on the server, by state (pending, ok, failed).",
+                    n as f64,
+                )
+                .label("state", state)
+            })
+            .collect())
     }
 
     fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
@@ -839,10 +921,11 @@ impl Module for Webhooks {
             }
             let now = ctx.clock().now_ms();
             let ev = event.clone();
+            let base = ctx.config().public_base();
             let added = ctx
                 .meta()
                 .store()
-                .write(move |tx| enqueue(tx, &ev, now))
+                .write(move |tx| enqueue(tx, &ev, now, base.as_deref()))
                 .await?;
             if added > 0 {
                 self.inner.wake.notify_one();

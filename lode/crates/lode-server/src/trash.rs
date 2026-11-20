@@ -143,6 +143,9 @@ async fn restore_handler(
     Ok(Json(DepotView {
         name: d.name,
         created_at: ms_to_time(d.created_at),
+        revisions: None,
+        last_commit_at: None,
+        size_bytes: None,
     }))
 }
 

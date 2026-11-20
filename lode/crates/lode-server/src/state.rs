@@ -49,6 +49,8 @@ struct Inner {
     last_backup: Mutex<Option<BackupRun>>,
     last_backup_copy: Mutex<Option<BackupRun>>,
     listening: std::sync::OnceLock<std::net::SocketAddr>,
+    sizes: crate::sizes::SizeCache,
+    counters: crate::metrics::Counters,
 }
 
 /// The outcome of the last scheduled backup this server made (T140).
@@ -79,6 +81,9 @@ impl AppState {
         modules: Modules,
     ) -> Self {
         let mut scopes = ScopeRegistry::core();
+        if config.metrics.enabled {
+            scopes.extend([crate::metrics::SCOPE_METRICS]);
+        }
         for m in &modules {
             scopes.extend_defs(m.scopes());
         }
@@ -112,6 +117,8 @@ impl AppState {
                 failpoints: Arc::default(),
                 started_at,
                 last_backup: Mutex::new(None),
+                sizes: crate::sizes::SizeCache::default(),
+                counters: crate::metrics::Counters::default(),
                 last_backup_copy: Mutex::new(None),
                 listening: std::sync::OnceLock::new(),
             }),
@@ -123,6 +130,11 @@ impl AppState {
         // Freshly created, so the cell is empty and this cannot fail.
         let _ = state.inner.tools.set(tools);
         state
+    }
+
+    /// Request and byte counters for `/metrics`.
+    pub fn counters(&self) -> &crate::metrics::Counters {
+        &self.inner.counters
     }
 
     /// Metadata store.
@@ -295,6 +307,12 @@ impl AppState {
     /// port 0).
     pub fn set_listening(&self, addr: std::net::SocketAddr) {
         let _ = self.inner.listening.set(addr);
+    }
+
+    /// Measured directory sizes (depots, store, database), shared by the admin pages and
+    /// `GET /depots`.
+    pub fn sizes(&self) -> &crate::sizes::SizeCache {
+        &self.inner.sizes
     }
 
     /// The address the server listens on: the bound one when known, else the configured one.

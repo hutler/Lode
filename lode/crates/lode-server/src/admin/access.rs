@@ -26,6 +26,28 @@ pub(crate) struct CheckQuery {
     branch: String,
     #[serde(default)]
     path: String,
+    /// Rules list filter: only rules that can apply in this depot.
+    #[serde(default)]
+    in_depot: String,
+    /// Rules list filter: a user or group name, or `all` for rules for everyone.
+    #[serde(default)]
+    who: String,
+}
+
+impl CheckQuery {
+    /// Whether the rules list shows `r` (the same rules `GET /admin/acl?depot=&subject=` gives).
+    fn shows(&self, r: &AclRule) -> bool {
+        let depot_ok = self.in_depot.is_empty()
+            || r.depot.is_none()
+            || r.depot.as_deref() == Some(self.in_depot.as_str());
+        let who_ok = match (self.who.as_str(), &r.subject) {
+            ("", _) => true,
+            ("all", AclSubject::All) => true,
+            (w, AclSubject::User(n) | AclSubject::Group(n)) => n == w,
+            _ => false,
+        };
+        depot_ok && who_ok
+    }
 }
 
 fn level_text(l: Option<AccessLevel>) -> &'static str {
@@ -105,9 +127,11 @@ async fn page(ctx: &Ctx, admin: &Admin, q: &CheckQuery, top: Html) -> Response {
         .unwrap_or_default();
 
     let csrf = admin.csrf_field();
+    let shown = rules.iter().enumerate().filter(|(_, r)| q.shows(r)).count();
     let rows: Html = rules
         .iter()
         .enumerate()
+        .filter(|(_, r)| q.shows(r))
         .map(|(i, r)| {
             let id = r.id.unwrap_or_default();
             let mark = if Some(id) == decided {
@@ -147,6 +171,8 @@ async fn page(ctx: &Ctx, admin: &Admin, q: &CheckQuery, top: Html) -> Response {
         .collect();
     let table = if rules.is_empty() {
         html!("<p class=\"muted\">No rules: only administrators see anything.</p>")
+    } else if shown == 0 {
+        html!("<p class=\"muted\">No rule matches the filter.</p>")
     } else {
         html!(
             "<table class=\"wide\"><thead><tr><th class=\"num\">Order</th><th class=\"num\">Rule</th>\
@@ -229,7 +255,11 @@ async fn page(ctx: &Ctx, admin: &Admin, q: &CheckQuery, top: Html) -> Response {
          <section><h2 id=\"rules\">Rules</h2><p class=\"muted\">Rules are read in this order. \
          Without an allow, a path is invisible; a deny at a level takes away that level and every \
          higher one; otherwise the highest allow counts. An allow admin on every depot makes a \
-         server administrator.</p>{}</section>\
+         server administrator.</p>\
+         <form class=\"row\" method=\"get\" action=\"/admin/access#rules\">\
+         <label>In depot<select name=\"in_depot\">{}</select></label>\
+         <label>For<input type=\"text\" name=\"who\" value=\"{}\" placeholder=\"ana, artists or all\"/></label>\
+         <button type=\"submit\">Filter</button></form>{}</section>\
          <section><h2 id=\"check\">Check access</h2>\
          <form class=\"row\" method=\"get\" action=\"/admin/access#check\">\
          <label>Who<input type=\"text\" name=\"principal\" value=\"{}\" required=\"required\" placeholder=\"ana\"/></label>\
@@ -251,6 +281,8 @@ async fn page(ctx: &Ctx, admin: &Admin, q: &CheckQuery, top: Html) -> Response {
          <option value=\"write\">Write</option><option value=\"admin\">Admin</option></select></label>\
          <button type=\"submit\" class=\"primary\">Add rule</button></form></section>",
         top,
+        depot_options(&q.in_depot, true),
+        q.who,
         table,
         q.principal,
         depot_options(&q.depot, false),

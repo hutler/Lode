@@ -49,6 +49,9 @@ fn view(d: &DepotRow) -> DepotView {
     DepotView {
         name: d.name.clone(),
         created_at: ms_to_time(d.created_at),
+        revisions: None,
+        last_commit_at: None,
+        size_bytes: None,
     }
 }
 
@@ -58,13 +61,35 @@ async fn list(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<D
 }
 
 /// The depots `caller` can see, as `GET /depots` returns them.
+///
+/// Server administrators also get each depot's newest revision, its time and the stored size
+/// (T179); others do not, since a path rule may hide what those revisions touched.
 pub async fn list_depots(state: &AppState, caller: &Caller) -> ApiResult<DepotList> {
-    let rows = state.meta().read(|tx| tx.depots()).await?;
-    let depots = rows
+    let admin = state.permissions().is_server_admin(caller);
+    let rows = state
+        .meta()
+        .read(move |tx| {
+            let mut out = Vec::new();
+            for d in tx.depots()? {
+                let last = if admin { tx.last_revision(d.id)? } else { None };
+                out.push((d, last));
+            }
+            Ok(out)
+        })
+        .await?;
+    let mut depots = Vec::new();
+    for (d, last) in rows
         .iter()
-        .filter(|d| state.permissions().depot(caller, d.id).is_visible())
-        .map(view)
-        .collect();
+        .filter(|(d, _)| state.permissions().depot(caller, d.id).is_visible())
+    {
+        let mut v = view(d);
+        if admin {
+            v.revisions = Some(last.as_ref().map_or(0, |r| r.num));
+            v.last_commit_at = last.as_ref().map(|r| ms_to_time(r.created_at));
+            v.size_bytes = crate::sizes::depot_size(state, d.id).await;
+        }
+        depots.push(v);
+    }
     Ok(DepotList { depots })
 }
 

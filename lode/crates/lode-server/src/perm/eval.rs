@@ -445,6 +445,7 @@ mod tests {
                 created_at: 0,
                 sso_id: None,
                 deleted_at: None,
+                password_change_by: None,
             },
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
             token_id: TokenId(1),

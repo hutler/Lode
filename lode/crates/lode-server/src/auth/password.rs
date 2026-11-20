@@ -30,6 +30,20 @@ pub fn verify_password(password: &str, stored: Option<&str>) -> bool {
     }
 }
 
+/// Letters and digits that cannot be mistaken for one another when read aloud or copied by
+/// hand (no 0/O, 1/l/I).
+const GENERATED_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/// Length of a generated password: about 116 bits.
+pub const GENERATED_PASSWORD_LEN: usize = 20;
+
+/// A random password for a first sign-in, from an unambiguous alphabet.
+pub fn generate_password(rng: &mut impl rand::RngCore) -> String {
+    use rand::Rng;
+    (0..GENERATED_PASSWORD_LEN)
+        .map(|_| char::from(GENERATED_ALPHABET[rng.gen_range(0..GENERATED_ALPHABET.len())]))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -43,5 +57,12 @@ mod tests {
         assert!(!verify_password("wrong horse", Some(&h)));
         assert!(!verify_password("correct horse", None));
         assert!(!verify_password("correct horse", Some("not a hash")));
+    }
+
+    #[test]
+    fn generated_passwords_use_the_unambiguous_alphabet() {
+        let p = generate_password(&mut rand::rngs::OsRng);
+        assert_eq!(p.len(), GENERATED_PASSWORD_LEN);
+        assert!(p.bytes().all(|b| GENERATED_ALPHABET.contains(&b)));
     }
 }

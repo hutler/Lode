@@ -13,12 +13,15 @@ pub mod checks;
 pub mod commit;
 pub mod consts;
 pub mod depot;
+pub mod doctor;
 pub mod error;
 pub mod feed;
+pub mod links;
 pub mod locks;
 pub mod read;
 pub mod shelves;
 pub mod webhooks;
+pub mod x509;
 
 pub use lode_core::{Change, ChangeAction, CopyFrom, DepotPath, EntryKind, ErrorCode, ObjectId};
 
