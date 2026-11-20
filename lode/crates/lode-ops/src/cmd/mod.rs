@@ -18,6 +18,7 @@ pub mod init;
 pub mod locks;
 pub mod login;
 pub mod merge;
+pub mod proxy;
 pub mod revert;
 pub mod shelve;
 pub mod status;

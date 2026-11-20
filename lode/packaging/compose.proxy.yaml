@@ -1,0 +1,37 @@
+# Lode caching proxy for a remote office (T154): file content is fetched from the main server
+# once and then served from the cache in the `lode-proxy-cache` volume. People point their
+# clients at it with `lode proxy set https://lode-office.example.com` (or LODE_PROXY); all
+# other requests still go to the main server, which also decides who may read what.
+#
+#   1. Write proxy.toml next to this file, for example:
+#
+#        listen = "0.0.0.0:443"
+#        data_dir = "/var/lib/lode-proxy"           # the ACME account and certificate
+#        [tls]
+#        acme_domain = "lode-office.example.com"   # Let's Encrypt; or cert/key files
+#        [proxy]
+#        upstream = "https://lode.example.com"
+#        cache_dir = "/var/cache/lode-proxy"
+#        cache_max_gib = 100
+#
+#      (`docker run --rm ghcr.io/hutler/loded:latest proxy --example` prints a starting file.)
+#   2. docker compose -f compose.proxy.yaml up -d
+#
+# The proxy keeps no tokens and no history; losing the cache volume only costs downloads.
+services:
+  lode-proxy:
+    image: ghcr.io/hutler/loded:latest
+    restart: unless-stopped
+    command: ["proxy", "--config", "/etc/lode/proxy.toml"]
+    ports:
+      - "443:443"
+    volumes:
+      - ./proxy.toml:/etc/lode/proxy.toml:ro
+      - lode-proxy-cache:/var/cache/lode-proxy
+      # data_dir: the ACME account and certificate survive a restart.
+      - lode-proxy-state:/var/lib/lode-proxy
+    stop_grace_period: 30s
+
+volumes:
+  lode-proxy-cache:
+  lode-proxy-state:

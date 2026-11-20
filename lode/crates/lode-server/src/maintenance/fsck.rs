@@ -54,6 +54,10 @@ impl Fsck<'_> {
         }
         let ok = match self.state.blobs().get_stored(self.depot, &id).await {
             Ok(s) if s.kind == kind => true,
+            Ok(s) if s.kind == ObjectKind::ChunkList && kind == ObjectKind::Blob => {
+                drop(s);
+                self.chunks(id, at).await
+            }
             Ok(s) => {
                 self.problem(
                     Some(id),
@@ -72,6 +76,49 @@ impl Fsck<'_> {
             }
         };
         self.checked.insert(id, ok);
+        ok
+    }
+
+    /// Checks that every chunk of a chunked file is stored with the size the list gives.
+    async fn chunks(&mut self, id: ObjectId, at: &str) -> bool {
+        let list = match self.state.chunked().chunk_list(self.depot, &id).await {
+            Ok(Some(l)) => l,
+            Ok(None) => return true,
+            Err(e) => {
+                self.problem(Some(id), format!("{at}: chunk list {id} is damaged: {e}"));
+                return false;
+            }
+        };
+        let mut ok = true;
+        for c in &list.chunks {
+            if let Some(known) = self.checked.get(&c.id) {
+                ok &= *known;
+                continue;
+            }
+            let fine = match self.state.blobs().get_stored(self.depot, &c.id).await {
+                Ok(s) if s.kind == ObjectKind::Blob && s.raw_len == u64::from(c.size) => true,
+                Ok(_) => {
+                    self.problem(
+                        Some(id),
+                        format!("{at}: chunk {} of {id} differs from its list", c.id),
+                    );
+                    false
+                }
+                Err(StoreError::NotFound(_)) => {
+                    self.problem(Some(id), format!("{at}: chunk {} of {id} is missing", c.id));
+                    false
+                }
+                Err(e) => {
+                    self.problem(
+                        Some(id),
+                        format!("{at}: chunk {} of {id} is damaged: {e}", c.id),
+                    );
+                    false
+                }
+            };
+            self.checked.insert(c.id, fine);
+            ok &= fine;
+        }
         ok
     }
 

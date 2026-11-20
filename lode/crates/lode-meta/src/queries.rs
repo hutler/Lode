@@ -1,8 +1,9 @@
 //! Query methods. Reads are on the [`Reads`] trait, which both transaction types implement;
 //! writes are inherent methods of [`WriteTx`].
 
+use crate::sql::{Row, Sql, Val};
+use crate::vals;
 use lode_core::{DepotId, ObjectId};
-use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::error::unique;
 use crate::rows::*;
@@ -12,56 +13,16 @@ fn to_i64(v: u64) -> Result<i64> {
     i64::try_from(v).map_err(|_| MetaError::BadValue(format!("{v} does not fit in an i64")))
 }
 
-fn get_u64(r: &Row<'_>, i: usize) -> rusqlite::Result<u64> {
-    let v: i64 = r.get(i)?;
-    u64::try_from(v).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Integer, Box::new(e))
-    })
-}
-
-fn get_opt_u64(r: &Row<'_>, i: usize) -> rusqlite::Result<Option<u64>> {
-    let v: Option<i64> = r.get(i)?;
-    v.map(|v| {
-        u64::try_from(v).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(
-                i,
-                rusqlite::types::Type::Integer,
-                Box::new(e),
-            )
-        })
-    })
-    .transpose()
-}
-
-fn bad(i: usize, msg: &str) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(i, rusqlite::types::Type::Text, msg.to_owned().into())
-}
-
-fn get_id(r: &Row<'_>, i: usize) -> rusqlite::Result<ObjectId> {
-    let b: Vec<u8> = r.get(i)?;
-    let arr: [u8; 32] = b
-        .try_into()
-        .map_err(|_| bad(i, "object id is not 32 bytes"))?;
-    Ok(ObjectId::from_bytes(arr))
-}
-
-fn get_opt_id(r: &Row<'_>, i: usize) -> rusqlite::Result<Option<ObjectId>> {
-    let b: Option<Vec<u8>> = r.get(i)?;
-    b.map(|b| {
-        let arr: [u8; 32] = b
-            .try_into()
-            .map_err(|_| bad(i, "object id is not 32 bytes"))?;
-        Ok(ObjectId::from_bytes(arr))
-    })
-    .transpose()
+fn bad(i: usize, msg: &str) -> MetaError {
+    MetaError::BadValue(format!("column {i}: {msg}"))
 }
 
 const DEPOT_COLS: &str = "id, name, next_rev, created_at, deleted_at";
-fn depot_row(r: &Row<'_>) -> rusqlite::Result<DepotRow> {
+fn depot_row(r: &Row) -> Result<DepotRow> {
     Ok(DepotRow {
         id: DepotId(r.get(0)?),
         name: r.get(1)?,
-        next_rev: get_u64(r, 2)?,
+        next_rev: r.get::<u64>(2)?,
         created_at: r.get(3)?,
         deleted_at: r.get(4)?,
     })
@@ -69,7 +30,7 @@ fn depot_row(r: &Row<'_>) -> rusqlite::Result<DepotRow> {
 
 const PRINCIPAL_COLS: &str =
     "id, kind, name, display_name, owner_id, password_hash, disabled, created_at, sso_id, deleted_at";
-fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
+fn principal_row(r: &Row) -> Result<PrincipalRow> {
     let kind: String = r.get(1)?;
     Ok(PrincipalRow {
         id: PrincipalId(r.get(0)?),
@@ -80,9 +41,9 @@ fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
         },
         name: r.get(2)?,
         display_name: r.get(3)?,
-        owner_id: r.get::<_, Option<i64>>(4)?.map(PrincipalId),
+        owner_id: r.get::<Option<i64>>(4)?.map(PrincipalId),
         password_hash: r.get(5)?,
-        disabled: r.get::<_, i64>(6)? != 0,
+        disabled: r.get::<i64>(6)? != 0,
         created_at: r.get(7)?,
         sso_id: r.get(8)?,
         deleted_at: r.get(9)?,
@@ -91,7 +52,7 @@ fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
 
 const TOKEN_COLS: &str =
     "id, principal_id, name, hash, scopes, expires_at, last_used_at, created_at";
-fn token_row(r: &Row<'_>) -> rusqlite::Result<TokenRow> {
+fn token_row(r: &Row) -> Result<TokenRow> {
     let scopes: String = r.get(4)?;
     Ok(TokenRow {
         id: TokenId(r.get(0)?),
@@ -107,7 +68,7 @@ fn token_row(r: &Row<'_>) -> rusqlite::Result<TokenRow> {
 
 const ACL_COLS: &str =
     "id, depot_id, subject_kind, subject_id, branch_glob, path_glob, effect, level";
-fn acl_row(r: &Row<'_>) -> rusqlite::Result<AclRow> {
+fn acl_row(r: &Row) -> Result<AclRow> {
     let kind: String = r.get(2)?;
     let sid: Option<i64> = r.get(3)?;
     let subject = match (kind.as_str(), sid) {
@@ -120,7 +81,7 @@ fn acl_row(r: &Row<'_>) -> rusqlite::Result<AclRow> {
     let level: String = r.get(7)?;
     Ok(AclRow {
         id: AclId(r.get(0)?),
-        depot_id: r.get::<_, Option<i64>>(1)?.map(DepotId),
+        depot_id: r.get::<Option<i64>>(1)?.map(DepotId),
         subject,
         branch_glob: r.get(4)?,
         path_glob: r.get(5)?,
@@ -140,16 +101,16 @@ fn acl_row(r: &Row<'_>) -> rusqlite::Result<AclRow> {
 
 const BRANCH_COLS: &str =
     "id, depot_id, name, head_rev, created_rev, parent_branch_id, parent_rev, state";
-fn branch_row(r: &Row<'_>) -> rusqlite::Result<BranchRow> {
+fn branch_row(r: &Row) -> Result<BranchRow> {
     let state: String = r.get(7)?;
     Ok(BranchRow {
         id: BranchId(r.get(0)?),
         depot_id: DepotId(r.get(1)?),
         name: r.get(2)?,
-        head_rev: get_u64(r, 3)?,
-        created_rev: get_u64(r, 4)?,
-        parent_branch_id: r.get::<_, Option<i64>>(5)?.map(BranchId),
-        parent_rev: get_opt_u64(r, 6)?,
+        head_rev: r.get::<u64>(3)?,
+        created_rev: r.get::<u64>(4)?,
+        parent_branch_id: r.get::<Option<i64>>(5)?.map(BranchId),
+        parent_rev: r.get::<Option<u64>>(6)?,
         state: match state.as_str() {
             "active" => BranchState::Active,
             "archived" => BranchState::Archived,
@@ -160,13 +121,13 @@ fn branch_row(r: &Row<'_>) -> rusqlite::Result<BranchRow> {
 
 const REVISION_COLS: &str = "depot_id, num, branch_id, parent_num, root_tree, author_id, \
      submitter_id, created_at, message, provenance, request_id";
-fn revision_row(r: &Row<'_>) -> rusqlite::Result<RevisionRow> {
+fn revision_row(r: &Row) -> Result<RevisionRow> {
     Ok(RevisionRow {
         depot_id: DepotId(r.get(0)?),
-        num: get_u64(r, 1)?,
+        num: r.get::<u64>(1)?,
         branch_id: BranchId(r.get(2)?),
-        parent_num: get_opt_u64(r, 3)?,
-        root_tree: get_id(r, 4)?,
+        parent_num: r.get::<Option<u64>>(3)?,
+        root_tree: r.get::<ObjectId>(4)?,
         author_id: PrincipalId(r.get(5)?),
         submitter_id: PrincipalId(r.get(6)?),
         created_at: r.get(7)?,
@@ -178,7 +139,7 @@ fn revision_row(r: &Row<'_>) -> rusqlite::Result<RevisionRow> {
 
 const CHANGE_COLS: &str =
     "path, action, kind, old_id, new_id, size, flags, copy_from_path, copy_from_rev";
-fn change_row_at(r: &Row<'_>, o: usize) -> rusqlite::Result<ChangeRow> {
+fn change_row_at(r: &Row, o: usize) -> Result<ChangeRow> {
     let action: String = r.get(o + 1)?;
     let action = match action.as_str() {
         "A" => 'A',
@@ -189,20 +150,20 @@ fn change_row_at(r: &Row<'_>, o: usize) -> rusqlite::Result<ChangeRow> {
     Ok(ChangeRow {
         path: r.get(o)?,
         action,
-        kind: r.get::<_, Option<i64>>(o + 2)?.map(|k| k as u8),
-        old_id: get_opt_id(r, o + 3)?,
-        new_id: get_opt_id(r, o + 4)?,
-        size: get_opt_u64(r, o + 5)?,
-        flags: r.get::<_, i64>(o + 6)? as u8,
+        kind: r.get::<Option<i64>>(o + 2)?.map(|k| k as u8),
+        old_id: r.get::<Option<ObjectId>>(o + 3)?,
+        new_id: r.get::<Option<ObjectId>>(o + 4)?,
+        size: r.get::<Option<u64>>(o + 5)?,
+        flags: r.get::<i64>(o + 6)? as u8,
         copy_from_path: r.get(o + 7)?,
-        copy_from_rev: get_opt_u64(r, o + 8)?,
+        copy_from_rev: r.get::<Option<u64>>(o + 8)?,
     })
 }
 
-fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRow> {
+fn outbox_row(r: &Row) -> Result<OutboxRow> {
     Ok(OutboxRow {
         id: r.get(0)?,
-        depot_id: r.get::<_, Option<i64>>(1)?.map(DepotId),
+        depot_id: r.get::<Option<i64>>(1)?.map(DepotId),
         kind: r.get(2)?,
         payload: r.get(3)?,
         created_at: r.get(4)?,
@@ -216,282 +177,250 @@ pub fn in_chain(chain: &[HistorySegment], branch: BranchId, num: u64) -> bool {
         .any(|seg| seg.branch_id == branch && seg.max_rev.is_none_or(|m| num <= m))
 }
 
-fn collect<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>> {
-    Ok(rows.collect::<rusqlite::Result<Vec<T>>>()?)
-}
-
 /// Read queries, available in both read and write transactions.
 pub trait Reads {
     /// The connection the queries run on.
-    fn db(&self) -> &Connection;
+    fn db(&self) -> &dyn Sql;
 
     /// A live depot by name; depots in the trash are left out.
     fn depot_by_name(&self, name: &str) -> Result<Option<DepotRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {DEPOT_COLS} FROM depot WHERE name = ?1 AND deleted_at IS NULL"),
-                [name],
-                depot_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {DEPOT_COLS} FROM depot WHERE name = ?1 AND deleted_at IS NULL"),
+            vals![name],
+            depot_row,
+        )
     }
 
     /// A depot in the trash, by name. Purged depots have lost their name and are not found.
     fn trashed_depot(&self, name: &str) -> Result<Option<DepotRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!(
-                    "SELECT {DEPOT_COLS} FROM depot \
-                     WHERE name = ?1 AND deleted_at IS NOT NULL AND purged_at IS NULL"
-                ),
-                [name],
-                depot_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!(
+                "SELECT {DEPOT_COLS} FROM depot \
+                 WHERE name = ?1 AND deleted_at IS NOT NULL AND purged_at IS NULL"
+            ),
+            vals![name],
+            depot_row,
+        )
     }
 
     /// A depot by id, live, in the trash or purged.
     fn depot(&self, id: DepotId) -> Result<Option<DepotRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {DEPOT_COLS} FROM depot WHERE id = ?1"),
-                [id.0],
-                depot_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {DEPOT_COLS} FROM depot WHERE id = ?1"),
+            vals![id.0],
+            depot_row,
+        )
     }
 
     /// Every live depot, by name.
     fn depots(&self) -> Result<Vec<DepotRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {DEPOT_COLS} FROM depot WHERE deleted_at IS NULL ORDER BY name"
-        ))?;
-        let rows = st.query_map([], depot_row)?;
-        collect(rows)
+        self.db().query(
+            &format!("SELECT {DEPOT_COLS} FROM depot WHERE deleted_at IS NULL ORDER BY name"),
+            vals![],
+            depot_row,
+        )
     }
 
     /// Depots in the trash and not yet purged, oldest deletion first.
     fn trashed_depots(&self) -> Result<Vec<DepotRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {DEPOT_COLS} FROM depot WHERE deleted_at IS NOT NULL AND purged_at IS NULL \
-             ORDER BY deleted_at, name"
-        ))?;
-        let rows = st.query_map([], depot_row)?;
-        collect(rows)
+        self.db().query(
+            &format!(
+                "SELECT {DEPOT_COLS} FROM depot WHERE deleted_at IS NOT NULL AND purged_at IS NULL \
+                 ORDER BY deleted_at, name"
+            ),
+            vals![],
+            depot_row,
+        )
     }
 
     /// A principal by id.
     fn principal(&self, id: PrincipalId) -> Result<Option<PrincipalRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {PRINCIPAL_COLS} FROM principal WHERE id = ?1"),
-                [id.0],
-                principal_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {PRINCIPAL_COLS} FROM principal WHERE id = ?1"),
+            vals![id.0],
+            principal_row,
+        )
     }
 
     /// A principal by name; deleted principals are left out.
     fn principal_by_name(&self, name: &str) -> Result<Option<PrincipalRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!(
-                    "SELECT {PRINCIPAL_COLS} FROM principal WHERE name = ?1 AND deleted_at IS NULL"
-                ),
-                [name],
-                principal_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!(
+                "SELECT {PRINCIPAL_COLS} FROM principal WHERE name = ?1 AND deleted_at IS NULL"
+            ),
+            vals![name],
+            principal_row,
+        )
     }
 
     /// A deleted principal by name. Its name stays taken, so it can be told apart from a
     /// free name.
     fn deleted_principal(&self, name: &str) -> Result<Option<PrincipalRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!(
-                    "SELECT {PRINCIPAL_COLS} FROM principal \
-                     WHERE name = ?1 AND deleted_at IS NOT NULL"
-                ),
-                [name],
-                principal_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!(
+                "SELECT {PRINCIPAL_COLS} FROM principal \
+                 WHERE name = ?1 AND deleted_at IS NOT NULL"
+            ),
+            vals![name],
+            principal_row,
+        )
     }
 
     /// The principal linked to a single sign-on identity (compared in lower case).
     fn principal_by_sso(&self, sso_id: &str) -> Result<Option<PrincipalRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!(
-                    "SELECT {PRINCIPAL_COLS} FROM principal \
-                     WHERE sso_id = ?1 AND deleted_at IS NULL"
-                ),
-                [sso_id.to_lowercase()],
-                principal_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!(
+                "SELECT {PRINCIPAL_COLS} FROM principal \
+                 WHERE sso_id = ?1 AND deleted_at IS NULL"
+            ),
+            vals![sso_id.to_lowercase()],
+            principal_row,
+        )
     }
 
     /// Every principal that is not deleted, by name.
     fn principals(&self) -> Result<Vec<PrincipalRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {PRINCIPAL_COLS} FROM principal WHERE deleted_at IS NULL ORDER BY name"
-        ))?;
-        let rows = st.query_map([], principal_row)?;
-        collect(rows)
+        self.db().query(
+            &format!(
+                "SELECT {PRINCIPAL_COLS} FROM principal WHERE deleted_at IS NULL ORDER BY name"
+            ),
+            vals![],
+            principal_row,
+        )
     }
 
     /// A group by name.
     fn group_by_name(&self, name: &str) -> Result<Option<GroupRow>> {
-        Ok(self
-            .db()
-            .query_row("SELECT id, name FROM grp WHERE name = ?1", [name], |r| {
+        self.db().query_opt(
+            "SELECT id, name FROM grp WHERE name = ?1",
+            vals![name],
+            |r| {
+                Ok(GroupRow {
+                    id: GroupId(r.get(0)?),
+                    name: r.get(1)?,
+                })
+            },
+        )
+    }
+
+    /// Every group, by name.
+    fn groups(&self) -> Result<Vec<GroupRow>> {
+        self.db()
+            .query("SELECT id, name FROM grp ORDER BY name", vals![], |r| {
                 Ok(GroupRow {
                     id: GroupId(r.get(0)?),
                     name: r.get(1)?,
                 })
             })
-            .optional()?)
-    }
-
-    /// Every group, by name.
-    fn groups(&self) -> Result<Vec<GroupRow>> {
-        let mut st = self
-            .db()
-            .prepare("SELECT id, name FROM grp ORDER BY name")?;
-        let rows = st.query_map([], |r| {
-            Ok(GroupRow {
-                id: GroupId(r.get(0)?),
-                name: r.get(1)?,
-            })
-        })?;
-        collect(rows)
     }
 
     /// Members of a group, by name.
     fn group_members(&self, group: GroupId) -> Result<Vec<PrincipalRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {} FROM principal p JOIN grp_member m ON m.principal_id = p.id \
+        self.db().query(
+            &format!(
+                "SELECT {} FROM principal p JOIN grp_member m ON m.principal_id = p.id \
              WHERE m.grp_id = ?1 ORDER BY p.name",
-            PRINCIPAL_COLS
-                .split(", ")
-                .map(|c| format!("p.{c}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))?;
-        let rows = st.query_map([group.0], principal_row)?;
-        collect(rows)
+                PRINCIPAL_COLS
+                    .split(", ")
+                    .map(|c| format!("p.{c}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            vals![group.0],
+            principal_row,
+        )
     }
 
     /// Groups the principal belongs to.
     fn groups_of(&self, principal: PrincipalId) -> Result<Vec<GroupId>> {
-        let mut st = self
-            .db()
-            .prepare("SELECT grp_id FROM grp_member WHERE principal_id = ?1 ORDER BY grp_id")?;
-        let rows = st.query_map([principal.0], |r| Ok(GroupId(r.get(0)?)))?;
-        collect(rows)
+        self.db().query(
+            "SELECT grp_id FROM grp_member WHERE principal_id = ?1 ORDER BY grp_id",
+            vals![principal.0],
+            |r| Ok(GroupId(r.get(0)?)),
+        )
     }
 
     /// A token by the SHA-256 of its secret.
     fn token_by_hash(&self, hash: &[u8]) -> Result<Option<TokenRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {TOKEN_COLS} FROM token WHERE hash = ?1"),
-                [hash],
-                token_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {TOKEN_COLS} FROM token WHERE hash = ?1"),
+            vals![hash],
+            token_row,
+        )
     }
 
     /// Tokens of a principal, oldest first.
     fn tokens_of(&self, principal: PrincipalId) -> Result<Vec<TokenRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {TOKEN_COLS} FROM token WHERE principal_id = ?1 ORDER BY id"
-        ))?;
-        let rows = st.query_map([principal.0], token_row)?;
-        collect(rows)
+        self.db().query(
+            &format!("SELECT {TOKEN_COLS} FROM token WHERE principal_id = ?1 ORDER BY id"),
+            vals![principal.0],
+            token_row,
+        )
     }
 
     /// Access rules that apply to a depot (its own and the global ones), in id order.
     fn acl_for_depot(&self, depot: DepotId) -> Result<Vec<AclRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {ACL_COLS} FROM acl WHERE depot_id = ?1 OR depot_id IS NULL ORDER BY id"
-        ))?;
-        let rows = st.query_map([depot.0], acl_row)?;
-        collect(rows)
+        self.db().query(
+            &format!(
+                "SELECT {ACL_COLS} FROM acl WHERE depot_id = ?1 OR depot_id IS NULL ORDER BY id"
+            ),
+            vals![depot.0],
+            acl_row,
+        )
     }
 
     /// The access epoch: raised by every change to access rules or group membership.
     fn access_epoch(&self) -> Result<u64> {
-        let v: i64 = self.db().query_row(
+        let v: i64 = self.db().value(
             "SELECT value FROM counter WHERE name = 'access_epoch'",
-            [],
-            |r| r.get(0),
+            vals![],
         )?;
         u64::try_from(v).map_err(|_| MetaError::BadValue("negative access epoch".into()))
     }
 
     /// Every access rule, in id order.
     fn acl_all(&self) -> Result<Vec<AclRow>> {
-        let mut st = self
-            .db()
-            .prepare(&format!("SELECT {ACL_COLS} FROM acl ORDER BY id"))?;
-        let rows = st.query_map([], acl_row)?;
-        collect(rows)
+        self.db().query(
+            &format!("SELECT {ACL_COLS} FROM acl ORDER BY id"),
+            vals![],
+            acl_row,
+        )
     }
 
     /// A branch by name.
     fn branch(&self, depot: DepotId, name: &str) -> Result<Option<BranchRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {BRANCH_COLS} FROM branch WHERE depot_id = ?1 AND name = ?2"),
-                params![depot.0, name],
-                branch_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {BRANCH_COLS} FROM branch WHERE depot_id = ?1 AND name = ?2"),
+            vals![depot.0, name],
+            branch_row,
+        )
     }
 
     /// A branch by id.
     fn branch_by_id(&self, id: BranchId) -> Result<Option<BranchRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {BRANCH_COLS} FROM branch WHERE id = ?1"),
-                [id.0],
-                branch_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {BRANCH_COLS} FROM branch WHERE id = ?1"),
+            vals![id.0],
+            branch_row,
+        )
     }
 
     /// Branches of a depot, by name.
     fn branches(&self, depot: DepotId) -> Result<Vec<BranchRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {BRANCH_COLS} FROM branch WHERE depot_id = ?1 ORDER BY name"
-        ))?;
-        let rows = st.query_map([depot.0], branch_row)?;
-        collect(rows)
+        self.db().query(
+            &format!("SELECT {BRANCH_COLS} FROM branch WHERE depot_id = ?1 ORDER BY name"),
+            vals![depot.0],
+            branch_row,
+        )
     }
 
     /// A revision.
     fn revision(&self, depot: DepotId, num: u64) -> Result<Option<RevisionRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!("SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND num = ?2"),
-                params![depot.0, to_i64(num)?],
-                revision_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!("SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND num = ?2"),
+            vals![depot.0, to_i64(num)?],
+            revision_row,
+        )
     }
 
     /// The revision a client request id produced, for idempotent retries.
@@ -500,42 +429,41 @@ pub trait Reads {
         depot: DepotId,
         request_id: &str,
     ) -> Result<Option<RevisionRow>> {
-        Ok(self
-            .db()
-            .query_row(
-                &format!(
-                    "SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND request_id = ?2"
-                ),
-                params![depot.0, request_id],
-                revision_row,
-            )
-            .optional()?)
+        self.db().query_opt(
+            &format!(
+                "SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND request_id = ?2"
+            ),
+            vals![depot.0, request_id],
+            revision_row,
+        )
     }
 
     /// Revisions with numbers above `after`, ascending, across all branches.
     fn revisions_after(&self, depot: DepotId, after: u64, limit: u32) -> Result<Vec<RevisionRow>> {
-        let mut st = self.db().prepare(&format!(
-            "SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND num > ?2 \
+        self.db().query(
+            &format!(
+                "SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND num > ?2 \
              ORDER BY num LIMIT ?3"
-        ))?;
-        let rows = st.query_map(params![depot.0, to_i64(after)?, limit], revision_row)?;
-        collect(rows)
+            ),
+            vals![depot.0, to_i64(after)?, limit],
+            revision_row,
+        )
     }
 
     /// Revisions matching `f`, in number order.
     fn find_revisions(&self, depot: DepotId, f: &RevisionFilter) -> Result<Vec<RevisionRow>> {
-        use rusqlite::types::Value;
+        use crate::sql::Val as Value;
         let mut sql = format!("SELECT {REVISION_COLS} FROM revision r WHERE r.depot_id = ?1");
-        let mut args: Vec<Value> = vec![Value::Integer(depot.0)];
-        let mut arg = |sql: &mut String, frag: &str, v: Value| {
+        let mut args: Vec<Value<'static>> = vec![Value::Int(depot.0)];
+        let mut arg = |sql: &mut String, frag: &str, v: Value<'static>| {
             args.push(v);
             sql.push_str(&frag.replace('?', &format!("?{}", args.len())));
         };
         if let Some(min) = f.min {
-            arg(&mut sql, " AND r.num >= ?", Value::Integer(to_i64(min)?));
+            arg(&mut sql, " AND r.num >= ?", Value::Int(to_i64(min)?));
         }
         if let Some(max) = f.max {
-            arg(&mut sql, " AND r.num <= ?", Value::Integer(to_i64(max)?));
+            arg(&mut sql, " AND r.num <= ?", Value::Int(to_i64(max)?));
         }
         if let Some(segs) = &f.segments {
             if segs.is_empty() {
@@ -546,26 +474,22 @@ pub trait Reads {
                 if i > 0 {
                     sql.push_str(" OR ");
                 }
-                arg(
-                    &mut sql,
-                    "(r.branch_id = ?",
-                    Value::Integer(seg.branch_id.0),
-                );
+                arg(&mut sql, "(r.branch_id = ?", Value::Int(seg.branch_id.0));
                 match seg.max_rev {
-                    Some(m) => arg(&mut sql, " AND r.num <= ?)", Value::Integer(to_i64(m)?)),
+                    Some(m) => arg(&mut sql, " AND r.num <= ?)", Value::Int(to_i64(m)?)),
                     None => sql.push(')'),
                 }
             }
             sql.push(')');
         }
         if let Some(a) = f.author {
-            arg(&mut sql, " AND r.author_id = ?", Value::Integer(a.0));
+            arg(&mut sql, " AND r.author_id = ?", Value::Int(a.0));
         }
         if let Some(k) = f.author_kind {
             arg(
                 &mut sql,
                 " AND r.author_id IN (SELECT id FROM principal WHERE kind = ?)",
-                Value::Text(k.as_str().to_owned()),
+                Value::from(k.as_str()),
             );
         }
         if let Some(path) = &f.path {
@@ -573,7 +497,7 @@ pub trait Reads {
                 &mut sql,
                 " AND EXISTS (SELECT 1 FROM rev_change c WHERE c.depot_id = r.depot_id \
                  AND c.rev = r.num AND c.path = ?",
-                Value::Text(path.clone()),
+                Value::from(path.clone()),
             );
             if f.copies_only {
                 sql.push_str(" AND c.action = 'A' AND c.copy_from_path IS NOT NULL");
@@ -585,65 +509,63 @@ pub trait Reads {
         } else {
             " ORDER BY r.num DESC"
         });
-        arg(&mut sql, " LIMIT ?", Value::Integer(i64::from(f.limit)));
-        let mut st = self.db().prepare(&sql)?;
-        let rows = st.query_map(rusqlite::params_from_iter(args), revision_row)?;
-        collect(rows)
+        arg(&mut sql, " LIMIT ?", Value::Int(i64::from(f.limit)));
+        self.db().query(&sql, &args, revision_row)
     }
 
     /// Changes of a revision, by path.
     fn changes(&self, depot: DepotId, rev: u64) -> Result<Vec<ChangeRow>> {
-        let mut st = self.db().prepare(&format!(
+        self.db().query(
+            &format!(
             "SELECT {CHANGE_COLS} FROM rev_change WHERE depot_id = ?1 AND rev = ?2 ORDER BY path"
-        ))?;
-        let rows = st.query_map(params![depot.0, to_i64(rev)?], |r| change_row_at(r, 0))?;
-        collect(rows)
+        ),
+            vals![depot.0, to_i64(rev)?],
+            |r| change_row_at(r, 0),
+        )
     }
 
     /// Merges recorded on a revision.
     fn merges(&self, depot: DepotId, rev: u64) -> Result<Vec<MergeRow>> {
-        let mut st = self.db().prepare(
+        self.db().query(
             "SELECT source_branch_id, from_rev, to_rev FROM rev_merge \
              WHERE depot_id = ?1 AND rev = ?2 ORDER BY rowid",
-        )?;
-        let rows = st.query_map(params![depot.0, to_i64(rev)?], |r| {
-            Ok(MergeRow {
-                source_branch_id: BranchId(r.get(0)?),
-                from_rev: get_u64(r, 1)?,
-                to_rev: get_u64(r, 2)?,
-            })
-        })?;
-        collect(rows)
+            vals![depot.0, to_i64(rev)?],
+            |r| {
+                Ok(MergeRow {
+                    source_branch_id: BranchId(r.get(0)?),
+                    from_rev: r.get::<u64>(1)?,
+                    to_rev: r.get::<u64>(2)?,
+                })
+            },
+        )
     }
 
     /// Metadata of a revision, by key.
     fn rev_meta(&self, depot: DepotId, rev: u64) -> Result<Vec<(String, String)>> {
-        let mut st = self.db().prepare(
+        self.db().query(
             "SELECT key, value FROM rev_meta WHERE depot_id = ?1 AND rev = ?2 ORDER BY key",
-        )?;
-        let rows = st.query_map(params![depot.0, to_i64(rev)?], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })?;
-        collect(rows)
+            vals![depot.0, to_i64(rev)?],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     /// Outbox events after `after_id`, oldest first.
     fn outbox_after(&self, after_id: i64, limit: u32) -> Result<Vec<OutboxRow>> {
-        let mut st = self.db().prepare(
+        self.db().query(
             "SELECT id, depot_id, kind, payload, created_at FROM outbox \
              WHERE id > ?1 ORDER BY id LIMIT ?2",
-        )?;
-        let rows = st.query_map(params![after_id, limit], outbox_row)?;
-        collect(rows)
+            vals![after_id, limit],
+            outbox_row,
+        )
     }
 
     /// Every subscriber cursor.
     fn outbox_cursors(&self) -> Result<Vec<(String, i64)>> {
-        let mut st = self
-            .db()
-            .prepare("SELECT subscriber, last_id FROM outbox_cursor ORDER BY subscriber")?;
-        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        collect(rows)
+        self.db().query(
+            "SELECT subscriber, last_id FROM outbox_cursor ORDER BY subscriber",
+            vals![],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
     }
 
     /// The history chain of a branch (ARCHITECTURE §4.3): its own revisions, then its
@@ -678,23 +600,24 @@ pub trait Reads {
         chain: &[HistorySegment],
         source: BranchId,
     ) -> Result<Vec<(u64, MergeRow)>> {
-        let mut st = self.db().prepare(
+        let rows = self.db().query(
             "SELECT m.rev, r.branch_id, m.from_rev, m.to_rev FROM rev_merge m \
              JOIN revision r ON r.depot_id = m.depot_id AND r.num = m.rev \
              WHERE m.depot_id = ?1 AND m.source_branch_id = ?2 ORDER BY m.rev, m.rowid",
+            vals![depot.0, source.0],
+            |r| {
+                Ok((
+                    r.get::<u64>(0)?,
+                    BranchId(r.get(1)?),
+                    MergeRow {
+                        source_branch_id: source,
+                        from_rev: r.get::<u64>(2)?,
+                        to_rev: r.get::<u64>(3)?,
+                    },
+                ))
+            },
         )?;
-        let rows = st.query_map(params![depot.0, source.0], |r| {
-            Ok((
-                get_u64(r, 0)?,
-                BranchId(r.get(1)?),
-                MergeRow {
-                    source_branch_id: source,
-                    from_rev: get_u64(r, 2)?,
-                    to_rev: get_u64(r, 3)?,
-                },
-            ))
-        })?;
-        Ok(collect(rows)?
+        Ok(rows
             .into_iter()
             .filter(|(rev, b, _)| in_chain(chain, *b, *rev))
             .map(|(rev, _, m)| (rev, m))
@@ -708,18 +631,16 @@ pub trait Reads {
         chain: &[HistorySegment],
         after: u64,
     ) -> Result<Vec<u64>> {
-        let mut st = self.db().prepare(
-            "SELECT num FROM revision \
-             WHERE depot_id = ?1 AND branch_id = ?2 AND num > ?3 AND num <= ?4 ORDER BY num",
-        )?;
+        let sql = "SELECT num FROM revision \
+             WHERE depot_id = ?1 AND branch_id = ?2 AND num > ?3 AND num <= ?4 ORDER BY num";
         let mut out = Vec::new();
         for seg in chain {
             let cap = seg.max_rev.map(to_i64).transpose()?.unwrap_or(i64::MAX);
-            let rows = st.query_map(
-                params![depot.0, seg.branch_id.0, to_i64(after)?, cap],
-                |r| get_u64(r, 0),
-            )?;
-            out.extend(collect(rows)?);
+            out.extend(self.db().query(
+                sql,
+                vals![depot.0, seg.branch_id.0, to_i64(after)?, cap],
+                |r| r.get::<u64>(0),
+            )?);
         }
         out.sort_unstable();
         Ok(out)
@@ -738,7 +659,7 @@ pub trait Reads {
         let chain = self.branch_chain(branch)?;
         let mut out = Vec::new();
         let before = before.map(to_i64).transpose()?.unwrap_or(i64::MAX);
-        let mut st = self.db().prepare(&format!(
+        let sql = format!(
             "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
              JOIN revision r ON r.depot_id = c.depot_id AND r.num = c.rev \
              WHERE c.depot_id = ?1 AND c.path = ?2 AND r.branch_id = ?3 \
@@ -749,22 +670,22 @@ pub trait Reads {
                 .map(|c| format!("c.{c}"))
                 .collect::<Vec<_>>()
                 .join(", ")
-        ))?;
+        );
         // Segments are ordered newest first and their ranges do not overlap in time beyond
         // the caps, so concatenating per-segment results and sorting gives the right order.
         for seg in &chain {
             let cap = seg.max_rev.map(to_i64).transpose()?.unwrap_or(i64::MAX);
-            let rows = st.query_map(
-                params![depot.0, path, seg.branch_id.0, cap, before, limit],
+            out.extend(self.db().query(
+                &sql,
+                vals![depot.0, path, seg.branch_id.0, cap, before, limit],
                 |r| {
                     Ok(PathHistoryEntry {
-                        rev: get_u64(r, 0)?,
+                        rev: r.get::<u64>(0)?,
                         branch_id: BranchId(r.get(1)?),
                         change: change_row_at(r, 2)?,
                     })
                 },
-            )?;
-            out.extend(collect(rows)?);
+            )?);
         }
         out.sort_by_key(|e| std::cmp::Reverse(e.rev));
         out.truncate(limit as usize);
@@ -772,51 +693,51 @@ pub trait Reads {
     }
     /// Every obliterated id of a depot.
     fn obliterated_ids(&self, depot: DepotId) -> Result<Vec<ObjectId>> {
-        let mut st = self
-            .db()
-            .prepare("SELECT id FROM obliterated WHERE depot_id = ?1")?;
-        let rows = st.query_map([depot.0], |r| get_id(r, 0))?;
-        collect(rows)
+        self.db().query(
+            "SELECT id FROM obliterated WHERE depot_id = ?1",
+            vals![depot.0],
+            |r| r.get::<ObjectId>(0),
+        )
     }
 
     /// What was obliterated from a depot, oldest first.
     fn obliterations(&self, depot: DepotId) -> Result<Vec<ObliteratedRow>> {
-        let mut st = self.db().prepare(
+        self.db().query(
             "SELECT depot_id, id, size, path, reason, by_id, at FROM obliterated \
              WHERE depot_id = ?1 ORDER BY at, path, id",
-        )?;
-        let rows = st.query_map([depot.0], |r| {
-            Ok(ObliteratedRow {
-                depot_id: DepotId(r.get(0)?),
-                id: get_id(r, 1)?,
-                size: get_u64(r, 2)?,
-                path: r.get(3)?,
-                reason: r.get(4)?,
-                by: PrincipalId(r.get(5)?),
-                at: r.get(6)?,
-            })
-        })?;
-        collect(rows)
+            vals![depot.0],
+            |r| {
+                Ok(ObliteratedRow {
+                    depot_id: DepotId(r.get(0)?),
+                    id: r.get::<ObjectId>(1)?,
+                    size: r.get::<u64>(2)?,
+                    path: r.get(3)?,
+                    reason: r.get(4)?,
+                    by: PrincipalId(r.get(5)?),
+                    at: r.get(6)?,
+                })
+            },
+        )
     }
 
     /// The last garbage collection and consistency checks of every depot.
     fn maintenance_runs(&self) -> Result<Vec<MaintenanceRunRow>> {
-        let mut st = self.db().prepare(
+        self.db().query(
             "SELECT depot_id, kind, at, objects_checked, objects_affected, bytes_affected, \
              problems FROM maintenance_run ORDER BY depot_id, kind",
-        )?;
-        let rows = st.query_map([], |r| {
-            Ok(MaintenanceRunRow {
-                depot_id: DepotId(r.get(0)?),
-                kind: r.get(1)?,
-                at: r.get(2)?,
-                objects_checked: get_u64(r, 3)?,
-                objects_affected: get_u64(r, 4)?,
-                bytes_affected: get_u64(r, 5)?,
-                problems: get_u64(r, 6)?,
-            })
-        })?;
-        collect(rows)
+            vals![],
+            |r| {
+                Ok(MaintenanceRunRow {
+                    depot_id: DepotId(r.get(0)?),
+                    kind: r.get(1)?,
+                    at: r.get(2)?,
+                    objects_checked: r.get::<u64>(3)?,
+                    objects_affected: r.get::<u64>(4)?,
+                    bytes_affected: r.get::<u64>(5)?,
+                    problems: r.get::<u64>(6)?,
+                })
+            },
+        )
     }
 
     /// Every change to `path`, or to any path under it when `subtree` is set, on every
@@ -840,23 +761,27 @@ pub trait Reads {
             } else {
                 format!("{path}0")
             };
-            ("c.path >= ?2 AND c.path < ?3", base, hi)
+            ("c.path >= ?2 AND c.path < ?3", base, Some(hi))
         } else {
-            ("c.path = ?2 AND ?3 = ?3", path.to_owned(), String::new())
+            ("c.path = ?2", path.to_owned(), None)
         };
-        let mut st = self.db().prepare(&format!(
-            "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
+        let mut args = vec![Val::from(depot.0), Val::from(lo)];
+        args.extend(hi.map(Val::from));
+        self.db().query(
+            &format!(
+                "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
              JOIN revision r ON r.depot_id = c.depot_id AND r.num = c.rev \
              WHERE c.depot_id = ?1 AND {cond} ORDER BY c.rev, c.path"
-        ))?;
-        let rows = st.query_map(params![depot.0, lo, hi], |r| {
-            Ok(RevChange {
-                rev: get_u64(r, 0)?,
-                branch_id: BranchId(r.get(1)?),
-                change: change_row_at(r, 2)?,
-            })
-        })?;
-        collect(rows)
+            ),
+            &args,
+            |r| {
+                Ok(RevChange {
+                    rev: r.get::<u64>(0)?,
+                    branch_id: BranchId(r.get(1)?),
+                    change: change_row_at(r, 2)?,
+                })
+            },
+        )
     }
 
     /// Every change that stored one of `ids`, at any path, oldest first. Scans the depot's
@@ -869,22 +794,27 @@ pub trait Reads {
             .join(", ");
         let mut out = Vec::new();
         for part in ids.chunks(500) {
-            let marks = vec!["?"; part.len()].join(", ");
-            let mut st = self.db().prepare(&format!(
-                "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
-                 JOIN revision r ON r.depot_id = c.depot_id AND r.num = c.rev \
-                 WHERE c.depot_id = ? AND c.new_id IN ({marks})"
-            ))?;
-            let mut args: Vec<rusqlite::types::Value> = vec![depot.0.into()];
-            args.extend(part.iter().map(|id| id.as_bytes().to_vec().into()));
-            let rows = st.query_map(rusqlite::params_from_iter(args), |r| {
-                Ok(RevChange {
-                    rev: get_u64(r, 0)?,
-                    branch_id: BranchId(r.get(1)?),
-                    change: change_row_at(r, 2)?,
-                })
-            })?;
-            out.extend(collect(rows)?);
+            let marks = (2..part.len() + 2)
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut args = vec![Val::from(depot.0)];
+            args.extend(part.iter().map(|id| Val::from(id.as_bytes())));
+            out.extend(self.db().query(
+                &format!(
+                    "SELECT r.num, r.branch_id, {cols} FROM rev_change c \
+                     JOIN revision r ON r.depot_id = c.depot_id AND r.num = c.rev \
+                     WHERE c.depot_id = ?1 AND c.new_id IN ({marks})"
+                ),
+                &args,
+                |r| {
+                    Ok(RevChange {
+                        rev: r.get::<u64>(0)?,
+                        branch_id: BranchId(r.get(1)?),
+                        change: change_row_at(r, 2)?,
+                    })
+                },
+            )?);
         }
         out.sort_by(|a, b| (a.rev, &a.change.path).cmp(&(b.rev, &b.change.path)));
         Ok(out)
@@ -892,13 +822,13 @@ pub trait Reads {
 }
 
 impl Reads for ReadTx<'_> {
-    fn db(&self) -> &Connection {
+    fn db(&self) -> &dyn Sql {
         self.conn()
     }
 }
 
 impl Reads for WriteTx<'_> {
-    fn db(&self) -> &Connection {
+    fn db(&self) -> &dyn Sql {
         self.conn()
     }
 }
@@ -906,13 +836,14 @@ impl Reads for WriteTx<'_> {
 impl WriteTx<'_> {
     /// Creates a depot whose first revision will be number 1.
     pub fn create_depot(&self, name: &str, now: Millis) -> Result<DepotRow> {
-        self.conn()
-            .execute(
-                "INSERT INTO depot (name, next_rev, created_at) VALUES (?1, 1, ?2)",
-                params![name, now],
+        let new_id = self
+            .conn()
+            .value::<i64>(
+                "INSERT INTO depot (name, next_rev, created_at) VALUES (?1, 1, ?2) RETURNING id",
+                vals![name, now],
             )
             .map_err(unique("depot name"))?;
-        let id = DepotId(self.conn().last_insert_rowid());
+        let id = DepotId(new_id);
         self.depot(id)?
             .ok_or_else(|| MetaError::NotFound(format!("depot {}", id.0)))
     }
@@ -921,33 +852,32 @@ impl WriteTx<'_> {
     pub fn allocate_rev(&self, depot: DepotId) -> Result<u64> {
         let n: i64 = self
             .conn()
-            .query_row(
+            .query_opt(
                 "UPDATE depot SET next_rev = next_rev + 1 WHERE id = ?1 RETURNING next_rev - 1",
-                [depot.0],
+                vals![depot.0],
                 |r| r.get(0),
-            )
-            .optional()?
+            )?
             .ok_or_else(|| MetaError::NotFound(format!("depot {}", depot.0)))?;
         u64::try_from(n).map_err(|_| MetaError::BadValue("negative revision number".into()))
     }
 
     /// Creates a principal.
     pub fn create_principal(&self, p: &NewPrincipal, now: Millis) -> Result<PrincipalId> {
-        self.conn()
-            .execute(
+        let new_id = self.conn()
+            .value::<i64>(
                 "INSERT INTO principal (kind, name, display_name, owner_id, password_hash, disabled, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
-                params![
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6) RETURNING id",
+                vals![
                     p.kind.as_str(),
-                    p.name,
-                    p.display_name,
+                    &p.name,
+                    &p.display_name,
                     p.owner_id.map(|o| o.0),
-                    p.password_hash,
+                    &p.password_hash,
                     now
                 ],
             )
             .map_err(unique("principal name"))?;
-        Ok(PrincipalId(self.conn().last_insert_rowid()))
+        Ok(PrincipalId(new_id))
     }
 
     /// Sets or clears a principal's password hash.
@@ -955,7 +885,7 @@ impl WriteTx<'_> {
         self.expect_one(
             self.conn().execute(
                 "UPDATE principal SET password_hash = ?2 WHERE id = ?1",
-                params![id.0, hash],
+                vals![id.0, hash],
             )?,
             "principal",
         )
@@ -969,7 +899,7 @@ impl WriteTx<'_> {
             .conn()
             .execute(
                 "UPDATE principal SET sso_id = ?2 WHERE id = ?1",
-                params![id.0, value],
+                vals![id.0, value],
             )
             .map_err(unique("single sign-on identity"))?;
         self.expect_one(n, "principal")
@@ -983,17 +913,19 @@ impl WriteTx<'_> {
             self.conn().execute(
                 "UPDATE principal SET deleted_at = ?2, disabled = 1, password_hash = NULL, \
                  sso_id = NULL WHERE id = ?1 AND deleted_at IS NULL",
-                params![id.0, now],
+                vals![id.0, now],
             )?,
             "principal",
         )?;
         self.conn()
-            .execute("DELETE FROM token WHERE principal_id = ?1", [id.0])?;
-        self.conn()
-            .execute("DELETE FROM grp_member WHERE principal_id = ?1", [id.0])?;
+            .execute("DELETE FROM token WHERE principal_id = ?1", vals![id.0])?;
+        self.conn().execute(
+            "DELETE FROM grp_member WHERE principal_id = ?1",
+            vals![id.0],
+        )?;
         self.conn().execute(
             "DELETE FROM acl WHERE subject_kind = 'user' AND subject_id = ?1",
-            [id.0],
+            vals![id.0],
         )?;
         self.bump_access_epoch()
     }
@@ -1003,7 +935,7 @@ impl WriteTx<'_> {
         self.expect_one(
             self.conn().execute(
                 "UPDATE depot SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
-                params![id.0, now],
+                vals![id.0, now],
             )?,
             "depot",
         )
@@ -1014,7 +946,7 @@ impl WriteTx<'_> {
         self.expect_one(
             self.conn().execute(
                 "UPDATE depot SET deleted_at = NULL WHERE id = ?1 AND purged_at IS NULL",
-                [id.0],
+                vals![id.0],
             )?,
             "depot",
         )
@@ -1037,13 +969,16 @@ impl WriteTx<'_> {
             "maintenance_run",
             "outbox",
         ] {
-            c.execute(&format!("DELETE FROM {table} WHERE depot_id = ?1"), [id.0])?;
+            c.execute(
+                &format!("DELETE FROM {table} WHERE depot_id = ?1"),
+                vals![id.0],
+            )?;
         }
         self.expect_one(
             c.execute(
                 "UPDATE depot SET name = '#' || id, purged_at = ?2, \
                  deleted_at = coalesce(deleted_at, ?2) WHERE id = ?1 AND purged_at IS NULL",
-                params![id.0, now],
+                vals![id.0, now],
             )?,
             "depot",
         )?;
@@ -1055,7 +990,7 @@ impl WriteTx<'_> {
         self.expect_one(
             self.conn().execute(
                 "UPDATE principal SET disabled = ?2 WHERE id = ?1",
-                params![id.0, disabled as i64],
+                vals![id.0, disabled as i64],
             )?,
             "principal",
         )
@@ -1063,17 +998,21 @@ impl WriteTx<'_> {
 
     /// Creates a group.
     pub fn create_group(&self, name: &str) -> Result<GroupId> {
-        self.conn()
-            .execute("INSERT INTO grp (name) VALUES (?1)", [name])
+        let new_id = self
+            .conn()
+            .value::<i64>(
+                "INSERT INTO grp (name) VALUES (?1) RETURNING id",
+                vals![name],
+            )
             .map_err(unique("group name"))?;
-        Ok(GroupId(self.conn().last_insert_rowid()))
+        Ok(GroupId(new_id))
     }
 
     /// Adds a member; adding an existing member does nothing. Raises the access epoch.
     pub fn add_group_member(&self, group: GroupId, principal: PrincipalId) -> Result<()> {
         self.conn().execute(
-            "INSERT OR IGNORE INTO grp_member (grp_id, principal_id) VALUES (?1, ?2)",
-            params![group.0, principal.0],
+            "INSERT INTO grp_member (grp_id, principal_id) VALUES (?1, ?2) ON CONFLICT DO NOTHING",
+            vals![group.0, principal.0],
         )?;
         self.bump_access_epoch()
     }
@@ -1082,7 +1021,7 @@ impl WriteTx<'_> {
     pub fn remove_group_member(&self, group: GroupId, principal: PrincipalId) -> Result<()> {
         self.conn().execute(
             "DELETE FROM grp_member WHERE grp_id = ?1 AND principal_id = ?2",
-            params![group.0, principal.0],
+            vals![group.0, principal.0],
         )?;
         self.bump_access_epoch()
     }
@@ -1091,7 +1030,7 @@ impl WriteTx<'_> {
     pub fn bump_access_epoch(&self) -> Result<()> {
         self.conn().execute(
             "UPDATE counter SET value = value + 1 WHERE name = 'access_epoch'",
-            [],
+            vals![],
         )?;
         Ok(())
     }
@@ -1114,21 +1053,22 @@ impl WriteTx<'_> {
                 "scope names cannot contain spaces".into(),
             ));
         }
-        self.conn()
-            .execute(
+        let new_id = self
+            .conn()
+            .value::<i64>(
                 "INSERT INTO token (principal_id, name, hash, scopes, expires_at, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![principal.0, name, hash, scopes.join(" "), expires_at, now],
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id",
+                vals![principal.0, name, hash, scopes.join(" "), expires_at, now],
             )
             .map_err(unique("token"))?;
-        Ok(TokenId(self.conn().last_insert_rowid()))
+        Ok(TokenId(new_id))
     }
 
     /// Records a successful use of a token.
     pub fn touch_token(&self, id: TokenId, now: Millis) -> Result<()> {
         self.conn().execute(
             "UPDATE token SET last_used_at = ?2 WHERE id = ?1",
-            params![id.0, now],
+            vals![id.0, now],
         )?;
         Ok(())
     }
@@ -1137,16 +1077,17 @@ impl WriteTx<'_> {
     pub fn delete_token(&self, id: TokenId) -> Result<()> {
         self.expect_one(
             self.conn()
-                .execute("DELETE FROM token WHERE id = ?1", [id.0])?,
+                .execute("DELETE FROM token WHERE id = ?1", vals![id.0])?,
             "token",
         )
     }
 
     /// Deletes every token of a principal.
     pub fn delete_tokens_of(&self, principal: PrincipalId) -> Result<usize> {
-        Ok(self
-            .conn()
-            .execute("DELETE FROM token WHERE principal_id = ?1", [principal.0])?)
+        self.conn().execute(
+            "DELETE FROM token WHERE principal_id = ?1",
+            vals![principal.0],
+        )
     }
 
     /// Adds an access rule; `rule.id` is ignored. Raises the access epoch.
@@ -1165,12 +1106,12 @@ impl WriteTx<'_> {
             AccessLevel::Write => "write",
             AccessLevel::Admin => "admin",
         };
-        self.conn().execute(
+        let new_id = self.conn().value::<i64>(
             "INSERT INTO acl (depot_id, subject_kind, subject_id, branch_glob, path_glob, effect, level) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![rule.depot_id.map(|d| d.0), kind, sid, rule.branch_glob, rule.path_glob, effect, level],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id",
+            vals![rule.depot_id.map(|d| d.0), kind, sid, &rule.branch_glob, &rule.path_glob, effect, level],
         )?;
-        let id = AclId(self.conn().last_insert_rowid());
+        let id = AclId(new_id);
         self.bump_access_epoch()?;
         Ok(id)
     }
@@ -1179,7 +1120,7 @@ impl WriteTx<'_> {
     pub fn delete_acl(&self, id: AclId) -> Result<()> {
         self.expect_one(
             self.conn()
-                .execute("DELETE FROM acl WHERE id = ?1", [id.0])?,
+                .execute("DELETE FROM acl WHERE id = ?1", vals![id.0])?,
             "acl rule",
         )?;
         self.bump_access_epoch()
@@ -1194,11 +1135,11 @@ impl WriteTx<'_> {
         created_rev: u64,
         parent: Option<(BranchId, u64)>,
     ) -> Result<BranchId> {
-        self.conn()
-            .execute(
+        let new_id = self.conn()
+            .value::<i64>(
                 "INSERT INTO branch (depot_id, name, head_rev, created_rev, parent_branch_id, parent_rev) \
-                 VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
-                params![
+                 VALUES (?1, ?2, ?3, ?3, ?4, ?5) RETURNING id",
+                vals![
                     depot.0,
                     name,
                     to_i64(created_rev)?,
@@ -1207,7 +1148,7 @@ impl WriteTx<'_> {
                 ],
             )
             .map_err(unique("branch name"))?;
-        Ok(BranchId(self.conn().last_insert_rowid()))
+        Ok(BranchId(new_id))
     }
 
     /// Moves a branch head.
@@ -1215,7 +1156,7 @@ impl WriteTx<'_> {
         self.expect_one(
             self.conn().execute(
                 "UPDATE branch SET head_rev = ?2 WHERE id = ?1",
-                params![branch.0, to_i64(rev)?],
+                vals![branch.0, to_i64(rev)?],
             )?,
             "branch",
         )
@@ -1230,7 +1171,7 @@ impl WriteTx<'_> {
         self.expect_one(
             self.conn().execute(
                 "UPDATE branch SET state = ?2 WHERE id = ?1",
-                params![branch.0, s],
+                vals![branch.0, s],
             )?,
             "branch",
         )
@@ -1241,7 +1182,7 @@ impl WriteTx<'_> {
         self.conn()
             .execute(
                 &format!("INSERT INTO revision ({REVISION_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"),
-                params![
+                vals![
                     r.depot_id.0,
                     to_i64(r.num)?,
                     r.branch_id.0,
@@ -1250,9 +1191,9 @@ impl WriteTx<'_> {
                     r.author_id.0,
                     r.submitter_id.0,
                     r.created_at,
-                    r.message,
-                    r.provenance,
-                    r.request_id
+                    &r.message,
+                    &r.provenance,
+                    &r.request_id
                 ],
             )
             .map_err(unique("revision number or request id"))?;
@@ -1261,26 +1202,30 @@ impl WriteTx<'_> {
 
     /// Inserts the history-index rows of a revision.
     pub fn insert_changes(&self, depot: DepotId, rev: u64, changes: &[ChangeRow]) -> Result<()> {
-        let mut st = self.conn().prepare_cached(&format!(
+        let sql = format!(
             "INSERT INTO rev_change (depot_id, rev, {CHANGE_COLS}) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
-        ))?;
+        );
         let rev = to_i64(rev)?;
         for c in changes {
-            st.execute(params![
-                depot.0,
-                rev,
-                c.path,
-                c.action.to_string(),
-                c.kind.map(i64::from),
-                c.old_id.as_ref().map(|i| i.as_bytes().to_vec()),
-                c.new_id.as_ref().map(|i| i.as_bytes().to_vec()),
-                c.size.map(to_i64).transpose()?,
-                i64::from(c.flags),
-                c.copy_from_path,
-                c.copy_from_rev.map(to_i64).transpose()?
-            ])
-            .map_err(unique("change path in revision"))?;
+            self.conn()
+                .execute(
+                    &sql,
+                    vals![
+                        depot.0,
+                        rev,
+                        &c.path,
+                        c.action.to_string(),
+                        c.kind.map(i64::from),
+                        c.old_id.as_ref().map(|i| i.as_bytes().to_vec()),
+                        c.new_id.as_ref().map(|i| i.as_bytes().to_vec()),
+                        c.size.map(to_i64).transpose()?,
+                        i64::from(c.flags),
+                        &c.copy_from_path,
+                        c.copy_from_rev.map(to_i64).transpose()?
+                    ],
+                )
+                .map_err(unique("change path in revision"))?;
         }
         Ok(())
     }
@@ -1290,7 +1235,7 @@ impl WriteTx<'_> {
         self.conn().execute(
             "INSERT INTO rev_merge (depot_id, rev, source_branch_id, from_rev, to_rev) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
+            vals![
                 depot.0,
                 to_i64(rev)?,
                 m.source_branch_id.0,
@@ -1311,7 +1256,7 @@ impl WriteTx<'_> {
         self.conn().execute(
             "INSERT INTO rev_meta (depot_id, rev, key, value) VALUES (?1, ?2, ?3, ?4) \
              ON CONFLICT (depot_id, rev, key) DO UPDATE SET value = excluded.value",
-            params![depot.0, to_i64(rev)?, key, value],
+            vals![depot.0, to_i64(rev)?, key, value],
         )?;
         Ok(())
     }
@@ -1324,11 +1269,11 @@ impl WriteTx<'_> {
         payload: &str,
         now: Millis,
     ) -> Result<i64> {
-        self.conn().execute(
-            "INSERT INTO outbox (depot_id, kind, payload, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![depot.map(|d| d.0), kind, payload, now],
+        let new_id = self.conn().value::<i64>(
+            "INSERT INTO outbox (depot_id, kind, payload, created_at) VALUES (?1, ?2, ?3, ?4) RETURNING id",
+            vals![depot.map(|d| d.0), kind, payload, now],
         )?;
-        Ok(self.conn().last_insert_rowid())
+        Ok(new_id)
     }
 
     /// Moves a subscriber's cursor.
@@ -1336,7 +1281,7 @@ impl WriteTx<'_> {
         self.conn().execute(
             "INSERT INTO outbox_cursor (subscriber, last_id) VALUES (?1, ?2) \
              ON CONFLICT (subscriber) DO UPDATE SET last_id = excluded.last_id",
-            params![subscriber, last_id],
+            vals![subscriber, last_id],
         )?;
         Ok(())
     }
@@ -1345,16 +1290,15 @@ impl WriteTx<'_> {
     pub fn delete_outbox_cursor(&self, subscriber: &str) -> Result<()> {
         self.conn().execute(
             "DELETE FROM outbox_cursor WHERE subscriber = ?1",
-            [subscriber],
+            vals![subscriber],
         )?;
         Ok(())
     }
 
     /// Deletes outbox rows with ids up to and including `upto`.
     pub fn prune_outbox(&self, upto: i64) -> Result<usize> {
-        Ok(self
-            .conn()
-            .execute("DELETE FROM outbox WHERE id <= ?1", [upto])?)
+        self.conn()
+            .execute("DELETE FROM outbox WHERE id <= ?1", vals![upto])
     }
 
     fn expect_one(&self, changed: usize, what: &str) -> Result<()> {
@@ -1375,9 +1319,9 @@ impl WriteTx<'_> {
              objects_checked = excluded.objects_checked, \
              objects_affected = excluded.objects_affected, \
              bytes_affected = excluded.bytes_affected, problems = excluded.problems",
-            params![
+            vals![
                 row.depot_id.0,
-                row.kind,
+                &row.kind,
                 row.at,
                 to_i64(row.objects_checked)?,
                 to_i64(row.objects_affected)?,
@@ -1393,12 +1337,12 @@ impl WriteTx<'_> {
         let n = self.conn().execute(
             "INSERT INTO obliterated (depot_id, id, size, path, reason, by_id, at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (depot_id, id) DO NOTHING",
-            params![
+            vals![
                 row.depot_id.0,
                 row.id.as_bytes().as_slice(),
                 to_i64(row.size)?,
-                row.path,
-                row.reason,
+                &row.path,
+                &row.reason,
                 row.by.0,
                 row.at
             ],

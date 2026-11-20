@@ -1,0 +1,60 @@
+# Lode server with its metadata in Postgres (T153), plain HTTP on port 7480 for a trusted
+# network or behind a TLS proxy. Start from compose.yaml for built-in HTTPS.
+#
+#   1. Put the admin password in admin-password.txt next to this file (one line).
+#   2. Put the database password in db-password.txt (one line), and the matching URL in
+#      database-url.txt:  postgres://lode:<that password>@postgres/lode?sslmode=disable
+#      (inside this compose network; use sslmode=verify-full for a database elsewhere).
+#   3. docker compose -f compose.postgres.yaml up -d
+#
+# On the first start loded sets itself up and moves its metadata into the empty database.
+# File content stays in the `lode-data` volume; with S3 storage ([storage] in loded.toml) a
+# second loded container can run as a standby: set LODED_WAIT_FOR_LOCK=1 on it and it takes
+# over when the active one stops. Back the database up with pg_dump; `loded backup` copies the
+# configuration and the objects.
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lode
+      POSTGRES_DB: lode
+      POSTGRES_PASSWORD_FILE: /run/secrets/lode_db_password
+    secrets:
+      - lode_db_password
+    volumes:
+      - lode-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "lode", "-d", "lode"]
+      interval: 5s
+      retries: 20
+
+  loded:
+    image: ghcr.io/hutler/loded:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:7480:7480"
+    environment:
+      LODED_ADMIN_PASSWORD_FILE: /run/secrets/lode_admin_password
+      LODED_DATABASE_URL_FILE: /run/secrets/lode_database_url
+    secrets:
+      - lode_admin_password
+      - lode_database_url
+    volumes:
+      - lode-data:/var/lib/lode
+    stop_grace_period: 60s
+
+secrets:
+  lode_admin_password:
+    file: ./admin-password.txt
+  lode_db_password:
+    file: ./db-password.txt
+  lode_database_url:
+    file: ./database-url.txt
+
+volumes:
+  lode-data:
+  lode-db:

@@ -80,6 +80,8 @@ async fn info(State(state): State<AppState>) -> Json<Info> {
             label: o.label.clone(),
             password_login: o.password_login == crate::config::PasswordLogin::Everyone,
         }),
+        chunking: Some(lode_proto::auth::ChunkingInfo::current()),
+        proxy: None,
     })
 }
 

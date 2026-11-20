@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+mod chunked;
 mod encode;
 mod error;
 mod fs;
@@ -18,6 +19,7 @@ use futures::stream::BoxStream;
 use lode_core::{Codec, DepotId, ObjectId, ObjectKind};
 use tokio::io::AsyncRead;
 
+pub use chunked::{ChunkListOutcome, ChunkedStore};
 pub use error::{Result, StoreError};
 pub use fs::{FsBlobStore, FsBlobStoreConfig};
 pub use s3::{S3BlobStore, S3Config};

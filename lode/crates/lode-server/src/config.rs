@@ -105,6 +105,16 @@ grace_seconds = 86400
 # access_key_id = "AKIA..."             # with the secret's file; leave both out to use
 # secret_access_key_file = "s3-secret.txt"   # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
 
+# Where the metadata (history, users, access rules, module data) is kept. By default it is
+# the SQLite file meta.db in the data directory. With kind = "postgres" it is a Postgres
+# database (14 or newer), for many concurrent users and for a standby server that takes over
+# when this one stops (`loded serve --wait-for-lock`). Move an existing server with
+# `loded migrate-db --to postgres --url-file <file>`.
+# [database]
+# kind = "postgres"
+# url_file = "database-url.txt"   # first line: postgres://lode:...@db.example.com/lode?sslmode=verify-full
+# connections = 8                 # read connections; writes use one more
+
 # The admin web UI at <server>/admin/ for server administrators: depots, maintenance, people,
 # access rules and settings in a browser. Put the server behind TLS before using it from
 # another machine; turn it off if nobody uses it.
@@ -178,6 +188,130 @@ pub struct ServerConfig {
     /// The admin web UI.
     #[serde(default)]
     pub admin_ui: AdminUiConfig,
+    /// Where the metadata is kept.
+    #[serde(default)]
+    pub database: DatabaseConfig,
+}
+
+/// The `[database]` table (T153).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "RawDatabase")]
+pub struct DatabaseConfig {
+    /// Which database the server uses.
+    pub kind: DatabaseKind,
+    /// The Postgres URL, when given in the file. Prefer `url_file`.
+    pub url: Option<String>,
+    /// A file whose first line is the Postgres URL. Resolved against the config file's
+    /// directory.
+    pub url_file: Option<PathBuf>,
+    /// Read connections.
+    pub connections: usize,
+}
+
+impl std::fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("kind", &self.kind)
+            .field("url", &self.url.as_ref().map(|_| "***"))
+            .field("url_file", &self.url_file)
+            .field("connections", &self.connections)
+            .finish()
+    }
+}
+
+/// Which database holds the metadata.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseKind {
+    /// `meta.db` in the data directory (the default).
+    #[default]
+    Sqlite,
+    /// A Postgres database.
+    Postgres,
+}
+
+/// Default number of read connections.
+pub const DEFAULT_DB_CONNECTIONS: usize = 8;
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawDatabase {
+    #[serde(default)]
+    kind: DatabaseKind,
+    url: Option<String>,
+    url_file: Option<PathBuf>,
+    connections: Option<usize>,
+}
+
+impl TryFrom<RawDatabase> for DatabaseConfig {
+    type Error = String;
+
+    fn try_from(raw: RawDatabase) -> Result<Self, String> {
+        let connections = raw.connections.unwrap_or(DEFAULT_DB_CONNECTIONS);
+        if connections == 0 {
+            return Err("[database] connections must be at least 1".into());
+        }
+        if raw.url.is_some() && raw.url_file.is_some() {
+            return Err("[database] takes url or url_file, not both".into());
+        }
+        if raw.kind == DatabaseKind::Postgres && raw.url.is_none() && raw.url_file.is_none() {
+            return Err("[database] kind = \"postgres\" needs url_file (or url)".into());
+        }
+        if let Some(url) = &raw.url {
+            if !(url.starts_with("postgres://") || url.starts_with("postgresql://")) {
+                return Err("[database] url must start with postgres://".into());
+            }
+        }
+        Ok(Self {
+            kind: raw.kind,
+            url: raw.url,
+            url_file: raw.url_file,
+            connections,
+        })
+    }
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            kind: DatabaseKind::Sqlite,
+            url: None,
+            url_file: None,
+            connections: DEFAULT_DB_CONNECTIONS,
+        }
+    }
+}
+
+impl DatabaseConfig {
+    /// Postgres settings with the URL in a file.
+    pub fn postgres_file(url_file: impl Into<PathBuf>) -> Self {
+        Self {
+            kind: DatabaseKind::Postgres,
+            url: None,
+            url_file: Some(url_file.into()),
+            connections: DEFAULT_DB_CONNECTIONS,
+        }
+    }
+
+    /// The Postgres URL: `url`, or the first line of `url_file`.
+    pub fn postgres_url(&self) -> Result<String, String> {
+        if let Some(url) = &self.url {
+            return Ok(url.clone());
+        }
+        let Some(file) = &self.url_file else {
+            return Err("[database] has no url_file".into());
+        };
+        let text = std::fs::read_to_string(file)
+            .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+        let url = text.lines().next().unwrap_or("").trim().to_owned();
+        if !(url.starts_with("postgres://") || url.starts_with("postgresql://")) {
+            return Err(format!(
+                "{} must hold a postgres:// URL on its first line",
+                file.display()
+            ));
+        }
+        Ok(url)
+    }
 }
 
 /// The `[admin_ui]` table (T140).
@@ -1025,6 +1159,9 @@ impl ServerConfig {
                 *f = base.join(&*f);
             }
         }
+        if let Some(f) = &mut cfg.database.url_file {
+            *f = base.join(&*f);
+        }
         Ok(cfg)
     }
 
@@ -1194,6 +1331,7 @@ impl ServerConfig {
             oidc: None,
             storage: StorageConfig::default(),
             admin_ui: AdminUiConfig::default(),
+            database: DatabaseConfig::default(),
         }
     }
 }

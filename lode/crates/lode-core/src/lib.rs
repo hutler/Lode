@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod change;
+pub mod chunk;
 pub mod config;
 pub mod error;
 pub mod glob;
@@ -17,6 +18,10 @@ pub mod tree;
 mod varint;
 
 pub use change::{validate_changes, Change, ChangeAction, ChangeSetError, CopyFrom};
+pub use chunk::{
+    ChunkList, ChunkListError, ChunkRef, Chunked, Chunker, ChunkingHasher, CHUNK_ALGORITHM,
+    CHUNK_AVG, CHUNK_MAX, CHUNK_MIN, CHUNK_THRESHOLD,
+};
 pub use config::{CheckRequirement, ConfigError, LodeConfig};
 pub use error::ErrorCode;
 pub use glob::{GlobError, PathGlobSet};

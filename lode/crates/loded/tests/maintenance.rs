@@ -35,6 +35,7 @@ fn http_post(addr: &str, path: &str, token: &str, body: &str) -> String {
 
 fn loded(args: &[&str], config: &Path) -> std::process::Output {
     let mut cmd = Command::cargo_bin("loded").unwrap();
+    cmd.env_remove("LODE_TEST_POSTGRES");
     cmd.arg(args[0])
         .arg("--config")
         .arg(config)
@@ -48,6 +49,8 @@ fn backup_and_fsck_from_the_command_line() {
     let data = dir.path().join("data");
     let out = Command::cargo_bin("loded")
         .unwrap()
+        // A backup restores as a data directory only with SQLite.
+        .env_remove("LODE_TEST_POSTGRES")
         .arg("init")
         .arg(&data)
         .output()
@@ -66,6 +69,8 @@ fn backup_and_fsck_from_the_command_line() {
 
     let child = Command::cargo_bin("loded")
         .unwrap()
+        // A backup restores as a data directory only with SQLite.
+        .env_remove("LODE_TEST_POSTGRES")
         .arg("serve")
         .arg("--config")
         .arg(&cfg_path)
