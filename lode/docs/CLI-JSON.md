@@ -524,7 +524,7 @@ may also manage that agent's tokens).
 | `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
 | `obliterate <depot> <path[@rev]>… --reason R [--dry-run] [--yes]` | `{ "dry_run", "objects": [ { "id", "size", "uses": [ { "rev", "branch", "path" } ] } ], "bytes", "in_use"? }`; `in_use` (`[ { "branch", "path", "id" } ]`) only on a dry run, otherwise it is a `conflict` with `details.in_use` |
 | `obliterated <depot>` | `{ "obliterated": [ { "id", "size", "path", "reason", "by", "at" } ] }`, oldest first |
-| `webhook add <depot> <url> --events E,… [--branch G]` | `{ "hook": hook, "secret" }`; the secret goes to stdout once |
+| `webhook add <depot> <url> --events E,… [--branch G] [--format lode\|slack\|discord\|telegram]` | `{ "hook": hook, "secret" }`; the secret goes to stdout once. `hook.format` is present unless it is `lode` |
 | `webhook list <depot>` | `{ "webhooks": [ { "id", "depot", "url", "events", "branch"?, "active", "created_by", "created_at" } ] }` |
 | `webhook remove <depot> <id>` | `{ "removed": id }` |
 | `webhook deliveries <depot> <id>` | `{ "deliveries": [ { "id", "hook_id", "event", "state": "pending"|"ok"|"failed", "attempts", "next_attempt_at"?, "last_status"?, "last_error"?, "created_at" } ] }`, newest first |

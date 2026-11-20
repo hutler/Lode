@@ -59,6 +59,7 @@ async fn migrate_db_moves_everything_and_serves_the_same_history() {
                 url: "http://127.0.0.1:9/hook".into(),
                 events: vec!["revision.created".into()],
                 branch: None,
+                format: Default::default(),
             },
         )
         .await

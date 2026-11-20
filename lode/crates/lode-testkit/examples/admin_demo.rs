@@ -195,6 +195,7 @@ async fn main() {
                 url: hook_url,
                 events: vec!["revision.created".into(), "lock.acquired".into()],
                 branch: Some("main".into()),
+                format: Default::default(),
             },
         )
         .await

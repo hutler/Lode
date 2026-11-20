@@ -842,7 +842,8 @@ Tells outside systems that something happened, so they need not poll. Built only
 
 ```sql
 mod_webhooks_hook     (id INTEGER PK, depot_id, url TEXT, secret BLOB, events TEXT /*json list*/,
-                       branch_glob TEXT NULL, active INT, created_by, created_at)
+                       branch_glob TEXT NULL, active INT, created_by, created_at,
+                       format TEXT DEFAULT 'lode' /*module schema 2, T175*/)
 mod_webhooks_delivery (id INTEGER PK, hook_id, outbox_id NULL /*NULL for ping*/, event TEXT,
                        body TEXT, state TEXT /*pending|ok|failed*/, attempts INT,
                        next_attempt_at NULL, first_attempt_at NULL, last_status INT NULL,
@@ -871,10 +872,18 @@ mod_webhooks_delivery (id INTEGER PK, hook_id, outbox_id NULL /*NULL for ping*/,
   oldest first; different hooks proceed in parallel.
 - URLs must be `https://` unless `[webhooks] allow_http = true` in `loded.toml`, and may not
   carry a user name or password.
+- Formats (T175). `POST` also takes `format`: `lode` (the default, the event envelope above;
+  left out of JSON when it is the default) or `slack`, `discord`, `telegram`. A chat format's
+  body is built when the delivery is queued (`chat::body`): one line of text from the event's
+  identifiers, `{"text"}`, `{"content"}` or `{"chat_id", "text",
+  "disable_web_page_preview": true}` with `chat_id` from the hook URL's query (required at
+  create). Revision and shelf messages end with a `/web/` link when
+  `ServerConfig::public_base` knows the address (ACME domain, else `[oidc] public_url`).
+  Headers and signing are the same for every format.
 - Delivery rows that are no longer pending are deleted 7 days after they were queued.
 - Delivery is at-least-once and, under retry, not strictly ordered. Receivers should treat an
   event as a hint and read the revision list with `after=` from their own cursor.
-- CLI: `lode admin webhook add <depot> <url> --events e1,e2 [--branch GLOB]` (prints the
+- CLI: `lode admin webhook add <depot> <url> --events e1,e2 [--branch GLOB] [--format F]` (prints the
   secret once on stdout), `list <depot>`, `remove <depot> <id>`, `deliveries <depot> <id>`,
   `ping <depot> <id>`.
 

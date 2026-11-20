@@ -8,8 +8,8 @@ use axum::response::Response;
 use lode_proto::consts::paths;
 use lode_proto::depot::DepotList;
 use lode_proto::webhooks::{
-    CreateWebhookRequest, CreatedWebhook, DeliveryList, DeliveryState, DeliveryView, WebhookList,
-    WebhookView, EVENTS,
+    CreateWebhookRequest, CreatedWebhook, DeliveryList, DeliveryState, DeliveryView, WebhookFormat,
+    WebhookList, WebhookView, EVENTS,
 };
 
 use super::api::path;
@@ -77,7 +77,7 @@ async fn list_page(ctx: &Ctx, admin: &Admin, top: Html) -> Response {
                 "<tr id=\"hook-{}\"><td class=\"num\" data-label=\"Hook\"><a href=\"{}\">#{}</a></td>\
                  <td data-label=\"Depot\">{}</td><td data-label=\"Sends to\"><code>{}</code></td>\
                  <td data-label=\"Events\">{}</td><td data-label=\"Branches\">{}</td>\
-                 <td data-label=\"State\">{}</td><td data-label=\"Added\">{} by {}</td>\
+                 <td data-label=\"Format\">{}</td><td data-label=\"State\">{}</td><td data-label=\"Added\">{} by {}</td>\
                  <td><div class=\"actions\"><form method=\"post\" action=\"{}/ping\">{}\
                  <button type=\"submit\">Send a test</button></form>\
                  <form method=\"post\" action=\"{}/remove\" data-confirm=\"Remove hook #{}? It stops sending at once.\">{}\
@@ -89,6 +89,7 @@ async fn list_page(ctx: &Ctx, admin: &Admin, top: Html) -> Response {
                 h.url,
                 h.events.join(", "),
                 h.branch.as_deref().unwrap_or("all"),
+                h.format.as_str(),
                 active,
                 at(h.created_at),
                 h.created_by.name,
@@ -105,7 +106,7 @@ async fn list_page(ctx: &Ctx, admin: &Admin, top: Html) -> Response {
     } else {
         html!(
             "<table class=\"wide\"><thead><tr><th class=\"num\">Hook</th><th>Depot</th>\
-             <th>Sends to</th><th>Events</th><th>Branches</th><th>State</th><th>Added</th><th></th>\
+             <th>Sends to</th><th>Events</th><th>Branches</th><th>Format</th><th>State</th><th>Added</th><th></th>\
              </tr></thead><tbody>{}</tbody></table>",
             rows
         )
@@ -137,10 +138,16 @@ async fn list_page(ctx: &Ctx, admin: &Admin, top: Html) -> Response {
              <div class=\"row\"><label>Depot<select name=\"depot\">{}</select></label>\
              <label>Sends to<input type=\"url\" name=\"url\" required=\"required\" \
              placeholder=\"https://ci.example.com/lode\"/></label>\
-             <label>Branches<input type=\"text\" name=\"branch\" placeholder=\"all, or a glob like release/*\"/></label></div>\
+             <label>Branches<input type=\"text\" name=\"branch\" placeholder=\"all, or a glob like release/*\"/></label>\
+             <label>Format<select name=\"format\">\
+             <option value=\"lode\">Lode (signed JSON)</option>\
+             <option value=\"slack\">Slack</option><option value=\"discord\">Discord</option>\
+             <option value=\"telegram\">Telegram</option></select></label></div>\
              <fieldset><legend>Events</legend>{}</fieldset>\
              <p class=\"muted\">The receiver gets a POST at {} for each event, signed with the \
-             hook's secret in <code>X-Lode-Signature</code>.</p>\
+             hook's secret in <code>X-Lode-Signature</code>. The chat formats send one line of \
+             text to a Slack or Discord webhook URL, or to a Telegram bot's \
+             <code>sendMessage</code> URL with <code>?chat_id=</code>.</p>\
              <button type=\"submit\" class=\"primary\">Add webhook</button></form>",
             LIST,
             csrf,
@@ -180,6 +187,7 @@ pub(crate) async fn create(State(ctx): State<Ctx>, post: Post) -> Response {
         url: f.text("url"),
         events,
         branch: (!branch.is_empty()).then_some(branch),
+        format: WebhookFormat::parse(&f.text("format")).unwrap_or_default(),
     };
     let top = match ctx
         .api(&post.admin)

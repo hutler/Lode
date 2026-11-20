@@ -1117,6 +1117,22 @@ fn default_listen() -> SocketAddr {
 }
 
 impl ServerConfig {
+    /// The address people reach this server at, when the configuration says: the ACME
+    /// domain (`https://`, with the port unless it is 443), otherwise `[oidc] public_url`.
+    /// Used for links in messages sent elsewhere, such as chat notifications (T175).
+    pub fn public_base(&self) -> Option<String> {
+        if let Some(TlsConfig::Acme(a)) = &self.tls {
+            return Some(match self.listen.port() {
+                443 => format!("https://{}", a.domain),
+                p => format!("https://{}:{p}", a.domain),
+            });
+        }
+        self.oidc
+            .as_ref()
+            .and_then(|o| o.public_url.as_deref())
+            .map(|u| u.trim_end_matches('/').to_owned())
+    }
+
     /// Parses configuration text. Relative paths are resolved against `base`.
     pub fn parse(text: &str, base: &Path, origin: &Path) -> Result<Self, ConfigError> {
         let mut cfg: ServerConfig = toml::from_str(text).map_err(|e| ConfigError::Parse {

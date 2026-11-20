@@ -729,6 +729,7 @@ fn webhooks_types() {
             url: "https://ci.example.com/hooks/lode".into(),
             events: vec!["revision.created".into(), "shelf.updated".into()],
             branch: Some("release/*".into()),
+            format: Default::default(),
         }
     );
     let hook = WebhookView {
@@ -737,6 +738,7 @@ fn webhooks_types() {
         url: "https://ci.example.com/hooks/lode".into(),
         events: vec!["revision.created".into()],
         branch: None,
+        format: Default::default(),
         active: true,
         created_by: ana(),
         created_at: T,

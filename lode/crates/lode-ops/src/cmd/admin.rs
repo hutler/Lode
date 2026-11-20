@@ -10,7 +10,9 @@ use lode_proto::admin::{
     PatchPrincipalRequest,
 };
 use lode_proto::auth::{CreateTokenRequest, PrincipalView, TokenView};
-use lode_proto::webhooks::{CreateWebhookRequest, DeliveryState, DeliveryView, WebhookView};
+use lode_proto::webhooks::{
+    CreateWebhookRequest, DeliveryState, DeliveryView, WebhookFormat, WebhookView,
+};
 use lode_proto::PrincipalKind;
 use serde_json::{json, Value};
 
@@ -130,6 +132,10 @@ pub enum WebhookCmd {
         /// Only events on branches matching this glob.
         #[arg(long)]
         branch: Option<String>,
+        /// What to send: lode (signed JSON, the default), or one line of text for slack,
+        /// discord or telegram (a bot's sendMessage URL with ?chat_id=).
+        #[arg(long, default_value = "lode", value_parser = ["lode", "slack", "discord", "telegram"])]
+        format: String,
     },
     /// List the hooks of a depot.
     List {
@@ -699,7 +705,7 @@ fn print_check(ctx: &Ctx, c: &AccessCheck) {
 
 fn webhook_line(h: &WebhookView) -> String {
     format!(
-        "{:>4}  {}  events {}{}{}",
+        "{:>4}  {}  events {}{}{}{}",
         h.id,
         h.url,
         h.events.join(","),
@@ -707,6 +713,11 @@ fn webhook_line(h: &WebhookView) -> String {
             .as_deref()
             .map(|b| format!("  branch {b}"))
             .unwrap_or_default(),
+        if h.format.is_lode() {
+            String::new()
+        } else {
+            format!("  format {}", h.format.as_str())
+        },
         if h.active { "" } else { "  (inactive)" }
     )
 }
@@ -744,7 +755,10 @@ async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> OpResult<Value> {
             url,
             events,
             branch,
+            format,
         } => {
+            let format = WebhookFormat::parse(&format)
+                .ok_or_else(|| OpError::usage(format!("unknown webhook format `{format}`")))?;
             if let Some(b) = &branch {
                 check_glob("branch", b)?;
             }
@@ -760,6 +774,7 @@ async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> OpResult<Value> {
                         url,
                         events,
                         branch,
+                        format,
                     },
                 )
                 .await?;

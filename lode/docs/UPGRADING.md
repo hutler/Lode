@@ -134,6 +134,9 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   expire. A TLS proxy in front of the server must pass `/web/` through as well.
 - Shelf review on the web (T174): `/web/depots/D/shelves` lists open shelves; a shelf's page
   shows its diff and checks and offers Submit and Delete, under the API's usual rules.
+- Webhooks gain `format` (T175, webhooks module schema 2, added on the first start):
+  `slack`, `discord` or `telegram` send one line of text to team chat; `lode` (the default)
+  is unchanged byte for byte. `lode admin webhook add --format F`.
 
 ### 0.3.0: chunked large files, Postgres, caching proxy (M15)
 
