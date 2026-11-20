@@ -109,7 +109,7 @@ See [lode/docs/MCP.md](lode/docs/MCP.md).
 | Client | What it is |
 | --- | --- |
 | `lode` | The command-line client. Every command has `--json`. |
-| **Lode Desk** | A native desktop app (Slint): changes and changelists, history, blame, text and image diffs, branches and merges with conflict resolution, locks, shelves and their checks. It updates itself. Guide: [lode/docs/desk-guide.md](lode/docs/desk-guide.md). |
+| **Lode Desk** | A native desktop app (Slint): changes and changelists, history, blame, text and image diffs, branches and merges with conflict resolution, locks, shelves and their checks. It updates itself. Guide: [desk/docs/guide.md](desk/docs/guide.md). |
 | **Lode for Unreal** | An Unreal Editor plugin that makes Lode a revision control provider (Unreal Engine 5.8). It runs `lode --json`. Guide and spec: [unreal/docs/SPEC.md](unreal/docs/SPEC.md). |
 | Any MCP agent | `lode mcp` on a developer machine, or `/mcp` on the server. |
 
@@ -153,7 +153,8 @@ Implemented on `main`: Lode v1 (M0 to M6), packaging and easy setup (M7, M8), Lo
 M13, now on Slint), Lode 0.2 features such as obliterate, single sign-on, S3 storage and the
 SVN importer (M12), the admin web UI (M14), chunked large files, Postgres and the caching
 proxy (M15), streams and smarter merges (M16), and the agent as a desktop client with the event
-feed (M18), plus deleting users and depots and backup copies to S3.
+feed (M18), plus deleting users and depots and backup copies to S3. Lode Desk now lives in its
+own `desk/` folder with a pinned core version, its own CI and its own `desk-v*` releases.
 
 Releases: **0.2.0** is published on the
 [releases page](https://github.com/hutler/Lode/releases/tag/lode-v0.2.0). **0.3.0** and
@@ -168,8 +169,6 @@ In review now:
 - **M19, content validation** ([#21](https://github.com/hutler/Lode/pull/21)): Python
   validation scripts kept in the depot that run before shelve and commit, for people and agents
   alike, plus branches that accept only shelf submits.
-- **Lode Desk in its own folder** ([#22](https://github.com/hutler/Lode/pull/22)): Desk moves to
-  a top-level `desk/` with a pinned core version, its own CI and its own `desk-v*` releases.
 
 Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
 [unreal/docs/TASKS.md](unreal/docs/TASKS.md).
@@ -178,11 +177,15 @@ Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
 
 | Folder | What it is | Language | Start reading at |
 | --- | --- | --- | --- |
-| [lode/](lode/) | The server `loded`, the client `lode`, the modules and Lode Desk | Rust | [lode/README.md](lode/README.md), [lode/docs/SPEC.md](lode/docs/SPEC.md), [lode/docs/ARCHITECTURE.md](lode/docs/ARCHITECTURE.md) |
+| [lode/](lode/) | The core: the server `loded`, the client `lode`, the modules and the `lode-ops` library | Rust | [lode/README.md](lode/README.md), [lode/docs/SPEC.md](lode/docs/SPEC.md), [lode/docs/ARCHITECTURE.md](lode/docs/ARCHITECTURE.md) |
+| [desk/](desk/) | Lode Desk, the desktop client, built on a pinned version of the core | Rust | [desk/README.md](desk/README.md), [desk/docs/guide.md](desk/docs/guide.md) |
 | [unreal/](unreal/) | Lode for Unreal, the editor plugin | C++ | [unreal/docs/SPEC.md](unreal/docs/SPEC.md) |
 | [docs/logo/](docs/logo/) | The mascot and banner, with the scripts that draw them | Python | |
 
 Lode never names Unreal: the plugin only runs the `lode` command and reads its JSON output.
+Lode Desk uses the core's `lode-ops` library at a version pinned in `desk/Cargo.toml`, so the
+core changes and settles first and Desk moves to it in its own change; Desk has its own
+version, CI and `desk-v*` releases.
 
 ## Building and contributing
 
@@ -192,7 +195,8 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-Building needs Rust 1.88 or newer and, on Windows, the MSVC C++ build tools. More in
+Lode Desk builds on its own, in `desk/` (`cargo build`, `cargo test`), and needs Rust 1.92.
+Building the core needs Rust 1.88 or newer and, on Windows, the MSVC C++ build tools. More in
 [lode/README.md](lode/README.md). Rules for people and AI agents working in this repository
 are in [AGENTS.md](AGENTS.md).
 

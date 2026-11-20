@@ -156,7 +156,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     window.set_pending_rows(ModelRc::from(Rc::clone(&pending_rows)));
     window.set_list_rows(ModelRc::from(Rc::clone(&list_rows)));
     let workspaces = Rc::new(VecModel::<WorkspaceTab>::default());
-    window.set_version(lode_build::VERSION.into());
+    window.set_version(env!("DESK_BUILD_VERSION").into());
     window.set_recent(ModelRc::from(Rc::clone(&recent)));
     window.set_workspaces(ModelRc::from(Rc::clone(&workspaces)));
     let change_rows = Rc::new(VecModel::<ChangeRow>::default());

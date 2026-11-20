@@ -1,8 +1,16 @@
 # Releasing Lode
 
-A release is one tag, `lode-v<version>`, which `.github/workflows/lode-release.yml` turns into
-a GitHub release holding the `lode` and `loded` archives, the client and server packages, the
-server image, and the Lode Desk installers with their update feed. This page is the checklist.
+Lode and Lode Desk release separately, each from its own tag:
+
+- `lode-v<version>`: `.github/workflows/lode-release.yml` makes the GitHub release "Lode
+  <version>" with the `lode` and `loded` archives, the client and server packages, and pushes
+  the server image.
+- `desk-v<version>`: `.github/workflows/desk-release.yml` makes the GitHub release "Lode Desk
+  <version>" with the installers, and publishes the update feed.
+
+Desk builds against a pinned Lode core (see "The core version" in `desk/README.md`), so a Lode
+release never needs a Desk release, and a Desk release can follow when Desk has moved to the
+new core. When both go out together, tag Lode first. This page is the checklist for both.
 
 ## Once per repository
 
@@ -46,16 +54,24 @@ These are set up once, by someone with admin rights on the repository.
 
 ## Before the tag
 
-- [ ] `main` is green in `.github/workflows/lode.yml`, including the Lode Desk jobs.
-- [ ] The version in `lode/Cargo.toml` (workspace) is the tag's, and
-      `lode/crates/lode-desk/Cargo.toml` agrees. The programs report the workspace version, so
-      the workflow stops if it differs from the tag.
+Lode (`lode-v`):
+
+- [ ] `main` is green in `.github/workflows/lode.yml`.
+- [ ] The version in `lode/Cargo.toml` (workspace) is the tag's. The programs report the
+      workspace version, so the workflow stops if it differs from the tag.
 - [ ] `docs/UPGRADING.md` says what changes for people upgrading a server, if anything.
-- [ ] The user guide and the Lode Desk guide describe what changed; the PDF is regenerated.
-- [ ] A manual run of the workflow ("Run workflow" on `lode-release`) passed on the commit to
-      be tagged. It builds everything without publishing; its `lode-desk-release` artifact
-      holds the installers and, when the update key is set, a `latest.json` checked against
-      `lode/crates/lode-desk/packaging/feed.schema.json`.
+- [ ] The user guide describes what changed; the PDF is regenerated.
+- [ ] A manual run of `lode-release` ("Run workflow") passed on the commit to be tagged.
+
+Lode Desk (`desk-v`):
+
+- [ ] `main` is green in `.github/workflows/desk.yml`.
+- [ ] `desk/Cargo.toml` pins the core Desk is meant to ship with (normally the newest
+      `lode-v` tag), and its own `version` is the tag's; the workflow stops if they differ.
+- [ ] `desk/docs/guide.md` describes what changed.
+- [ ] A manual run of `desk-release` passed on the commit to be tagged. Its
+      `lode-desk-release` artifact holds the installers and, when the update key is set, a
+      `latest.json` checked against `desk/packaging/feed.schema.json`.
 
 ## Build versions
 
@@ -63,7 +79,8 @@ Every commit builds programs that say which commit they came from, so a build fr
 to `main` can be told apart from the release and from other pushes. `lode --version`,
 `loded --version`, `/api/v1/info` (`server_version`), the admin pages and Lode Desk's About
 show it; `lode --version --json` has it as `build`. The crate `lode-build` works it out in its
-`build.rs`:
+`build.rs`. Lode Desk's About works out its own the same way from `desk-v*` tags
+(`desk/build.rs`, `DESK_BUILD_VERSION`):
 
 | Built from | Build version |
 |---|---|
@@ -82,25 +99,33 @@ needs bumping by hand for this; the release version in `Cargo.toml` changes only
 ```
 git tag -a lode-v0.2.0 -m "Lode 0.2.0"
 git push origin lode-v0.2.0
+git tag -a desk-v0.2.0 -m "Lode Desk 0.2.0"    # when Desk goes out too
+git push origin desk-v0.2.0
 ```
 
-The workflow then:
+`lode-release` then:
 
 1. builds the CLI and server for five targets and the server packages, installing each
    package once before going on;
 2. creates the release with generated notes;
-3. builds the Lode Desk installers with cargo-packager on Linux (`.deb`, AppImage), Windows
+3. pushes the server image.
+
+`desk-release` then:
+
+1. builds the Lode Desk installers with cargo-packager on Linux (`.deb`, AppImage), Windows
    (MSI and NSIS setup) and macOS (universal `.app` and `.dmg`), installs the `.deb` on Ubuntu
    and the MSI on Windows, and checks that the `.deb`, the AppImage and the MSI register
    `lode://` links;
-4. attaches the Lode Desk installers to the release, writes the update feed from their
-   signatures and the release notes, checks it against its schema and uploads it as
-   `latest.json` to the fixed release `lode-desk-feed`, where installed copies look;
-5. pushes the server image.
+2. creates the release "Lode Desk <version>" with generated notes (not marked latest, so the
+   Lode release stays the repository's latest) and attaches the installers;
+3. writes the update feed from their signatures and the release notes, checks it against its
+   schema and uploads it as `latest.json` to the fixed release `lode-desk-feed`, where
+   installed copies look.
 
 ## After the tag
 
-- [ ] The release lists the archives, packages, `SHA256SUMS` and the `lode-desk-*` files.
+- [ ] The Lode release lists the archives, packages and `SHA256SUMS`; the Lode Desk release
+      lists the `lode-desk-*` files.
 - [ ] `https://github.com/<owner>/Lode/releases/download/lode-desk-feed/latest.json`
       names the new version.
 - [ ] On one machine with the previous Lode Desk: Home, "Check for updates now" finds the new
