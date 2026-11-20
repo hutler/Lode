@@ -139,6 +139,9 @@ Templates exist for `unreal`, `unity`, `godot`, `rust`, `node` and `generic`. Th
 and AI agents deploying a server can follow
 [lode/docs/deploy-linux-for-agents.md](lode/docs/deploy-linux-for-agents.md).
 
+For agents working with Lode, see the Russian [system guide](docs/agent-guide.ru.md)
+and [pre-commit and shelf validation guide](docs/agent-validation.ru.md).
+
 ## What Lode is not
 
 Lode stays small on purpose. It has no built-in CI runners (it stores and enforces check
