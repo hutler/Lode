@@ -492,7 +492,7 @@ may also manage that agent's tokens).
 | `user list` / `agent list` | `{ "principals": [principal] }`, users or agents only |
 | `user disable <name> [--enable]` / `agent disable …` | the principal |
 | `user passwd <name> [--password-stdin]` | the principal |
-| `agent create <name> --owner <user> [--display-name D]` | the principal |
+| `agent create <name> --owner <user> [--display-name D] [--grant DEPOT=LEVEL]… [--with-token [--scope S]]` | the principal, plus `"rules": [rule]` with `--grant` (allow LEVEL on every branch and path of DEPOT) and `"token"` (as `token create`) with `--with-token`; the token alone goes to stdout in text mode. A failure after the agent exists says what was done |
 | `group create <name>` / `group list` | `{ "name", "members" }` / `{ "groups": [ … ] }` |
 | `group add|remove <group> <member>` | `{ "group", "added"|"removed" }` |
 | `token create [--for P] [--name N] [--scope S,…] [--expires-in-days D]` | `{ "token", "info": token }` |

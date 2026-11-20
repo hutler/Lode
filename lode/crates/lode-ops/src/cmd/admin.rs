@@ -261,7 +261,8 @@ pub enum UserCmd {
 /// `lode admin agent`.
 #[derive(Debug, clap::Subcommand)]
 pub enum AgentCmd {
-    /// Create an agent owned by a user. Give it a token with `lode admin token create --for`.
+    /// Create an agent owned by a user; with --with-token and --grant, ready to work in one
+    /// step.
     Create {
         /// Name.
         name: String,
@@ -271,6 +272,17 @@ pub enum AgentCmd {
         /// Display name.
         #[arg(long)]
         display_name: Option<String>,
+        /// Allow the agent LEVEL (read, write or admin) in DEPOT, on every branch and path
+        /// (repeatable): `--grant game=write`.
+        #[arg(long = "grant", value_name = "DEPOT=LEVEL")]
+        grants: Vec<String>,
+        /// Also create a token for it and print it (once). Scopes: the agent defaults (read,
+        /// lock, shelve) unless --scope is given.
+        #[arg(long)]
+        with_token: bool,
+        /// With --with-token: the token's scopes, such as read,shelve (repeatable).
+        #[arg(long = "scope", value_delimiter = ',', requires = "with_token")]
+        scopes: Vec<String>,
     },
     /// List agents.
     List,
@@ -592,6 +604,34 @@ fn parse_subject(s: &str) -> OpResult<AclSubject> {
             "`{s}` is not a subject: use user:NAME, group:NAME or all"
         ))),
     }
+}
+
+/// `game=write` of `agent create --grant`.
+fn parse_grant(g: &str) -> OpResult<(String, AccessLevel)> {
+    let bad = || OpError::usage(format!("`{g}` is not DEPOT=LEVEL, such as game=write"));
+    let (depot, level) = g.split_once('=').ok_or_else(bad)?;
+    let level = match level {
+        "read" => AccessLevel::Read,
+        "write" => AccessLevel::Write,
+        "admin" => AccessLevel::Admin,
+        _ => return Err(bad()),
+    };
+    if depot.is_empty() {
+        return Err(bad());
+    }
+    Ok((depot.to_owned(), level))
+}
+
+/// ` and read in game, write in art`, for the agent's creation message.
+fn grants_text(rules: &[AclRule]) -> String {
+    if rules.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = rules
+        .iter()
+        .map(|r| format!("{} in {}", level_name(r.level), r.depot.as_deref().unwrap_or("every depot")))
+        .collect();
+    format!(", allowed {}", parts.join(", "))
 }
 
 fn subject_text(s: &AclSubject) -> String {
@@ -1028,7 +1068,15 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             name,
             owner,
             display_name,
+            grants,
+            with_token,
+            scopes,
         }) => {
+            // Checked before anything is created.
+            let grants = grants
+                .iter()
+                .map(|g| parse_grant(g))
+                .collect::<OpResult<Vec<_>>>()?;
             let p = c
                 .create_principal(&CreatePrincipalRequest {
                     kind: PrincipalKind::Agent,
@@ -1039,13 +1087,83 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
                     sso: None,
                 })
                 .await?;
-            ctx.out.line(format!(
-                "Created agent {} (owner {}); give it a token with `lode admin token create --for {}`",
-                p.name,
-                p.owner.as_deref().unwrap_or("?"),
-                p.name
-            ));
-            to_json(&p)
+            // From here on the agent exists: a failure says what was already done.
+            let partly = |e: lode_client::Error, done: &str| {
+                let mut e = OpError::from(e);
+                e.message = format!(
+                    "{}; agent {} was created{done}, so finish with `lode admin acl add` and \
+                     `lode admin token create --for {}`",
+                    e.message, p.name, p.name
+                );
+                e
+            };
+            let mut rules = Vec::new();
+            for (depot, level) in grants {
+                let rule = AclRule {
+                    id: None,
+                    depot: Some(depot),
+                    subject: AclSubject::User(p.name.clone()),
+                    branch: "**".into(),
+                    path: "**".into(),
+                    effect: AclEffect::Allow,
+                    level,
+                };
+                let done = if rules.is_empty() {
+                    String::new()
+                } else {
+                    format!(" with {} of its rules", rules.len())
+                };
+                rules.push(c.add_acl_rule(&rule).await.map_err(|e| partly(e, &done))?);
+            }
+            let token = if with_token {
+                let req = CreateTokenRequest {
+                    name: "agent".into(),
+                    scopes,
+                    expires_at: None,
+                };
+                let done = if rules.is_empty() {
+                    String::new()
+                } else {
+                    " with its rules".to_owned()
+                };
+                Some(
+                    c.create_token_for(&p.name, &req)
+                        .await
+                        .map_err(|e| partly(e, &done))?,
+                )
+            } else {
+                None
+            };
+            match &token {
+                Some(t) => {
+                    // The value alone on stdout, as `token create` prints it.
+                    ctx.out.line(&t.token);
+                    ctx.out.note(format!(
+                        "Created agent {} (owner {}){} with a token (scopes {}). It is shown only now.",
+                        p.name,
+                        p.owner.as_deref().unwrap_or("?"),
+                        grants_text(&rules),
+                        t.info.scopes.join(", ")
+                    ));
+                }
+                None => ctx.out.line(format!(
+                    "Created agent {} (owner {}){}; give it a token with `lode admin token create --for {}`",
+                    p.name,
+                    p.owner.as_deref().unwrap_or("?"),
+                    grants_text(&rules),
+                    p.name
+                )),
+            }
+            let mut v = to_json(&p)?;
+            if let Value::Object(m) = &mut v {
+                if !rules.is_empty() {
+                    m.insert("rules".into(), serde_json::to_value(&rules).unwrap_or(Value::Null));
+                }
+                if let Some(t) = &token {
+                    m.insert("token".into(), serde_json::to_value(t).unwrap_or(Value::Null));
+                }
+            }
+            Ok(v)
         }
         AdminCmd::Agent(AgentCmd::List) => principals_of(ctx, &c, PrincipalKind::Agent).await,
         AdminCmd::Agent(AgentCmd::Disable { name, enable }) => {

@@ -801,10 +801,9 @@ lode admin acl remove 7</code></pre>
 
 <h1>9. Agents</h1>
 <p>An agent is an account for an automated tool. It belongs to a user, has its own tokens and its own permissions, and never inherits its owner's access.</p>
-<pre><code>lode admin agent create review-bot --owner alice
-lode admin token create --for review-bot --name default
-lode admin acl add allow read review-bot --depot game
+<pre><code>lode admin agent create review-bot --owner alice --grant game=read --with-token
 lode admin agent list</code></pre>
+<p>That one command creates the agent, lets it read <code>game</code> (<code>--grant</code> is repeatable) and prints its token once. The long way is the same three steps: <code>agent create</code>, <code>acl add allow read review-bot --depot game</code>, <code>token create --for review-bot</code>.</p>
 <ul>
   <li>New agent tokens get the scopes <code>read</code>, <code>shelve</code> and <code>lock</code>. An agent can therefore propose changes as shelves but cannot commit.</li>
   <li>To let an agent commit directly, an administrator must create its token with <code>--scope read,write,shelve,lock</code> and grant it <code>write</code> permission. Do this deliberately and narrowly.</li>

@@ -410,3 +410,61 @@ async fn depot_list_shows_revisions_size_and_last_commit_to_admins() {
     assert_eq!(list["depots"][0]["name"], "game", "{list}");
     assert!(list["depots"][0].get("revisions").is_none(), "{list}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn agent_create_with_token_and_grant_is_ready_in_one_command() {
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    server
+        .commit_files("game", "main", &[("a.txt", b"one\n")])
+        .await;
+    server.create_user("ana", &["read"]).await;
+    let admin = as_user(&server, server.admin_token());
+
+    let (code, err) = admin.json_status(&[
+        "admin", "agent", "create", "bot", "--owner", "ana", "--grant", "game:write",
+    ]);
+    assert_eq!(code, 2, "a bad grant is refused before anything is made: {err}");
+    let v = admin.json(&[
+        "admin",
+        "agent",
+        "create",
+        "bot",
+        "--owner",
+        "ana",
+        "--grant",
+        "game=write",
+        "--with-token",
+    ]);
+    assert_eq!(v["name"], "bot");
+    assert_eq!(v["rules"][0]["depot"], "game");
+    let token = v["token"]["token"].as_str().unwrap().to_owned();
+    let mut scopes: Vec<String> = v["token"]["info"]["scopes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_owned())
+        .collect();
+    scopes.sort();
+    assert_eq!(scopes, ["lock", "read", "shelve"]);
+
+    // It can shelve but not commit.
+    let ws = as_user(&server, &token);
+    ws.json(&["checkout", &format!("{}/game", server.url()), "."]);
+    ws.write("a.txt", "two\n");
+    let shelf = ws.json(&["shelve", "-m", "proposal", "--keep"]);
+    assert!(shelf["shelf"].as_u64().is_some(), "{shelf}");
+    let (code, err) = ws.json_status(&["commit", "-m", "direct"]);
+    assert_ne!(code, 0);
+    assert_eq!(err["error"]["code"], "permission_denied", "{err}");
+
+    // A failure after the agent exists says what was done.
+    let (code, err) = admin.json_status(&[
+        "admin", "agent", "create", "bot2", "--owner", "ana", "--grant", "nope=read",
+    ]);
+    assert_ne!(code, 0);
+    assert!(
+        err["error"]["message"].as_str().unwrap().contains("agent bot2 was created"),
+        "{err}"
+    );
+}

@@ -17,11 +17,10 @@ Every tool answers structured JSON. Errors carry the same stable `code` as the H
 Give an agent its own identity rather than your token, so revisions show who did the work:
 
 ```sh
-# An admin creates the agent once, and lets it read the depot:
-lode admin agent create fixer --owner ana
-lode admin acl add allow read user:fixer --depot game
-# Its owner (or an admin) makes it a token; no scopes means read, shelve and lock.
-# The token is printed once:
+# An admin creates the agent, lets it read the depot and prints its token (once);
+# no --scope means read, shelve and lock:
+lode admin agent create fixer --owner ana --grant game=read --with-token
+# Later its owner (or an admin) can make more tokens:
 lode admin token create --for fixer --name laptop
 ```
 

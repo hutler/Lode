@@ -127,3 +127,4 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   completion.
 - `GET /depots` gives server administrators `revisions`, `last_commit_at` and `size_bytes`
   per depot; `lode admin depot list` prints them as a table. Older clients ignore the fields.
+- `lode admin agent create` takes `--grant DEPOT=LEVEL` and `--with-token`.
