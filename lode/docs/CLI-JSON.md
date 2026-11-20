@@ -171,6 +171,9 @@ replaces the release list URL (a GitHub-style `releases` JSON).
       "lock_required": false }
   ],
   "invalid": [ { "local": "/abs/path", "reason": "…" } ],
+  "summary": { "changed": 1, "needs_lock": 0, "conflicted": 0, "untracked": 0,
+               "pending_merge": true, "newer_at_head": 1, "locked_by_others": 1,
+               "head_rev": 14 },
   "remote": {
     "head_rev": 14,
     "proxy": "https://lode-office.example.com/",
@@ -194,6 +197,24 @@ Without the locks module, no locks are reported. `moved` is true when the origin
 `locked` is true when this workspace holds the file's lock; `needs_lock` is true for a changed
 file that matches `[locks].required` and is not locked here (the commit would be refused).
 `merges` lists the merge waiting for the next commit (`lode merge`), empty when there is none.
+`summary` (0.4) counts the listed files: `changed` (every status but untracked and unchanged),
+`needs_lock`, `conflicted`, `untracked`, and `pending_merge`; with `--remote` it adds
+`newer_at_head`, `locked_by_others` (locks held by anyone but this workspace) and `head_rev`.
+
+### `lode events [--depot D] [--after ID] [--kinds K,…] [--wait S]`
+
+```json
+{ "events": [ { "id": 41, "event": "shelf.created", "depot": "game",
+                "created_at": "2026-11-20T18:00:00Z",
+                "data": { "shelf_id": 7, "version": 1, "branch": "main", "base_rev": 12,
+                          "owner": "bot", "owner_kind": "agent" } } ],
+  "next": 41, "truncated": false }
+```
+
+The events of the depot after `--after`, oldest first, at most 500 (SPEC §6.7). Without
+`--after`: no events, and `next` is the cursor to start from. `--wait` (at most 55) holds the
+request until an event arrives. Fails `module_disabled` when the server runs without the feed
+module; an unknown name in `--kinds` is `invalid_request`.
 
 ### `lode add <paths>`
 
@@ -462,7 +483,8 @@ a symlink is `invalid_request`; a file over 1 MiB is `too_large`.
 ### `lode mcp [--agent-model M] [--agent-session S] [--agent-tool T]`
 
 Serves the workspace over MCP on stdin and stdout until stdin closes; prints nothing else to
-stdout. Each tool's result is the JSON above for the matching command, without `ok`; a
+stdout. Each tool's result is the JSON above for the matching command, without `ok`
+(`conflicts` and `wait_for_events` are described in `docs/MCP.md`); a
 failure is a tool error carrying `{code, message, details?}`. See `docs/MCP.md`.
 
 ### `lode admin …`
@@ -486,6 +508,11 @@ may also manage that agent's tokens).
 | `acl list` | `{ "rules": [rule] }` in evaluation order |
 | `acl add <allow|deny> <read|write|admin> <subject> [--depot D] [--branch G] [--path G] [--check P B PATH]` | the rule, plus `"check"` with `--check` |
 | `acl remove <id>` | `{ "removed": id }` |
+
+A rule's `subject` is `{ "kind": "user"|"group", "name" }`, `{ "kind": "all" }` or (0.4)
+`{ "kind": "agents" }` for every agent. On the command line a subject is `user:NAME` (or just
+NAME), `group:NAME`, `all` or `agents`; a user named `agents` is written `user:agents`. A 0.3
+client cannot read a rule list that holds an `agents` rule.
 | `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null, "depot_admin"?, "matched"?, "decided_by"? }`: `depot_admin` (only when true) means an admin rule on the depot passes over path rules; `matched` lists the ids of the rules that apply, in order; `decided_by` is the rule that set the level, absent when none did or for the built-in `admin` |
 | `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
 | `obliterate <depot> <path[@rev]>… --reason R [--dry-run] [--yes]` | `{ "dry_run", "objects": [ { "id", "size", "uses": [ { "rev", "branch", "path" } ] } ], "bytes", "in_use"? }`; `in_use` (`[ { "branch", "path", "id" } ]`) only on a dry run, otherwise it is a `conflict` with `details.in_use` |

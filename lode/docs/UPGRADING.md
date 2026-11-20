@@ -129,3 +129,20 @@ so take a backup first.
   --example` prints a starting file). Clients use it after `lode proxy set <url>` or with
   `LODE_PROXY`; nothing changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
   open to the depot's readers (ids only).
+
+### Next (0.4): the agent as a desktop client (M18)
+
+Nothing has to be done to upgrade: replace the programs and restart. The database widens the
+access-rule subject check (core schema 7) and gains the feed module's tables, on the first
+start. Take a backup first; a 0.3 server refuses a database a 0.4 server has opened.
+
+- `lode mcp` gains `branches`, `locks`, `conflicts`, `switch`, `merge`, `resolve`,
+  `changelist` and `wait_for_events` (T190, T191, T193); `status` takes `remote` and, like
+  `lode status --json`, answers a `summary` of counts.
+- New module `feed`, on by default (`[modules] feed = false` turns it off; T192): `GET
+  /depots/{d}/events` with long-poll, `lode events`, and `wait_for_events` on `/mcp`. Events
+  are kept 7 days (at most 100 000 per depot). A reverse proxy in front of `loded` must allow
+  requests to take up to 60 seconds; most do by default.
+- Access rules take the subject `agents` (T194). A bare `agents` on the command line now means
+  this subject; a user named `agents` is written `user:agents`. A 0.3 client cannot list
+  rules once one exists.
