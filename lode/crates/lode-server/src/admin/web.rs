@@ -57,6 +57,7 @@ pub(crate) fn routes(r: axum::Router<Ctx>) -> axum::Router<Ctx> {
     .route("/web/depots/{d}/raw", axum::routing::get(raw))
     .route("/web/depots/{d}/history", axum::routing::get(history))
     .route("/web/depots/{d}/r/{n}", axum::routing::get(revision))
+    .merge(super::web_shelves::routes())
     .route(
         "/web/{*rest}",
         axum::routing::get(not_found).post(not_found),
@@ -68,7 +69,7 @@ pub(crate) fn depot_href(d: &str) -> String {
     format!("/web/depots/{}", encode(d))
 }
 
-fn revision_href(d: &str, n: u64) -> String {
+pub(crate) fn revision_href(d: &str, n: u64) -> String {
     format!("{}/r/{n}", depot_href(d))
 }
 
@@ -113,7 +114,7 @@ impl At {
 
 /// The address this server is reached at, for `lode://` links: the request's host, over
 /// https when the server speaks TLS or a proxy in front says so.
-fn origin(ctx: &Ctx, headers: &HeaderMap) -> Option<String> {
+pub(crate) fn origin(ctx: &Ctx, headers: &HeaderMap) -> Option<String> {
     let host = headers.get(header::HOST)?.to_str().ok()?;
     let forwarded_https = headers
         .get("x-forwarded-proto")
@@ -129,7 +130,7 @@ fn origin(ctx: &Ctx, headers: &HeaderMap) -> Option<String> {
 
 /// The `lode://` link of `link` with a copy button and an "open" link, or nothing when the
 /// address cannot be put in a link.
-fn link_box(link: Option<Link>) -> Html {
+pub(crate) fn link_box(link: Option<Link>) -> Html {
     let Some(text) = link.and_then(|l| links::build(&l).ok()) else {
         return Html::new();
     };
@@ -143,7 +144,7 @@ fn link_box(link: Option<Link>) -> Html {
 }
 
 /// An error page in the browser's frame: 404 for what does not exist or is hidden.
-fn failure(ctx: &Ctx, viewer: &Viewer, title: &str, e: &ErrorBody) -> Response {
+pub(crate) fn failure(ctx: &Ctx, viewer: &Viewer, title: &str, e: &ErrorBody) -> Response {
     let body = html!(
         "<h1>{}</h1>{}<p><a href=\"{}\">Back to the depots</a></p>",
         title,
@@ -436,11 +437,19 @@ async fn tree(
         depot: d.clone(),
         rev: place.rev,
     });
+    let shelves_link = if super::web_shelves::enabled(&ctx) {
+        html!(
+            "<a href=\"{}/shelves\">Shelves waiting for review</a>",
+            base
+        )
+    } else {
+        Html::new()
+    };
     let body = html!(
         "<h1>{}</h1>{}<div class=\"row spread\">{}<p class=\"muted\">{} on {}</p></div>{}\
          <section>{}</section>\
-         <section><h2>Recent revisions</h2>{}<p><a href=\"{}/history?branch={}\">All history</a>\
-         </p></section>",
+         <section><h2>Recent revisions</h2>{}<p class=\"actions\">\
+         <a href=\"{}/history?branch={}\">All history</a>{}</p></section>",
         d,
         breadcrumbs(&d, &at, &place.branch, dir),
         branch_picker(&base, &place, dir),
@@ -450,13 +459,14 @@ async fn tree(
         listing,
         recent,
         base,
-        encode(&place.branch)
+        encode(&place.branch),
+        shelves_link
     );
     Page::new(&d, Nav::Depots).render_web(&ctx, &viewer, body)
 }
 
 /// Image types shown inline; anything else is text or a download.
-fn image_type(path: &str) -> Option<&'static str> {
+pub(crate) fn image_type(path: &str) -> Option<&'static str> {
     let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
     Some(match ext.as_str() {
         "png" => "image/png",
@@ -721,7 +731,7 @@ async fn history(
 }
 
 /// The unified diff of one change, as rows with added and removed lines marked.
-fn diff_block(patch: &str) -> Html {
+pub(crate) fn diff_block(patch: &str) -> Html {
     let rows: Html = patch
         .lines()
         .map(|line| {

@@ -200,6 +200,39 @@ async fn main() {
         .await
         .unwrap();
     admin.ping_webhook("game", hook.hook.id).await.unwrap();
+    // A shelf waiting for review, for the depot browser's shelf pages (T174).
+    let before = b"int main(){return 0;}";
+    let after = b"int main(){\n    return 1;\n}\n";
+    let new_id = lode_core::blob_id(&after[..]).unwrap();
+    admin
+        .put_blob("game", &new_id, std::io::Cursor::new(after.to_vec()))
+        .await
+        .unwrap();
+    let head = admin.branch("game", "main").await.unwrap().head_rev;
+    let shelver = s.token_for("admin", &["read", "write", "shelve"]).await;
+    s.client(&shelver)
+        .create_shelf(
+            "game",
+            &lode_proto::shelves::CreateShelfRequest {
+                branch: "main".into(),
+                base_rev: head,
+                description: "Return 1 when the game fails to start".into(),
+                changes: vec![lode_core::Change {
+                    path: lode_core::DepotPath::parse("Source/main.cpp").unwrap(),
+                    action: lode_core::ChangeAction::Modify,
+                    base_id: Some(lode_core::blob_id(&before[..]).unwrap()),
+                    new_id: Some(new_id),
+                    kind: Some(lode_core::EntryKind::File),
+                    executable: false,
+                    size: Some(after.len() as u64),
+                    copy_from: None,
+                }],
+                merged_from: Vec::new(),
+                provenance: None,
+            },
+        )
+        .await
+        .unwrap();
     admin.gc("game", false).await.unwrap();
     admin.fsck("game", false).await.unwrap();
 

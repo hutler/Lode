@@ -25,6 +25,7 @@ mod session;
 mod settings;
 mod signin;
 mod web;
+mod web_shelves;
 mod webhooks;
 
 use axum::http::{header, HeaderValue, StatusCode};

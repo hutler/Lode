@@ -132,6 +132,8 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   `/admin/`, everyone else on the read-only depot browser at `/web/`. The session cookie's
   path is `/` instead of `/admin`; sessions from before the upgrade keep working until they
   expire. A TLS proxy in front of the server must pass `/web/` through as well.
+- Shelf review on the web (T174): `/web/depots/D/shelves` lists open shelves; a shelf's page
+  shows its diff and checks and offers Submit and Delete, under the API's usual rules.
 
 ### 0.3.0: chunked large files, Postgres, caching proxy (M15)
 

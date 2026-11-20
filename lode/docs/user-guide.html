@@ -1017,8 +1017,11 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
   <tr><td>A depot</td><td>The files of a directory at a branch's head (pick the branch) or at a revision, with sizes, and the recent revisions that touched it. Paths your access rules hide are not listed.</td></tr>
   <tr><td>A file</td><td>Text with line numbers (up to 2 MiB), images inline, anything else as a download, and the file's history. Content removed with obliterate is reported as such.</td></tr>
   <tr><td>A revision</td><td>Author, time, message and merges, and a diff of each changed text file.</td></tr>
+  <tr><td>Shelves</td><td>With the <code>shelves</code> module on: the open shelves of a depot, with owner (an agent and the user it belongs to), description, version, base revision and the state of their checks.</td></tr>
+  <tr><td>A shelf</td><td>The diff of each file against the shelf's base, images before and after side by side, the checks reported for its recent versions, and two buttons: <strong>Submit</strong> (the commit message starts as the shelf's description and can be edited) and <strong>Delete</strong>.</td></tr>
   <tr><td>Account</td><td>Your tokens, with Revoke, and a form to change your password.</td></tr>
 </table>
+<p><strong>Reviewing an agent's work.</strong> An agent proposes a change as a shelf (through MCP or <code>lode shelve</code>); a person opens the shelf's link, reads the diff and presses Submit. There is no separate approval: submitting is the acceptance, and the rules are the API's. Submit needs <code>write</code> on the branch; when the branch's <code>.lodeconfig</code> requires checks, every required check must be <code>success</code> on the shelf's current version, and the page lists each one that is not, and why. A submit from a page that shows an older version is refused, so what was read is what goes in. Delete is for the shelf's owner and depot administrators.</p>
 <p>Each depot, file and revision page shows its <code>lode://</code> link with a Copy button and an "Open in Lode Desk" button, so a link pasted in chat opens the same place in the app. Administrators get an Admin link at the top, and the admin pages a Browse link.</p>
 <h3>Turning it off</h3>
 <p>When nobody uses the pages, turn them off; <code>/admin/</code> and <code>/web/</code> then answer 404 like any unknown address:</p>

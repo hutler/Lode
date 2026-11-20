@@ -495,6 +495,14 @@ them out, so `/admin/…` falls through to the API's 404.
   so access rules and path visibility apply as for any client. `lode://` links are built
   with `lode_proto::links` from the request's `Host` (https with `[tls]` or
   `X-Forwarded-Proto: https`).
+- **Shelf review (T174).** `admin/web_shelves.rs` adds `/web/depots/{d}/shelves[/{id}]`
+  when the shelves module is on: the list (`GET …/shelves?state=open`, checks per current
+  version from `GET …/checks`), a shelf (`GET …/shelves/{id}?diff=true` for the patches;
+  images from the base revision's file and from the shelf's blob, served only for a path the
+  shelf changes) and two forms posting to `POST …/shelves/{id}/submit` (with
+  `expected_version` from the page) and `DELETE …/shelves/{id}`. A refused submit is shown
+  on the shelf page with the API's message and, for `checks_required`, each entry of
+  `details.missing`.
 - **CSRF.** Every signed-in form carries `csrf`, the first 16 bytes of
   SHA-256(`"lode admin csrf\n"` + token) in hex, compared in constant time before the handler
   runs. The sign-in form uses a double-submit value in a short-lived `lode_admin_signin`
