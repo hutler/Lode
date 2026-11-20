@@ -2,6 +2,7 @@
 //! moving content to S3.
 
 mod backup;
+pub mod copy;
 mod fsck;
 mod gc;
 mod migrate;
@@ -14,7 +15,7 @@ pub use gc::{collect_garbage, GcOptions};
 pub use migrate::{migrate_to_s3, MigrateError, MigrateOptions, MigrateReport};
 pub use obliterate::{gone, missing_object, obliterate, obliterations, MAX_REASON, MAX_TARGETS};
 pub use schedule::{
-    backup_tick, newest_backup, run_backups, BackupSchedule, BackupTick, BACKUP_PREFIX,
+    backup_tick, copy_newest, newest_backup, run_backups, BackupSchedule, BackupTick, BACKUP_PREFIX,
 };
 
 use axum::extract::State;

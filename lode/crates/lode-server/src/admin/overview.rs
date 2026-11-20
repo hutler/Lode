@@ -251,6 +251,32 @@ async fn backups(ctx: &Ctx, now: i64) -> Html {
         html!("{} (in {})", when(next), span(next - now))
     };
     out.push(fact("Next backup", next));
+    let copy = match (&schedule.copy_to, state.last_backup_copy()) {
+        (None, _) => html!(
+            "<span class=\"muted\">Off. Add <code>[backup.copy_to]</code> to send each backup \
+             to an S3-compatible bucket on another machine.</span>"
+        ),
+        (Some(c), None) => html!(
+            "To <code>{}</code>, keeping {}. <span class=\"muted\">None since the server \
+             started.</span>",
+            c.s3.bucket,
+            c.keep
+        ),
+        (Some(c), Some(run)) => {
+            let result = match &run.outcome {
+                Ok(n) => html!("<span class=\"ok\">Done</span>, {} sent", bytes(*n)),
+                Err(e) => html!("<span class=\"bad\">Failed:</span> {}", e),
+            };
+            html!(
+                "To <code>{}</code>, keeping {}. {}: {}",
+                c.s3.bucket,
+                c.keep,
+                when(run.at),
+                result
+            )
+        }
+    };
+    out.push(fact("Copy elsewhere", copy));
     html!("<dl class=\"facts\">{}</dl>", out)
 }
 

@@ -42,6 +42,7 @@ async fn backups_follow_the_clock_and_keep_the_newest() {
         every: Duration::from_secs(24 * 60 * 60),
         keep: 3,
         dir: backups.clone(),
+        copy_to: None,
     };
     std::fs::create_dir_all(backups.join("keep-me")).unwrap();
     std::fs::create_dir_all(backups.join("lode-backup-20261031T000000Z.partial")).unwrap();
@@ -91,6 +92,7 @@ async fn the_scheduler_backs_up_and_stops() {
         every: Duration::from_secs(60 * 60),
         keep: 7,
         dir: backups.clone(),
+        copy_to: None,
     };
     let (stop_tx, stop) = Stop::new();
     let task = tokio::spawn(run_backups(state, schedule, stop));

@@ -1038,6 +1038,19 @@ absorbs.
   renamed when complete). The newest complete backup's name says when the next is due, so
   restarts keep the schedule; complete backups beyond `keep` (7) are removed, oldest first.
   The scheduler checks at least hourly, by the server clock.
+- **Copies elsewhere**: with `[backup.copy_to]` (an S3-compatible bucket, the same keys as
+  `[storage]` plus `keep`), the scheduler sends the newest complete backup to the bucket
+  after making it, and at each later check until one copy succeeds. Under the prefix:
+  `objects/<depot-id>/<h0h1>/<h2h3>/<hex>` (stored objects, shared by all copies, uploaded
+  with `If-None-Match: *` and only when missing, so each copy sends only new content), and
+  per copy `<name>/meta.db`, `loded.toml`, `objects.zst` (the copy's `<depot-id>/<hex>`
+  list, zstd) and `done.json` last. A copy without `done.json` is incomplete. After each
+  copy, complete copies beyond `keep` go (default `[backup] keep`), then incomplete ones
+  older than the newest complete copy, then every object no kept copy lists, which is how
+  obliterated content and erased depots leave the bucket. `loded backup-copy` sends the
+  newest backup now; `loded restore --config <file> [--name N] <dest>` downloads a copy
+  into an empty directory as a data directory (`--list` names the copies). The overview
+  shows the last copy's outcome. Files over 5 GiB (one S3 `PUT`) are refused.
 - **Setup and services** (T082): `loded setup` writes a checked `loded.toml` from the answers
   and initializes the data directory with an admin password. `loded service install` writes a
   systemd unit on Linux, or registers a native Windows service whose process is
