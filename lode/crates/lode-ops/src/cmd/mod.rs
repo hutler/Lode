@@ -11,6 +11,7 @@ pub mod commit;
 pub mod conflict;
 pub mod diff;
 pub mod doctor;
+pub mod events;
 pub mod files;
 pub mod history;
 pub mod import;

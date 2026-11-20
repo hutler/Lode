@@ -142,6 +142,8 @@ pub mod paths {
     pub const SHELF_SUBMIT: &str = "/api/v1/depots/{d}/shelves/{id}/submit";
     /// Checks module: report (`POST`) and list (`GET`).
     pub const CHECKS: &str = "/api/v1/depots/{d}/checks";
+    /// Feed module: events of one depot after a cursor, optionally waiting.
+    pub const EVENTS: &str = "/api/v1/depots/{d}/events";
     /// Webhooks module: list and create.
     pub const WEBHOOKS: &str = "/api/v1/depots/{d}/webhooks";
     /// Webhooks module: delete one hook.

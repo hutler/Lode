@@ -82,9 +82,15 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
         },
         Migration {
             version: 8,
+            name: "acl_agents",
+            sql: include_str!("../migrations/core/0008_acl_agents.sql"),
+            postgres: include_str!("../migrations/core/0008_acl_agents.postgres.sql"),
+        },
+        Migration {
+            version: 9,
             name: "password_change",
-            sql: include_str!("../migrations/core/0008_password_change.sql"),
-            postgres: include_str!("../migrations/core/0008_password_change.postgres.sql"),
+            sql: include_str!("../migrations/core/0009_password_change.sql"),
+            postgres: include_str!("../migrations/core/0009_password_change.postgres.sql"),
         },
     ],
 };

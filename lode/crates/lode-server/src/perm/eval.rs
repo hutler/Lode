@@ -194,6 +194,7 @@ fn subject_matches(subject: &AclSubject, caller: &Caller) -> bool {
         AclSubject::All => true,
         AclSubject::User(p) => *p == caller.principal.id,
         AclSubject::Group(g) => caller.groups.contains(g),
+        AclSubject::Agents => caller.principal.kind == lode_meta::PrincipalKind::Agent,
     }
 }
 

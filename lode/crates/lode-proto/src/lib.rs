@@ -15,6 +15,7 @@ pub mod consts;
 pub mod depot;
 pub mod doctor;
 pub mod error;
+pub mod feed;
 pub mod links;
 pub mod locks;
 pub mod read;

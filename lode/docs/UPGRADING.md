@@ -107,13 +107,75 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   `GET /admin/acl/check` (`lode admin acl check --json`) gains the optional fields
   `depot_admin`, `matched` and `decided_by`; older clients ignore them.
 
+### 0.3.0: chunked large files, Postgres, caching proxy (M15)
+
+Nothing has to be done to upgrade: replace the programs and restart. The database gains the
+columns for deleting users and depots (core schema 6: `lode admin user delete`, `lode admin
+depot delete` and the trash), added on the first start. A 0.2 server refuses a database a 0.3 server has opened,
+so take a backup first.
+
+- Files of 16 MiB and more are stored as content-defined chunks (T150, T151). The file id
+  does not change, so history, trees and older clients are unaffected: an 0.2 client still
+  uploads and downloads whole files, and the server serves whole files to it. 0.3 clients
+  send and fetch only the chunks the other side lacks. `/info` gains `chunking`.
+- New optional `[database]` table (T153): `kind = "postgres"` keeps the metadata in Postgres
+  14 or newer. Without it nothing changes. Move a stopped server with
+  `loded migrate-db --to postgres --url-file <file>` (see the user guide, "Keeping the
+  metadata in Postgres"). With Postgres, backups do not contain the database; use `pg_dump`.
+- Modules declare a Postgres form of each migration (`Migration::postgres`); a module without
+  one cannot be enabled on a Postgres server. All modules shipped with Lode have one.
+- New `loded proxy` (T154): a caching proxy for remote offices, configured in its own
+  `proxy.toml` (see the user guide, "A caching proxy for a remote office"; `loded proxy
+  --example` prints a starting file). Clients use it after `lode proxy set <url>` or with
+  `LODE_PROXY`; nothing changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
+  open to the depot's readers (ids only).
+
+### 0.4.0: streams and smarter merge (M16)
+
+Nothing has to be done to upgrade: replace the programs and restart. The database gains
+`branch.stream_type` (core schema 7), added on the first start; every existing branch has no
+type and keeps the 0.3 merge rules. A 0.3 server refuses a database a 0.4 server has opened,
+so take a backup first.
+
+- Streams (T160, T161) are opt-in. To turn a depot into streams, a depot admin gives the
+  trunk a type first (`lode branch set-type main mainline`), then its children
+  (`lode branch set-type dev/ui development`, `... rel/1.0 release`). From then on the
+  server refuses merges between streams that go the wrong way (`conflict` with
+  `details.reason = "stream_flow"`); `lode branch tree` shows what each stream could merge.
+  Merges where either side has no type are unchanged. Older clients can still commit; a
+  refused merge reaches them as an ordinary `conflict` error.
+- `GET …/merge-info` gains `flow`, `BranchView` gains `stream`, and there is a new webhook
+  event `branch.stream_changed`. Clients that ignore unknown fields are unaffected.
+- `lode merge` follows renames (T162), merges JSON files key by key (T163, `[merge] json` in
+  `.lodeconfig`, on by default for `*.json`, `*.uproject` and `*.uplugin`), and names a
+  merge tool for conflicted files (T164, `[merge.tools]`); a tool runs only through
+  `lode resolve --tool` and only as set up in your own `settings.toml`.
+- Backups can be copied to an S3-compatible bucket and restored from it
+  (`[backup.copy_to]`, `loded restore`; see the user guide, "Copies on another machine").
+
+#### Also in 0.4.0: the agent as a desktop client (M18)
+
+The database also widens the access-rule subject check (core schema 8) and gains the feed
+module's tables, on the same first start.
+
+- `lode mcp` gains `branches`, `locks`, `conflicts`, `switch`, `merge`, `resolve`,
+  `changelist` and `wait_for_events` (T190, T191, T193); `status` takes `remote` and, like
+  `lode status --json`, answers a `summary` of counts.
+- New module `feed`, on by default (`[modules] feed = false` turns it off; T192): `GET
+  /depots/{d}/events` with long-poll, `lode events`, and `wait_for_events` on `/mcp`. Events
+  are kept 7 days (at most 100 000 per depot). A reverse proxy in front of `loded` must allow
+  requests to take up to 60 seconds; most do by default.
+- Access rules take the subject `agents` (T194). A bare `agents` on the command line now means
+  this subject; a user named `agents` is written `user:agents`. A 0.3 client cannot list
+  rules once one exists.
+
 ### Next release: field feedback from the first deployment (M17)
 
 - **Upgrade note:** `loded setup` no longer prints an admin token; the password is the one
   secret. Scripts that read the token from setup's output need `--print-admin-token`.
   Without a terminal and without `--admin-password-file`, setup now generates a first
   password (`--generate-admin-password`) instead of failing.
-- The database gains `principal.password_change_by` (core schema 8), added on the first
+- The database gains `principal.password_change_by` (core schema 9), added on the first
   start. A generated first password is good only for choosing a new one (`POST
   /auth/password`, `lode passwd`, or the admin web sign-in), and for 24 hours. Logins with it
   are `unauthenticated` with `details.reason` `password_change_required` (or
@@ -143,26 +205,3 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 - `loded doctor --config C` and `lode doctor [URL]` (T178) check a server's setup and the
   way to it, one line per check; exit 0, 2 on warnings, 1 on a failure. `--json` gives the
   report (docs/CLI-JSON.md).
-
-### 0.3.0: chunked large files, Postgres, caching proxy (M15)
-
-Nothing has to be done to upgrade: replace the programs and restart. The database gains the
-columns for deleting users and depots (core schema 6: `lode admin user delete`, `lode admin
-depot delete` and the trash), added on the first start. A 0.2 server refuses a database a 0.3 server has opened,
-so take a backup first.
-
-- Files of 16 MiB and more are stored as content-defined chunks (T150, T151). The file id
-  does not change, so history, trees and older clients are unaffected: an 0.2 client still
-  uploads and downloads whole files, and the server serves whole files to it. 0.3 clients
-  send and fetch only the chunks the other side lacks. `/info` gains `chunking`.
-- New optional `[database]` table (T153): `kind = "postgres"` keeps the metadata in Postgres
-  14 or newer. Without it nothing changes. Move a stopped server with
-  `loded migrate-db --to postgres --url-file <file>` (see the user guide, "Keeping the
-  metadata in Postgres"). With Postgres, backups do not contain the database; use `pg_dump`.
-- Modules declare a Postgres form of each migration (`Migration::postgres`); a module without
-  one cannot be enabled on a Postgres server. All modules shipped with Lode have one.
-- New `loded proxy` (T154): a caching proxy for remote offices, configured in its own
-  `proxy.toml` (see the user guide, "A caching proxy for a remote office"; `loded proxy
-  --example` prints a starting file). Clients use it after `lode proxy set <url>` or with
-  `LODE_PROXY`; nothing changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
-  open to the depot's readers (ids only).

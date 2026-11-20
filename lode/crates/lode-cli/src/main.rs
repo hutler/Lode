@@ -138,6 +138,8 @@ enum Command {
     Link(cmd::link::LinkArgs),
     /// List the checks reported on a revision or a shelf version.
     Checks(cmd::checks::ChecksArgs),
+    /// List what happened in a depot since a cursor, optionally waiting for it.
+    Events(cmd::events::EventsArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
     Mcp(cmd::mcp::McpArgs),
     /// Print a shell completion script: bash, zsh, fish, powershell or elvish.
@@ -238,6 +240,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Checks(a)) => cmd::checks::checks(&ctx, a).await,
         Some(Command::Link(a)) => cmd::link::link(&ctx, a).await,
         Some(Command::Completions { .. }) => Ok(Value::Null),
+        Some(Command::Events(a)) => cmd::events::events(&ctx, a).await,
         Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {
             // The child owns stdout; `lode` adds nothing to it and passes its exit code on.

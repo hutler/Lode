@@ -48,6 +48,7 @@ One Cargo workspace. Library crates never depend on binaries; arrows point downw
 | `lode-mod-mcp` | lib | Server MCP endpoint |
 | `lode-mod-webhooks` | lib | Webhooks module (optional, off by default) |
 | `lode-mod-checks` | lib | Checks module and submit gate (optional, off by default) |
+| `lode-mod-feed` | lib | Event feed: events of a depot from a cursor, long-poll (0.4) |
 | `lode-client` | lib | Typed HTTP client, blob transfer, retry |
 | `lode-workspace` | lib | Workspace database, scanner, sync, merge, changelists, client side of locks and shelves |
 | `lode-import` | lib | Imports history from other systems: Git through the `git` command (first-parent replay, renames, LFS content) |
@@ -275,7 +276,7 @@ principal  (id INTEGER PK, kind TEXT CHECK(kind IN ('user','agent')), name TEXT 
             sso_id TEXT NULL,   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
             deleted_at NULL,    -- deleted: row kept for history, name stays taken (schema 6)
             password_change_by NULL) -- set: a first password, good only for choosing a new
-                                     -- one, and only until this time (schema 8)
+                                     -- one, and only until this time (schema 9)
 grp        (id INTEGER PK, name TEXT UNIQUE)
 grp_member (grp_id, principal_id, PRIMARY KEY (grp_id, principal_id))
 token      (id INTEGER PK, principal_id, name, hash BLOB UNIQUE, scopes TEXT,
@@ -984,6 +985,28 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
   scope is not enough to pass someone else's required check.
 - Direct commits are not gated. Making a branch accept shelf submits only is a separate
   feature, not in this version.
+
+### 9.6 Feed (`lode-mod-feed`)
+
+Keeps a copy of each outbox event so readers can ask "what happened since cursor N".
+
+```sql
+mod_feed_event (id INT PRIMARY KEY /*outbox id*/, depot_id, created_at, body TEXT /*envelope*/)
+mod_feed_depot (depot_id PRIMARY KEY, pruned_through INT)
+```
+
+- `on_event` stores the envelope of §8.1 under its outbox id (`ON CONFLICT DO NOTHING`, so a
+  repeated delivery is harmless), then wakes waiting requests. A request is woken only after
+  the row is committed, so a woken request finds what woke it.
+- `GET /depots/{d}/events?after=&kinds=&wait=` reads rows of the depot after `after`, drops
+  events whose `data.branch` the caller can read nothing on, and answers at most 500 with
+  `next` = the last id scanned (or the newest id anywhere once the depot has nothing more).
+  With `wait` it registers for a wake-up before each look, so no event slips between the look
+  and the wait. At most 256 requests wait at once; beyond that a request answers at once.
+- The worker prunes on start and hourly: rows older than 7 days and beyond 100 000 per
+  depot. `pruned_through` per depot lets an answer say `truncated` when `after` is older.
+- `mcp_tools`: `wait_for_events` (scope `read`, wait at most 50 s). `purge_depot` deletes the
+  depot's rows.
 
 ## 10. Client
 
