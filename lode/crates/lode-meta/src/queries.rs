@@ -100,7 +100,7 @@ fn acl_row(r: &Row) -> Result<AclRow> {
 }
 
 const BRANCH_COLS: &str =
-    "id, depot_id, name, head_rev, created_rev, parent_branch_id, parent_rev, state";
+    "id, depot_id, name, head_rev, created_rev, parent_branch_id, parent_rev, state, stream_type";
 fn branch_row(r: &Row) -> Result<BranchRow> {
     let state: String = r.get(7)?;
     Ok(BranchRow {
@@ -115,6 +115,10 @@ fn branch_row(r: &Row) -> Result<BranchRow> {
             "active" => BranchState::Active,
             "archived" => BranchState::Archived,
             _ => return Err(bad(7, "bad branch state")),
+        },
+        stream_type: match r.get::<Option<String>>(8)? {
+            None => None,
+            Some(t) => Some(StreamType::parse(&t).ok_or_else(|| bad(8, "bad stream type"))?),
         },
     })
 }
@@ -1172,6 +1176,17 @@ impl WriteTx<'_> {
             self.conn().execute(
                 "UPDATE branch SET state = ?2 WHERE id = ?1",
                 vals![branch.0, s],
+            )?,
+            "branch",
+        )
+    }
+
+    /// Sets or clears a branch's stream type.
+    pub fn set_branch_stream(&self, branch: BranchId, stream: Option<StreamType>) -> Result<()> {
+        self.expect_one(
+            self.conn().execute(
+                "UPDATE branch SET stream_type = ?2 WHERE id = ?1",
+                vals![branch.0, stream.map(StreamType::as_str)],
             )?,
             "branch",
         )

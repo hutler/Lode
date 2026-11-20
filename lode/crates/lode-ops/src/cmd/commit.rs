@@ -13,14 +13,14 @@ use std::time::SystemTime;
 use futures::StreamExt;
 use lode_client::Client;
 use lode_core::{validate_changes, Change, ChangeAction, DepotPath, EntryKind, ObjectId};
-use lode_proto::commit::CommitRequest;
+use lode_proto::commit::{CommitRequest, EXT_FORCE_FLOW};
 use lode_workspace::db::keys;
 use lode_workspace::scan::{symlink_id, trusted_mtime};
 use lode_workspace::{FileRow, FileState, Status, Workspace};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::cmd::merge::{describe, pending_merges, PENDING_MERGE};
+use crate::cmd::merge::{describe, pending_merges, PENDING_FORCE_FLOW, PENDING_MERGE};
 use crate::context::Ctx;
 use crate::error::{Exit, OpError, OpResult};
 use crate::local;
@@ -52,6 +52,10 @@ pub struct CommitArgs {
     /// Only the files of this changelist; its description is the default message.
     #[arg(short = 'c', long = "changelist")]
     pub changelist: Option<String>,
+    /// Ask the server to skip the stream flow rules for the merge this commit records (depot
+    /// admins only; `lode merge --force-flow` sets it for you).
+    #[arg(long)]
+    pub force_flow: bool,
 }
 
 /// A commit in flight, as stored under [`PENDING_COMMIT`].
@@ -255,6 +259,7 @@ fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> OpResult<()> {
         }
         if !p.request.merged_from.is_empty() {
             tx.remove_config(PENDING_MERGE)?;
+            tx.remove_config(PENDING_FORCE_FLOW)?;
         }
         tx.remove_config(PENDING_COMMIT)
     })?;
@@ -296,6 +301,7 @@ async fn finish_pending(
                 "bytes_reused": 0,
                 "replayed": resp.replayed,
                 "resumed": true,
+                "forced_flow": pending.request.extensions.contains_key(EXT_FORCE_FLOW),
             }))
         }
         Err(e) if maybe_committed(&e) => Err(explain(e)),
@@ -591,6 +597,8 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
         });
     let msg = message(ctx, &ws, &args, &summary, default_msg.as_deref())?;
 
+    let force_flow =
+        !merges.is_empty() && (args.force_flow || ws.db().config(PENDING_FORCE_FLOW)?.is_some());
     let uploaded = upload(ctx, &client, &depot, &out).await?;
     crate::crash::point("commit.uploaded");
 
@@ -601,10 +609,15 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
             changes,
             merged_from: merges,
             provenance: ctx.g.provenance(),
-            extensions: if args.keep_locks {
-                [(KEEP_LOCKS.to_owned(), Value::Bool(true))].into()
-            } else {
-                Default::default()
+            extensions: {
+                let mut ext = std::collections::BTreeMap::new();
+                if args.keep_locks {
+                    ext.insert(KEEP_LOCKS.to_owned(), Value::Bool(true));
+                }
+                if force_flow {
+                    ext.insert(EXT_FORCE_FLOW.to_owned(), Value::Bool(true));
+                }
+                ext
             },
         },
         stats: out
@@ -652,5 +665,6 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
         "bytes_reused": uploaded.transfer.reused,
         "replayed": resp.replayed,
         "resumed": false,
+        "forced_flow": force_flow,
     }))
 }

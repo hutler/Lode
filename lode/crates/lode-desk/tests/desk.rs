@@ -1053,7 +1053,7 @@ async fn branches_create_switch_and_archive() {
     // From the workspace's own revision (r2), not main's head (r3), and without switching.
     let made = s
         .desk
-        .branch_create(root.clone(), "art".into(), Some(" ".into()), false)
+        .branch_create(root.clone(), "art".into(), Some(" ".into()), false, None)
         .await
         .unwrap();
     assert_eq!(made["name"], "art", "{made}");
@@ -1066,7 +1066,13 @@ async fn branches_create_switch_and_archive() {
     // From another branch at a revision, switching to it.
     let made = s
         .desk
-        .branch_create(root.clone(), "hotfix".into(), Some("main@r3".into()), true)
+        .branch_create(
+            root.clone(),
+            "hotfix".into(),
+            Some("main@r3".into()),
+            true,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(made["parent"]["rev"], 3, "{made}");
@@ -1154,7 +1160,13 @@ async fn merge_conflicts_and_resolve() {
         .await;
     s.desk.update(root.clone(), None).await.unwrap();
     s.desk
-        .branch_create(root.clone(), "feat".into(), Some("main".into()), false)
+        .branch_create(
+            root.clone(),
+            "feat".into(),
+            Some("main".into()),
+            false,
+            None,
+        )
         .await
         .unwrap();
     s.server

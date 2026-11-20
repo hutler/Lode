@@ -38,6 +38,8 @@ pub struct ConflictSides {
     pub result: Option<Content>,
     /// The incoming file beside the local one, for a binary conflict (workspace-relative).
     pub theirs_file: Option<String>,
+    /// The merge tool the depot's `[merge.tools]` names for this file (T164).
+    pub tool: Option<String>,
 }
 
 fn conflict_of(ctx: &Ctx, ws: &Workspace, path: &str) -> OpResult<ConflictRow> {
@@ -88,6 +90,7 @@ pub async fn conflict_sides(ctx: &Ctx, path: &str, limit: u64) -> OpResult<Confl
     let mut bases = Bases::new(ctx, &ws)?;
     let result = read_file(&local_path, limit)?;
     let theirs_rev = (c.theirs_rev != FROM_SHELF).then_some(c.theirs_rev);
+    let tool = crate::cmd::mergetool::tool_for(update::local_config(&ws).as_ref(), &c.path);
     if let Some(mine_id) = c.mine_id {
         // A text merge: every side is small enough to have been merged in memory.
         let base = match c.base_id {
@@ -116,6 +119,7 @@ pub async fn conflict_sides(ctx: &Ctx, path: &str, limit: u64) -> OpResult<Confl
             theirs,
             result,
             theirs_file: None,
+            tool,
         });
     }
     // Left as it was: the local file is mine; theirs is beside it, or deleted there.
@@ -141,6 +145,7 @@ pub async fn conflict_sides(ctx: &Ctx, path: &str, limit: u64) -> OpResult<Confl
         theirs,
         result,
         theirs_file,
+        tool,
     })
 }
 

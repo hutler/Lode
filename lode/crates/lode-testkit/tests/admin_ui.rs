@@ -609,6 +609,7 @@ async fn a_depot_shows_branches_revisions_and_locks() {
                 name: "old".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await
@@ -619,6 +620,7 @@ async fn a_depot_shows_branches_revisions_and_locks() {
             "old",
             &lode_proto::depot::PatchBranchRequest {
                 state: Some(lode_proto::depot::BranchState::Archived),
+                stream: None,
             },
         )
         .await

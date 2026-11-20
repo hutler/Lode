@@ -22,7 +22,7 @@ pub use chunk::{
     ChunkList, ChunkListError, ChunkRef, Chunked, Chunker, ChunkingHasher, CHUNK_ALGORITHM,
     CHUNK_AVG, CHUNK_MAX, CHUNK_MIN, CHUNK_THRESHOLD,
 };
-pub use config::{CheckRequirement, ConfigError, LodeConfig};
+pub use config::{CheckRequirement, ConfigError, LodeConfig, MergeToolRule, DEFAULT_JSON_MERGE};
 pub use error::ErrorCode;
 pub use glob::{GlobError, PathGlobSet};
 pub use id::{blob_id, tree_id, DepotId, IdParseError, ObjectId, TREE_ID_CONTEXT};
