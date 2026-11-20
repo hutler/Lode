@@ -43,4 +43,6 @@ lode-core.workspace = true
 lode-server.workspace = true
 lode-store = { workspace = true, features = ["test-util"] }
 lode-testkit.workspace = true
+lode-proxy.workspace = true
 rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+lode-meta.workspace = true

@@ -131,7 +131,12 @@ async fn a_depot_lives_in_s3() {
         .unwrap();
     assert!(report.content_in_bucket);
     assert_eq!(report.objects, 0);
-    assert!(dest.path().join("b/meta.db").is_file());
+    let database = if report.database_external {
+        lode_server::maintenance::DATABASE_NOTE_FILE
+    } else {
+        "meta.db"
+    };
+    assert!(dest.path().join("b").join(database).is_file());
 }
 
 #[tokio::test]

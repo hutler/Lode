@@ -1,0 +1,16 @@
+---
+source: crates/lode-proto/tests/wire.rs
+expression: v
+---
+{
+  "server_version": "0.3.0",
+  "api_version": "1",
+  "modules": [],
+  "chunking": {
+    "algorithm": "fastcdc-2020-lode-v1",
+    "min": 262144,
+    "avg": 1048576,
+    "max": 4194304,
+    "threshold": 16777216
+  }
+}

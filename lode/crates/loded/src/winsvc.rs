@@ -116,7 +116,7 @@ fn serve_logged(
         ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
         0,
     ))?;
-    let result = runtime.block_on(crate::serve(cfg, async move {
+    let result = runtime.block_on(crate::serve(cfg, false, async move {
         let _ = stop_rx.await;
         tracing::info!("service stop requested; finishing in-flight requests");
     }));

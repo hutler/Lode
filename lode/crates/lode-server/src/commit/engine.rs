@@ -483,6 +483,16 @@ async fn check_blobs(state: &AppState, d: lode_core::DepotId, changes: &[Change]
                     )));
                 }
             }
+            Ok(s) if s.kind == ObjectKind::ChunkList => {
+                drop(s);
+                let total = match state.chunked().chunk_list(d, id).await? {
+                    Some(list) => list.total_size(),
+                    None => 0,
+                };
+                if total != *size {
+                    return Err(invalid(format!("blob {id} has {total} bytes, not {size}")));
+                }
+            }
             Ok(_) | Err(StoreError::NotFound(_)) => missing.push(*id),
             Err(e) => return Err(e.into()),
         }
