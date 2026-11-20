@@ -648,9 +648,10 @@ receiver may not read. Receivers fetch details through the API with their own pe
 
 | Event | Written by | `data` |
 | --- | --- | --- |
-| `revision.created` | core | `rev, branch, author, author_kind, submitter, origin` |
-| `branch.created` | core | `branch, rev, from_branch, from_rev` |
+| `revision.created` | core | `rev, branch, author, author_kind, submitter, origin`, and `forced_flow: true` when a depot admin skipped the stream rules (0.4) |
+| `branch.created` | core | `branch, rev, from_branch, from_rev`, and `stream` for a stream (0.4) |
 | `branch.archived` | core | `branch` |
+| `branch.stream_changed` | core | `branch, stream` (0.4; `null` when cleared) |
 | `lock.acquired`, `lock.released` | locks | `branch, owner, count` |
 | `shelf.created`, `shelf.updated`, `shelf.deleted` | shelves | `shelf_id, version, branch, base_rev, owner, owner_kind` |
 | `shelf.submitted` | shelves | as above, plus `rev` |

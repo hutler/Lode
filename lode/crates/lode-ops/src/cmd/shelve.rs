@@ -506,6 +506,7 @@ async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> O
     let req = SubmitShelfRequest {
         expected_version: version,
         message: message.filter(|m| !m.trim().is_empty()),
+        force_flow: false,
     };
     let resp = match t.client.submit_shelf(&t.depot, id, &req).await {
         Ok(r) => r,

@@ -134,6 +134,7 @@ pub async fn branch(ctx: &Ctx, args: BranchArgs) -> OpResult<Value> {
                 name: name.clone(),
                 from_branch,
                 from_rev,
+                stream: None,
             };
             let b = client.create_branch(&depot, &req).await.map_err(explain)?;
             ctx.out.line(format!(
@@ -160,6 +161,7 @@ pub async fn branch(ctx: &Ctx, args: BranchArgs) -> OpResult<Value> {
             }
             let req = PatchBranchRequest {
                 state: Some(BranchState::Archived),
+                stream: None,
             };
             let b = client
                 .patch_branch(&depot, &name, &req)

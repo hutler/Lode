@@ -249,6 +249,7 @@ fn depot_types() {
                     created_rev: 1,
                     parent: None,
                     state: BranchState::Active,
+                    stream: None,
                 },
                 BranchView {
                     name: "release/1.0".into(),
@@ -259,6 +260,7 @@ fn depot_types() {
                         rev: 899,
                     }),
                     state: BranchState::Archived,
+                    stream: None,
                 },
             ],
         }
@@ -269,12 +271,14 @@ fn depot_types() {
             name: "feature-x".into(),
             from_branch: "main".into(),
             from_rev: Some(1040),
+            stream: None,
         }
     );
     snap!(
         "patch_branch_request",
         PatchBranchRequest {
             state: Some(BranchState::Archived),
+            stream: None,
         }
     );
     snap!(
@@ -658,6 +662,7 @@ fn shelves_types() {
         SubmitShelfRequest {
             expected_version: 3,
             message: None,
+            force_flow: false,
         }
     );
 }
