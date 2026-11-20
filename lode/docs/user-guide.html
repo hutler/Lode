@@ -963,6 +963,25 @@ every = "24h"          # s, m, h or d
 keep = 7
 dir = "/mnt/backup/lode"</code></pre>
 <p>Each backup is a folder <code>lode-backup-&lt;UTC time&gt;</code>, the same as <code>loded backup</code> makes. It is written under a <code>.partial</code> name first, so a backup cut short by a restart never counts and is cleared on the next run. The newest backup's time decides when the next is due, so restarts do not shift the schedule. Older backups beyond <code>keep</code> are deleted; other files in the folder are left alone. <code>loded setup</code> turns this on (daily, seven kept) unless told <code>none</code>. Put the folder on another disk, and copy it off the machine regularly.</p>
+<h3>Copies on another machine</h3>
+<p>A backup on the same machine does not survive the machine. Add <code>[backup.copy_to]</code> and the server also sends each scheduled backup to an S3-compatible bucket: Backblaze B2, Wasabi, AWS S3, a Hetzner bucket, or MinIO on a second server of your own.</p>
+<pre><code>[backup.copy_to]
+bucket = "lode-backups"
+prefix = "office"                     # a bucket or prefix of its own, not the [storage] one
+endpoint = "https://s3.eu-central-003.backblazeb2.com"   # leave out for AWS
+region = "eu-central-003"
+path_style = false                    # true for MinIO
+access_key_id = "..."
+secret_access_key_file = "backup-s3-secret.txt"   # first line: the secret key
+keep = 30                             # copies kept in the bucket; default: [backup] keep</code></pre>
+<p>Stored content never changes, so after the first copy each one uploads only new content plus the database. Old copies beyond <code>keep</code> are removed from the bucket, and with them content that no remaining copy needs (obliterated files and erased depots leave the bucket that way). A copy that fails, say because the bucket is unreachable, is tried again within the hour; the admin overview shows the last copy and its outcome. To send the newest backup at once, run <code>loded backup-copy --config /var/lib/lode/loded.toml</code>.</p>
+<p>With the metadata in Postgres, a copy holds the content and the configuration but not the database, the same as a local backup: keep backing the database up with <code>pg_dump</code> or your provider's snapshots.</p>
+<p>Give the backup key write and delete rights on that bucket only. For protection against someone who takes over the server itself, turn on the bucket's object lock or versioning, so copies cannot be deleted for a while.</p>
+<h3>Restore from a copy</h3>
+<pre><code>loded restore --config loded.toml --list                # the copies in the bucket
+loded restore --config loded.toml /var/lib/lode/data    # the newest one
+loded restore --config loded.toml --name lode-backup-20261120T030000Z /var/lib/lode/data</code></pre>
+<p>On a new machine, write a <code>loded.toml</code> with only the <code>[backup.copy_to]</code> table and its secret file. The destination must be empty; it receives the database, the configuration the server had (<code>loded.toml</code>) and all content. Then run <code>loded fsck</code> on it and start the server, as for a local restore below.</p>
 <h3>Backup while running</h3>
 <pre><code>loded backup --config /var/lib/lode/loded.toml /backups/lode-2026-11-12</code></pre>
 <p>This makes a consistent copy without stopping the server. Stored content never changes once written, so repeated backups to the same destination with a tool such as <code>rsync</code> copy only what is new.</p>

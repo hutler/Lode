@@ -47,6 +47,7 @@ struct Inner {
     sso: Option<Sso>,
     started_at: i64,
     last_backup: Mutex<Option<BackupRun>>,
+    last_backup_copy: Mutex<Option<BackupRun>>,
     listening: std::sync::OnceLock<std::net::SocketAddr>,
     sizes: crate::sizes::SizeCache,
     counters: crate::metrics::Counters,
@@ -118,6 +119,7 @@ impl AppState {
                 last_backup: Mutex::new(None),
                 sizes: crate::sizes::SizeCache::default(),
                 counters: crate::metrics::Counters::default(),
+                last_backup_copy: Mutex::new(None),
                 listening: std::sync::OnceLock::new(),
             }),
         };
@@ -336,6 +338,24 @@ impl AppState {
         *self
             .inner
             .last_backup
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(run);
+    }
+
+    /// The last copy of a backup to `[backup.copy_to]` since the server started.
+    pub fn last_backup_copy(&self) -> Option<BackupRun> {
+        self.inner
+            .last_backup_copy
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
+    /// Records a finished copy of a backup.
+    pub fn record_backup_copy(&self, run: BackupRun) {
+        *self
+            .inner
+            .last_backup_copy
             .lock()
             .unwrap_or_else(|p| p.into_inner()) = Some(run);
     }
