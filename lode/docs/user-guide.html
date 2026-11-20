@@ -995,6 +995,10 @@ lode admin gc game</code></pre>
 lode admin fsck game --full      # also re-reads and verifies all content
 loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every depot</code></pre>
 <p>Run the quick check after any unclean shutdown or restore, and the full check occasionally, for example monthly. A reported problem names the revision, path and content affected; restore that content from a backup.</p>
+<h3>Checking the setup</h3>
+<pre><code>loded doctor --config /var/lib/lode/loded.toml   # on the server machine
+lode doctor https://lode.example.com             # from anyone's computer</code></pre>
+<p><code>loded doctor</code> checks what an operator would otherwise check by hand: the configuration parses, the data directory is writable, the disk has room (a warning below 10% free), the certificate is not near expiry (a warning with fewer than 14 days left), an automatic certificate's domain resolves to this machine, the newest backup is not older than two intervals, and the database and store answer. <code>lode doctor</code> checks the way from a client: the name resolves, the TLS handshake and certificate, <code>/info</code>, that the client and server versions fit, and that you are signed in. Both print one line per check, take <code>--json</code>, only read, and exit with 0 when all is well, 2 on warnings only and 1 on a failure, so they can run from a monitoring script.</p>
 <h3>Logs</h3>
 <p>The server writes its log to standard error (the journal under systemd, <code>docker logs</code> in a container). Each request has an id, also returned to the client, which you can use to find the matching log line when a user reports an error. Tokens, passwords and file content are never logged.</p>
 

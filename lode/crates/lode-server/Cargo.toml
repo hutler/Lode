@@ -39,6 +39,7 @@ thiserror.workspace = true
 time.workspace = true
 similar.workspace = true
 diffy.workspace = true
+fs4.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
 toml.workspace = true

@@ -57,6 +57,17 @@ enum Command {
         /// Depots to check; all when none are given.
         depots: Vec<String>,
     },
+    /// Check this server's setup: configuration, data directory, disk space, certificate,
+    /// domain, backups, database and store. It only reads. Exits with 0 when all is well, 2
+    /// on warnings only, 1 on a failure.
+    Doctor {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// Print the report as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Copy the data directory to an empty directory while the server keeps running.
     Backup {
         /// Path to loded.toml.
@@ -250,6 +261,21 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
                 std::process::exit(1);
             }
             Ok(())
+        }
+        Command::Doctor { config, json } => {
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
+            let report = lode_server::doctor::run(&config, now).await;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                for line in report.lines() {
+                    println!("{line}");
+                }
+            }
+            match report.exit_code() {
+                0 => Ok(()),
+                code => std::process::exit(i32::from(code)),
+            }
         }
         Command::Backup { config, dest } => {
             let cfg = ServerConfig::load(&config)?;

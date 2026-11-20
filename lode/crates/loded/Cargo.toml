@@ -29,6 +29,8 @@ lode-mod-shelves.workspace = true
 lode-proxy.workspace = true
 lode-server.workspace = true
 rpassword.workspace = true
+serde_json.workspace = true
+time.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
@@ -40,5 +42,4 @@ windows-service.workspace = true
 [dev-dependencies]
 assert_cmd = "2"
 lode-testkit.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true

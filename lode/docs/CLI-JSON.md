@@ -112,6 +112,18 @@ The caching proxy (0.3) used for the server's file content.
 
 `{ "server", "name", "kind": "user"|"agent", "owner": name|null, "scopes": [..] }`
 
+### `lode doctor [url]`
+
+`{ "ok": bool, "server", "status": "ok"|"warn"|"fail", "checks": [{ "name", "status":
+"ok"|"warn"|"fail"|"skip", "detail" }] }`. The checks, in order: `dns`, `tls` (handshake and
+certificate expiry; a warning with fewer than 14 days left), `info`, `versions`, `identity`.
+A step that cannot run because an earlier one failed is `skip`. `ok` is false only when a
+check failed. The exit code is 0 when all is well, 2 on warnings only, 1 on a failure.
+
+`loded doctor --config C --json` on the server prints the same `{ "status", "checks" }`
+shape (no envelope) with the checks `config`, `data_dir`, `disk`, `certificate`, `domain`,
+`backups`, `database`, `store`, and the same exit codes.
+
 ### `lode checkout <url>/<depot> [dir]`
 
 `{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "bytes_downloaded", "bytes_reused", "obliterated", "resumed": bool }`

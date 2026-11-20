@@ -60,6 +60,9 @@ enum Command {
     Logout,
     /// Show who you are signed in as.
     Whoami,
+    /// Check the way to a server: DNS, TLS and its certificate, /info, versions and your
+    /// sign-in. Exits with 0 when all is well, 2 on warnings only, 1 on a failure.
+    Doctor(cmd::doctor::DoctorArgs),
     /// Change your own password.
     Passwd(cmd::login::PasswdArgs),
     /// Download file content through a caching proxy in your office.
@@ -179,6 +182,22 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Login(a)) => cmd::login::login(&ctx, a).await,
         Some(Command::Logout) => cmd::login::logout(&ctx).await,
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
+        Some(Command::Doctor(a)) => {
+            let v = cmd::doctor::doctor(&ctx, a).await?;
+            let code = cmd::doctor::exit_code(&v);
+            if cli.json {
+                let mut doc = json!({ "ok": code != 1 });
+                if let (Some(d), Value::Object(m)) = (doc.as_object_mut(), v) {
+                    d.extend(m);
+                }
+                println!("{doc}");
+            } else {
+                for line in cmd::doctor::lines(&v) {
+                    ctx.out.line(line);
+                }
+            }
+            std::process::exit(i32::from(code));
+        }
         Some(Command::Passwd(a)) => cmd::login::passwd(&ctx, a).await,
         Some(Command::Proxy(c)) => cmd::proxy::proxy(&ctx, c).await,
         Some(Command::Admin(a)) => cmd::admin::admin(&ctx, a).await,

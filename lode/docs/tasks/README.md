@@ -225,7 +225,7 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T175 | todo |  | chat notifications from webhooks (field feedback 2026-11-20) |
 | T176 | todo |  | `lode link` (field feedback 2026-11-20) |
 | T177 | todo |  | shell completions (field feedback 2026-11-20) |
-| T178 | todo |  | `loded doctor` and `lode doctor` (field feedback 2026-11-20) |
+| T178 | review | `lode/m17-field-feedback` (#14) | `loded doctor --config C [--json]`: config, data_dir (probe write), disk (warn <10%, fail at 0), certificate (file or ACME cache; warn <14 days, fail expired), domain (resolves to a local address), backups (missing warn, older than 2 intervals fail), database, store. `lode doctor [URL]`: dns, tls (handshake, expiry from the peer certificate via `Client::info_with_certificate`), info, versions, identity. Exit 0 / 2 warnings / 1 failure. Shared types in `lode_proto::doctor`, DER validity in `lode_proto::x509`. Tests: `lode-server/tests/doctor.rs` (2), `lode-cli/tests/doctor.rs` (2, one with an expired certificate), unit tests. Deviation: no persisted "last ACME result"; the certificate and domain checks stand in for it. |
 | T179 | todo |  | size and revisions in `depot list` (field feedback 2026-11-20) |
 | T180 | todo |  | agent with a token in one command (field feedback 2026-11-20) |
 | T181 | todo |  | optional Prometheus `/metrics` (field feedback 2026-11-20) |

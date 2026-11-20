@@ -1,8 +1,8 @@
 //! Subcommands: the operations of `lode-ops`, plus the ones only the command line has.
 
 pub use lode_ops::cmd::{
-    admin, branch, changelist, checkout, checks, commit, diff, files, history, import, init, link,
-    locks, login, merge, proxy, revert, shelve, status, update, view,
+    admin, branch, changelist, checkout, checks, commit, diff, doctor, files, history, import,
+    init, link, locks, login, merge, proxy, revert, shelve, status, update, view,
 };
 
 pub mod mcp;

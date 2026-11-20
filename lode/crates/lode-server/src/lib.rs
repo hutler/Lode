@@ -13,6 +13,7 @@ pub mod clock;
 pub mod commit;
 pub mod config;
 pub mod depots;
+pub mod doctor;
 pub mod error;
 pub mod events;
 pub mod extract;

@@ -151,7 +151,13 @@ sudo systemctl enable --now loded
 sleep 5
 systemctl is-active loded                  # active
 journalctl -u loded -n 50 --no-pager       # no "error" lines
+sudo -u lode loded doctor --config /var/lib/lode/loded.toml
 ```
+
+`loded doctor` checks the configuration, data directory, free disk, certificate, that the
+domain resolves to this machine, backups, database and store, one line each. It exits with 0
+when all is well, 2 on warnings only (a new server warns that it has no backup yet), 1 on a
+failure; each failing line says what to fix.
 
 With a domain, the first start obtains the certificate; the log says so within a minute. If
 the log shows a certificate error, check DNS (step 1) and the provider firewall (step 2), then
@@ -165,8 +171,11 @@ From the agent's own machine or the person's PC (not the server):
 ```
 curl -fsS https://<domain>/api/v1/info           # JSON with the server version
 lode login https://<domain> --name admin         # the person types the password
-lode whoami
+lode doctor https://<domain>                     # every line ok
 ```
+
+`lode doctor` names the step that fails from outside: the name does not resolve, the TLS
+handshake or certificate, `/info`, the versions, or the sign-in.
 
 With a generated first password, the person's first sign-in (the admin web page or `lode
 login`) asks them to choose their own password; until then the generated one works for
@@ -219,6 +228,8 @@ history with `lode import git <repo> https://<domain>/game --branch main`.
 - **Upgrade:** run the install command from step 3 again, then
   `sudo systemctl restart loded`. Read `docs/UPGRADING.md` first for the versions in between.
 - **Status and logs:** `systemctl status loded`, `journalctl -u loded -f`.
+- **Something is wrong but it is unclear what:** `sudo -u lode loded doctor --config
+  /var/lib/lode/loded.toml` on the server, `lode doctor https://<domain>` from outside.
 - **Configuration:** `/var/lib/lode/loded.toml`. Restart after editing. Every key is in the
   user guide, Part II, chapter 3.
 - **Port 443 refused from outside but fine on the server:** the provider firewall (step 2).

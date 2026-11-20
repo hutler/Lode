@@ -206,7 +206,9 @@ impl ClientBuilder {
             .pool_idle_timeout(Duration::from_secs(20))
             // Redirects could carry the token elsewhere or downgrade to http; the API never
             // redirects.
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            // Keeps the server's certificate on each response, for `lode doctor` (T178).
+            .tls_info(true);
         if !self.allow_insecure {
             // Plain http is only allowed for loopback, which `parse_server_url` checked.
             if base.scheme() == "https" && proxy.as_ref().is_none_or(|p| p.scheme() == "https") {
@@ -431,6 +433,21 @@ impl Client {
     pub async fn info(&self) -> Result<Info> {
         self.json(Retry::Yes, Method::GET, self.url(&["info"])?)
             .await
+    }
+
+    /// [`Client::info`], with the certificate the server presented (DER) when it was reached
+    /// over https.
+    pub async fn info_with_certificate(&self) -> Result<(Info, Option<Vec<u8>>)> {
+        let url = self.url(&["info"])?;
+        let resp = self
+            .send(Retry::Yes, || Ok(self.request(Method::GET, url.clone())))
+            .await?;
+        let cert = resp
+            .extensions()
+            .get::<reqwest::tls::TlsInfo>()
+            .and_then(|t| t.peer_certificate())
+            .map(<[u8]>::to_vec);
+        Ok((decode(resp).await?, cert))
     }
 
     /// `POST /auth/login`: exchanges a password for a new token. Not retried, since each
