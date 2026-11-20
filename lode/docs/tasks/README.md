@@ -26,6 +26,7 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M13.md](M13.md) | Lode Desk on Slint | T130–T135 |
 | [M14.md](M14.md) | Server admin web UI | T140–T143 |
 | [M15.md](M15.md) | Lode 0.3: chunked large files, Postgres, caching proxy | T150–T155 |
+| [M16.md](M16.md) | Lode 0.4: streams and smarter merge | T160–T166 |
 
 ## Dependency graph
 
@@ -111,6 +112,11 @@ M15  T150  T152                       (T150 after T123; T152 independent)
      T151  T153                       (T151 after T150; T153 after T152)
      T154                             (after T151)
      T155                             (after T150-T154)
+
+M16  T160  T162  T163  T164           (independent of each other)
+     T161                             (after T160)
+     T165                             (after T161 T164)
+     T166                             (after T160-T165)
 ```
 
 ## Status
@@ -211,3 +217,10 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T153 | done | main (#2) | `[database] kind = "postgres"` (`url`/`url_file`, `connections`); `lode-meta::pg` on `tokio-postgres` + `tokio-postgres-rustls` (ring), driven by a 2-thread runtime of its own so the store's blocking threads can wait on it inside or outside Tokio; `sslmode` disable/prefer/require/verify-full plus `sslrootcert`. Postgres forms of every core and module migration (`Migration::postgres`, core `*.postgres.sql`; `TEXT COLLATE "C"`, identity ids, `rev_merge.rowid`). One active server: session advisory lock per database+schema, `loded serve --wait-for-lock`, holder named from `pg_locks`, lock connection pinged every 3 s and the server stops if it is lost. `loded migrate-db --to postgres --url-file` (one transaction, row counts, identity sequences, `loded.toml.before-postgres`). Backups write `DATABASE-BACKUP.txt` (`database_external`); the admin overview shows the Postgres version. Test hook `LODE_TEST_POSTGRES` (fresh schema per test server via `<data>/test-postgres-url`); CI job `postgres`; `packaging/compose.postgres.yaml`, entrypoint `LODED_DATABASE_URL_FILE`/`LODED_WAIT_FOR_LOCK`. Tests: `lode-meta/tests/postgres.rs`, `loded/tests/standby.rs`, `lode-cli/tests/migrate_db.rs`, and the server, module, client and CLI suites pass with `LODE_TEST_POSTGRES` (Postgres 16 locally). Deviations: the per-dialect migration pairs from T152 land here; `migrate-db` reads one table at a time into memory (fine for the sizes Lode targets; a streaming copy is a later step). |
 | T154 | done | main (#2) | `loded proxy --config proxy.toml` (new crate `lode-proxy`; `listen`, `data_dir`, `[tls]` incl. Let's Encrypt, `[connections]`, `[proxy] upstream/cache_dir/cache_max_gib`; `--example`): blob GET (whole or `Range`) and `/chunks` from a disk cache, fetched once per object (per-object lock), hash-checked before keeping and on every read, chunked files cached chunk by chunk and served whole or by range from chunks; `/info` adds `proxy`; other paths `not_found` with `reason: caching_proxy`; `/admin/` and `/admin/metrics.json` (cache size, hit rate, bytes saved, upstream errors). Access per (token hash, depot) asked of the upstream with the caller's token and kept 60 s; new upstream endpoint `GET /depots/{d}/obliterated-ids?after=` (depot readers, ids only) refreshed with it, obliterated ids refused and their copies deleted. LRU cache by last use, evicted after each fill, rebuilt from disk at start. Client: `ClientBuilder::proxy` + `on_proxy_failure` (blob and chunk-list downloads only; warn once and fall back on transport error, 5xx or bad hash), `Client::fetch_content`, `obliterated_ids`; `[proxies]` in `settings.toml`, `LODE_PROXY`, `lode proxy set|clear|show`, `status --remote` reports `proxy`. `packaging/compose.proxy.yaml`. Tests: `lode-proxy/tests/proxy.rs` (6), `lode-cli/tests/proxy.rs` (2). Deviations: the proxy is its own crate rather than a `lode-server` module (keeps `lode-server` free of a `lode-client` dependency); `--prefetch` (optional), `loded setup --proxy`, `loded service install` for proxies and the Lode Desk settings field are not done (Desk honours the same setting and `LODE_PROXY`); obliterated ids are refreshed on the next request for the depot rather than on a timer. |
 | T155 | review | `lode/t155-release` | Version 0.3.0 (workspace and Lode Desk), UPGRADING 0.3.0 notes (schema 6, Postgres, proxy), guide and README for 0.3, PDF regenerated. The tag waits for the release dry run and is pushed by the person (the cloud proxy refuses tag pushes). |
+| T160 | todo | `lode/M16-streams` | |
+| T161 | todo | `lode/M16-streams` | |
+| T162 | todo | `lode/M16-streams` | |
+| T163 | todo | `lode/M16-streams` | |
+| T164 | todo | `lode/M16-streams` | |
+| T165 | todo | `lode/M16-streams` | |
+| T166 | todo | `lode/M16-streams` | |
