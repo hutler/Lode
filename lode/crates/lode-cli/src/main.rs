@@ -103,6 +103,8 @@ enum Command {
     Merge(cmd::merge::MergeArgs),
     /// Settle a conflict left by an update.
     Resolve(cmd::update::ResolveArgs),
+    /// Show the merge tools `lode resolve --tool` can start.
+    MergeTool(cmd::mergetool::MergeToolArgs),
     /// Take exclusive locks on files.
     Lock(cmd::locks::LockArgs),
     /// Release locks.
@@ -187,6 +189,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Switch(a)) => cmd::branch::switch(&ctx, a).await,
         Some(Command::Merge(a)) => cmd::merge::merge(&ctx, a).await,
         Some(Command::Resolve(a)) => cmd::update::resolve(&ctx, a).await,
+        Some(Command::MergeTool(a)) => cmd::mergetool::merge_tool(&ctx, a).await,
         Some(Command::Lock(a)) => cmd::locks::lock(&ctx, a).await,
         Some(Command::Unlock(a)) => cmd::locks::unlock(&ctx, a).await,
         Some(Command::Locks(a)) => cmd::locks::locks(&ctx, a).await,

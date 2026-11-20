@@ -231,6 +231,7 @@ async fn content_in_an_active_head_is_refused_until_the_branch_is_archived() {
                 name: "feat".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

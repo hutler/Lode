@@ -1864,6 +1864,7 @@ dependencies = [
  "lode-mod-webhooks",
  "lode-proto",
  "lode-server",
+ "lode-store",
  "quick-xml",
  "rcgen",
  "reqwest 0.12.28",

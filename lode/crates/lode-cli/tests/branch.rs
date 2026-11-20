@@ -115,6 +115,7 @@ async fn switch_carries_local_changes() {
                 name: "feat".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

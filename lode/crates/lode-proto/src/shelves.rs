@@ -139,4 +139,7 @@ pub struct SubmitShelfRequest {
     /// Commit message; the shelf description when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Skip the stream flow rules (SPEC §5.3a); depot admins only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force_flow: bool,
 }

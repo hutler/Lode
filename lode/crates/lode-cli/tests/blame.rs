@@ -54,6 +54,7 @@ async fn blame_follows_renames_and_branches() {
                 name: "feat".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

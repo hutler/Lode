@@ -169,6 +169,7 @@ async fn events_on_unreadable_branches_are_left_out() {
                 name: "secret".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

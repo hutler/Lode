@@ -372,23 +372,9 @@ impl S3BlobStore {
         token: Option<String>,
     ) -> Result<(Vec<Result<(ObjectId, SystemTime)>>, Option<String>)> {
         let prefix = self.depot_prefix(depot);
-        let mut query = vec![("list-type", "2"), ("prefix", prefix.as_str())];
-        if let Some(t) = &token {
-            query.push(("continuation-token", t.as_str()));
-        }
-        let resp = self
-            .send(Method::GET, None, &query, &[], Body::Empty)
-            .await?;
-        if !resp.status().is_success() {
-            return Err(s3_error(resp, "GET", None).await);
-        }
-        let body = resp
-            .bytes()
-            .await
-            .map_err(|e| other(format!("reading an S3 listing failed: {}", e.without_url())))?;
-        let page = xml::parse_list(&body).map_err(|e| other(format!("S3 listing: {e}")))?;
-        let mut items = Vec::with_capacity(page.objects.len());
-        for (key, modified) in page.objects {
+        let (objects, next) = self.list_raw(&prefix, token).await?;
+        let mut items = Vec::with_capacity(objects.len());
+        for (key, modified) in objects {
             let Some(rest) = key.strip_prefix(&prefix) else {
                 continue;
             };
@@ -403,6 +389,128 @@ impl S3BlobStore {
             .map_err(|_| other(format!("S3 listing: bad LastModified {modified:?}")));
             items.push(when.map(|t| (id, t)));
         }
+        Ok((items, next))
+    }
+}
+
+/// Plain files under the store's prefix, for uses other than object storage, such as
+/// copies of backups. `rel` is a key relative to the prefix.
+impl S3BlobStore {
+    fn full_key(&self, rel: &str) -> String {
+        format!("{}{rel}", self.depot_prefix_base())
+    }
+
+    /// Uploads `file` as `rel`. With `only_new` an existing key is left alone and the
+    /// answer is `false`; otherwise it is replaced. Files over 5 GiB are refused.
+    pub async fn put_file(&self, rel: &str, file: &Path, only_new: bool) -> Result<bool> {
+        let len = tfs::metadata(file).await?.len();
+        if len > MAX_SINGLE_PUT {
+            return Err(other(format!(
+                "{} is larger than the 5 GiB one S3 upload takes",
+                file.display()
+            )));
+        }
+        let key = self.full_key(rel);
+        let extra: &[(&str, &str)] = if only_new {
+            &[("if-none-match", "*")]
+        } else {
+            &[]
+        };
+        for _ in 0..ATTEMPTS {
+            let resp = self
+                .send(Method::PUT, Some(&key), &[], extra, Body::File(file, len))
+                .await?;
+            match resp.status() {
+                s if s.is_success() => return Ok(true),
+                StatusCode::PRECONDITION_FAILED if only_new => return Ok(false),
+                StatusCode::CONFLICT => continue,
+                _ => return Err(s3_error(resp, "PUT", Some(&key)).await),
+            }
+        }
+        Ok(false)
+    }
+
+    /// Downloads `rel` into `dest`, replacing it. A missing key is [`StoreError::Io`] with
+    /// kind `NotFound`.
+    pub async fn get_file(&self, rel: &str, dest: &Path) -> Result<u64> {
+        let key = self.full_key(rel);
+        let resp = self
+            .send(Method::GET, Some(&key), &[], &[], Body::Empty)
+            .await?;
+        match resp.status() {
+            StatusCode::OK => {}
+            StatusCode::NOT_FOUND => {
+                return Err(StoreError::Io(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("{key} is not in the bucket"),
+                )))
+            }
+            _ => return Err(s3_error(resp, "GET", Some(&key)).await),
+        }
+        let mut body = BodyReader::new(resp.bytes_stream().boxed());
+        let tmp = dest.with_extension("part");
+        let mut out = File::create(&tmp).await?;
+        let n = tokio::io::copy(&mut body, &mut out).await?;
+        out.sync_all().await?;
+        drop(out);
+        tfs::rename(&tmp, dest).await?;
+        Ok(n)
+    }
+
+    /// Every key that starts with `rel_prefix`, relative to the store's prefix, in order.
+    pub async fn list_keys(&self, rel_prefix: &str) -> Result<Vec<String>> {
+        let full = self.full_key(rel_prefix);
+        let base = self.depot_prefix_base();
+        let mut out = Vec::new();
+        let mut token: Option<String> = None;
+        loop {
+            let (objects, next) = self.list_raw(&full, token.take()).await?;
+            out.extend(
+                objects
+                    .into_iter()
+                    .filter_map(|(k, _)| k.strip_prefix(&base).map(str::to_owned)),
+            );
+            match next {
+                Some(t) => token = Some(t),
+                None => return Ok(out),
+            }
+        }
+    }
+
+    /// Deletes `rel`; a missing key is not an error.
+    pub async fn delete_key(&self, rel: &str) -> Result<()> {
+        let key = self.full_key(rel);
+        let resp = self
+            .send(Method::DELETE, Some(&key), &[], &[], Body::Empty)
+            .await?;
+        if resp.status().is_success() || resp.status() == StatusCode::NOT_FOUND {
+            Ok(())
+        } else {
+            Err(s3_error(resp, "DELETE", Some(&key)).await)
+        }
+    }
+
+    /// One ListObjectsV2 page of full keys under `prefix`, with their modification times.
+    async fn list_raw(
+        &self,
+        prefix: &str,
+        token: Option<String>,
+    ) -> Result<(Vec<(String, String)>, Option<String>)> {
+        let mut query = vec![("list-type", "2"), ("prefix", prefix)];
+        if let Some(t) = &token {
+            query.push(("continuation-token", t.as_str()));
+        }
+        let resp = self
+            .send(Method::GET, None, &query, &[], Body::Empty)
+            .await?;
+        if !resp.status().is_success() {
+            return Err(s3_error(resp, "GET", None).await);
+        }
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| other(format!("reading an S3 listing failed: {}", e.without_url())))?;
+        let page = xml::parse_list(&body).map_err(|e| other(format!("S3 listing: {e}")))?;
         let next = if page.truncated {
             match page.next_token {
                 Some(t) => Some(t),
@@ -411,7 +519,7 @@ impl S3BlobStore {
         } else {
             None
         };
-        Ok((items, next))
+        Ok((page.objects, next))
     }
 }
 

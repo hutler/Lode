@@ -133,7 +133,7 @@ so take a backup first.
 ### Next (0.4): the agent as a desktop client (M18)
 
 Nothing has to be done to upgrade: replace the programs and restart. The database widens the
-access-rule subject check (core schema 7) and gains the feed module's tables, on the first
+access-rule subject check (core schema 8) and gains the feed module's tables, on the first
 start. Take a backup first; a 0.3 server refuses a database a 0.4 server has opened.
 
 - `lode mcp` gains `branches`, `locks`, `conflicts`, `switch`, `merge`, `resolve`,

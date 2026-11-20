@@ -4,7 +4,8 @@
 //! and renamed when complete, so an interrupted backup never counts. The time of the newest
 //! complete backup decides when the next one is due, so the schedule survives restarts.
 //! After each backup, complete backups beyond `keep` are removed, oldest first; nothing else
-//! in the directory is touched.
+//! in the directory is touched. With `[backup.copy_to]` the newest backup is also sent to a
+//! bucket (see [`super::copy`]); a copy that fails is tried again at the next check.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -29,6 +30,8 @@ pub struct BackupSchedule {
     pub keep: usize,
     /// Directory holding the backups.
     pub dir: PathBuf,
+    /// Where copies go, if anywhere.
+    pub copy_to: Option<crate::config::BackupCopy>,
 }
 
 /// What one check did.
@@ -163,6 +166,7 @@ pub async fn backup_tick(
 /// shorter.
 pub async fn run_backups(state: AppState, schedule: BackupSchedule, mut stop: Stop) {
     const MAX_WAIT: Duration = Duration::from_secs(60 * 60);
+    let mut copied: Option<String> = None;
     loop {
         let wait = match backup_tick(&state, &schedule).await {
             Ok(BackupTick::NotDue(left)) => left,
@@ -194,10 +198,78 @@ pub async fn run_backups(state: AppState, schedule: BackupSchedule, mut stop: St
                 schedule.every
             }
         };
+        if let Some(copy) = &schedule.copy_to {
+            copy_newest(&state, &schedule, copy, &mut copied).await;
+        }
         let wait = wait.clamp(Duration::from_secs(1), MAX_WAIT);
         tokio::select! {
             () = tokio::time::sleep(wait) => {}
             () = stop.wait() => return,
+        }
+    }
+}
+
+/// Sends the newest local backup to the bucket unless `copied` says it is there already.
+/// Records the outcome for the admin overview; a failure is logged and tried next time.
+pub async fn copy_newest(
+    state: &AppState,
+    schedule: &BackupSchedule,
+    copy: &crate::config::BackupCopy,
+    copied: &mut Option<String>,
+) {
+    let Some((_, path)) = newest_backup(&schedule.dir) else {
+        return;
+    };
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if copied.as_deref() == Some(name.as_str()) {
+        return;
+    }
+    let data_dir = state.config().data_dir.clone();
+    let result = async {
+        let bucket = super::copy::open_bucket(copy, &data_dir).await?;
+        // After a restart: the copy may be there already.
+        if super::copy::list_remote(&bucket)
+            .await?
+            .iter()
+            .any(|b| b.name == name)
+        {
+            return Ok(None);
+        }
+        let tmp = data_dir.join("backup-copy-tmp");
+        super::copy::copy_backup(copy, &bucket, &path, &tmp)
+            .await
+            .map(Some)
+    }
+    .await;
+    let at = state.clock().now_ms();
+    match result {
+        Ok(Some(r)) => {
+            tracing::info!(
+                name = %r.name,
+                objects = r.objects,
+                uploaded = r.uploaded,
+                bytes = r.bytes,
+                removed = r.removed.len(),
+                objects_removed = r.objects_removed,
+                bucket = %copy.s3.bucket,
+                "backup copied"
+            );
+            state.record_backup_copy(crate::state::BackupRun {
+                at,
+                outcome: Ok(r.bytes),
+            });
+            *copied = Some(name);
+        }
+        Ok(None) => *copied = Some(name),
+        Err(e) => {
+            tracing::error!(error = %e, bucket = %copy.s3.bucket, "copying the backup failed");
+            state.record_backup_copy(crate::state::BackupRun {
+                at,
+                outcome: Err(e.to_string()),
+            });
         }
     }
 }

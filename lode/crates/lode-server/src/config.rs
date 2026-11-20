@@ -78,6 +78,19 @@ grace_seconds = 86400
 # every = "24h"       # s, m, h or d; at least 1m
 # keep = 7            # complete backups kept; older ones are removed
 # dir = "backups"     # relative to this file; best on another disk
+#
+# Also send each backup to an S3-compatible bucket on another machine (Backblaze B2, Wasabi,
+# AWS, Hetzner, or MinIO on a second server). Only new content is uploaded each time.
+# Restore with `loded restore --config loded.toml DEST`.
+# [backup.copy_to]
+# bucket = "lode-backups"
+# prefix = "office"                     # keys go under this; use a bucket or prefix of its own
+# endpoint = "https://s3.eu-central-003.backblazeb2.com"   # leave out for AWS
+# region = "eu-central-003"
+# path_style = false                    # true for MinIO
+# access_key_id = "..."                 # with the secret's file; leave both out to use
+# secret_access_key_file = "backup-s3-secret.txt"   # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+# keep = 30                             # copies kept in the bucket; default: keep above
 
 # Single sign-on through your company's identity provider (OpenID Connect): Google,
 # Microsoft Entra ID, Okta, Keycloak and others. Register Lode as a web application there
@@ -457,9 +470,7 @@ impl S3Settings {
                         }
                         first
                     }
-                    (None, None) => {
-                        return Err("[storage] access_key_id needs secret_access_key_file".into())
-                    }
+                    (None, None) => return Err("access_key_id needs secret_access_key_file".into()),
                 };
                 lode_store::s3::sigv4::Credentials {
                     access_key_id: id.clone(),
@@ -477,9 +488,10 @@ impl S3Settings {
                     session_token: nonempty("AWS_SESSION_TOKEN").map(|t| t.trim().to_owned()),
                 },
                 _ => {
-                    return Err("S3 storage needs credentials: set access_key_id and \
-                                secret_access_key_file in [storage], or the environment \
-                                variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+                    return Err("S3 needs credentials: set access_key_id and \
+                                secret_access_key_file in [storage] or [backup.copy_to], or \
+                                the environment variables AWS_ACCESS_KEY_ID and \
+                                AWS_SECRET_ACCESS_KEY"
                         .into())
                 }
             },
@@ -536,6 +548,17 @@ impl TryFrom<RawStorage> for StorageConfig {
             }
             return Ok(Self::default());
         }
+        let kind = raw.kind;
+        Ok(Self {
+            kind,
+            s3: Some(s3_settings("[storage]", raw)?),
+        })
+    }
+}
+
+/// Checks the S3 keys of a table (`[storage]` or `[backup.copy_to]`).
+fn s3_settings(section: &str, raw: RawStorage) -> Result<S3Settings, String> {
+    {
         let bucket = raw.bucket.unwrap_or_default();
         let bucket_ok = (3..=63).contains(&bucket.len())
             && bucket
@@ -543,13 +566,15 @@ impl TryFrom<RawStorage> for StorageConfig {
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
         if !bucket_ok {
             return Err(format!(
-                "[storage] bucket {bucket:?} is not a bucket name (3-63 lower-case letters, \
+                "{section} bucket {bucket:?} is not a bucket name (3-63 lower-case letters, \
                  digits, dots and dashes)"
             ));
         }
         let prefix = raw.prefix.unwrap_or_default().trim_matches('/').to_owned();
         if prefix.split('/').any(|p| p == "." || p == "..") || prefix.contains("//") {
-            return Err("[storage] prefix must not have empty, . or .. parts".into());
+            return Err(format!(
+                "{section} prefix must not have empty, . or .. parts"
+            ));
         }
         if let Some(e) = &raw.endpoint {
             let ok = reqwest::Url::parse(e).is_ok_and(|u| {
@@ -561,34 +586,30 @@ impl TryFrom<RawStorage> for StorageConfig {
             });
             if !ok {
                 return Err(format!(
-                    "[storage] endpoint {e:?} must be http(s)://host[:port] with nothing after it"
+                    "{section} endpoint {e:?} must be http(s)://host[:port] with nothing after it"
                 ));
             }
         }
         if raw.access_key_id.is_some() != raw.secret_access_key_file.is_some() {
-            return Err(
-                "[storage] give access_key_id and secret_access_key_file together, or \
-                        neither to use the AWS_* environment variables"
-                    .into(),
-            );
+            return Err(format!(
+                "{section} give access_key_id and secret_access_key_file together, or \
+                 neither to use the AWS_* environment variables"
+            ));
         }
         if let Some(r) = &raw.region {
             if r.is_empty() || !r.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
-                return Err(format!("[storage] region {r:?} is not a region name"));
+                return Err(format!("{section} region {r:?} is not a region name"));
             }
         }
-        Ok(Self {
-            kind: raw.kind,
-            s3: Some(S3Settings {
-                bucket,
-                prefix,
-                region: raw.region,
-                endpoint: raw.endpoint,
-                path_style: raw.path_style,
-                access_key_id: raw.access_key_id,
-                secret_access_key_file: raw.secret_access_key_file,
-                secret_access_key: None,
-            }),
+        Ok(S3Settings {
+            bucket,
+            prefix,
+            region: raw.region,
+            endpoint: raw.endpoint,
+            path_style: raw.path_style,
+            access_key_id: raw.access_key_id,
+            secret_access_key_file: raw.secret_access_key_file,
+            secret_access_key: None,
         })
     }
 }
@@ -824,6 +845,17 @@ pub struct BackupConfig {
     /// Where backups go. Resolved against the config file's directory by
     /// [`ServerConfig::load`]. Default `backups`.
     pub dir: PathBuf,
+    /// `[backup.copy_to]`: an S3-compatible bucket each scheduled backup is also sent to.
+    pub copy_to: Option<BackupCopy>,
+}
+
+/// `[backup.copy_to]`: where copies of backups go, and how many are kept there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupCopy {
+    /// The bucket.
+    pub s3: S3Settings,
+    /// Copies kept in the bucket; defaults to `[backup] keep`.
+    pub keep: usize,
 }
 
 impl Default for BackupConfig {
@@ -832,6 +864,7 @@ impl Default for BackupConfig {
             every: None,
             keep: 7,
             dir: PathBuf::from("backups"),
+            copy_to: None,
         }
     }
 }
@@ -843,6 +876,7 @@ impl BackupConfig {
             every,
             keep: self.keep,
             dir: self.dir.clone(),
+            copy_to: self.copy_to.clone(),
         })
     }
 }
@@ -853,6 +887,21 @@ struct RawBackup {
     every: Option<String>,
     keep: Option<usize>,
     dir: Option<PathBuf>,
+    copy_to: Option<RawCopyTo>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCopyTo {
+    bucket: Option<String>,
+    prefix: Option<String>,
+    region: Option<String>,
+    endpoint: Option<String>,
+    #[serde(default)]
+    path_style: bool,
+    access_key_id: Option<String>,
+    secret_access_key_file: Option<PathBuf>,
+    keep: Option<usize>,
 }
 
 impl TryFrom<RawBackup> for BackupConfig {
@@ -865,11 +914,59 @@ impl TryFrom<RawBackup> for BackupConfig {
         if keep == 0 {
             return Err("[backup] keep must be at least 1".into());
         }
+        let copy_to = match raw.copy_to {
+            None => None,
+            Some(c) => {
+                if c.bucket.is_none() {
+                    return Err("[backup.copy_to] needs a bucket".into());
+                }
+                let copies = c.keep.unwrap_or(keep);
+                if copies == 0 {
+                    return Err("[backup.copy_to] keep must be at least 1".into());
+                }
+                let s3 = s3_settings(
+                    "[backup.copy_to]",
+                    RawStorage {
+                        kind: StorageKind::Fs,
+                        bucket: c.bucket,
+                        prefix: c.prefix,
+                        region: c.region,
+                        endpoint: c.endpoint,
+                        path_style: c.path_style,
+                        access_key_id: c.access_key_id,
+                        secret_access_key_file: c.secret_access_key_file,
+                    },
+                )?;
+                Some(BackupCopy { s3, keep: copies })
+            }
+        };
         Ok(Self {
             every,
             keep,
             dir: raw.dir.unwrap_or(defaults.dir),
+            copy_to,
         })
+    }
+}
+
+/// The S3 keys of `s3` for the effective settings, with the access key hidden.
+fn s3_table(t: &mut toml::Table, s3: &S3Settings) {
+    use toml::Value;
+    let s = |v: &str| Value::String(v.to_owned());
+    t.insert("bucket".into(), s(&s3.bucket));
+    t.insert("prefix".into(), s(&s3.prefix));
+    if let Some(r) = &s3.region {
+        t.insert("region".into(), s(r));
+    }
+    if let Some(e) = &s3.endpoint {
+        t.insert("endpoint".into(), s(e));
+    }
+    t.insert("path_style".into(), Value::Boolean(s3.path_style));
+    if s3.access_key_id.is_some() {
+        t.insert("access_key_id".into(), s("***"));
+    }
+    if let Some(f) = &s3.secret_access_key_file {
+        t.insert("secret_access_key_file".into(), s(&f.display().to_string()));
     }
 }
 
@@ -1154,6 +1251,11 @@ impl ServerConfig {
             None => {}
         }
         cfg.backup.dir = base.join(&cfg.backup.dir);
+        if let Some(c) = &mut cfg.backup.copy_to {
+            if let Some(f) = &mut c.s3.secret_access_key_file {
+                *f = base.join(&*f);
+            }
+        }
         if let Some(oidc) = &mut cfg.oidc {
             if let Some(f) = &mut oidc.client_secret_file {
                 *f = base.join(&*f);
@@ -1259,6 +1361,12 @@ impl ServerConfig {
         }
         t.insert("keep".into(), n(self.backup.keep));
         t.insert("dir".into(), p(&self.backup.dir));
+        if let Some(c) = &self.backup.copy_to {
+            let mut ct = Table::new();
+            s3_table(&mut ct, &c.s3);
+            ct.insert("keep".into(), n(c.keep));
+            t.insert("copy_to".into(), Value::Table(ct));
+        }
         root.insert("backup".into(), Value::Table(t));
         if let Some(o) = &self.oidc {
             let mut t = Table::new();
@@ -1292,21 +1400,7 @@ impl ServerConfig {
         };
         t.insert("kind".into(), s(kind));
         if let Some(s3) = &self.storage.s3 {
-            t.insert("bucket".into(), s(&s3.bucket));
-            t.insert("prefix".into(), s(&s3.prefix));
-            if let Some(r) = &s3.region {
-                t.insert("region".into(), s(r));
-            }
-            if let Some(e) = &s3.endpoint {
-                t.insert("endpoint".into(), s(e));
-            }
-            t.insert("path_style".into(), Value::Boolean(s3.path_style));
-            if s3.access_key_id.is_some() {
-                t.insert("access_key_id".into(), s(HIDDEN));
-            }
-            if let Some(f) = &s3.secret_access_key_file {
-                t.insert("secret_access_key_file".into(), p(f));
-            }
+            s3_table(&mut t, s3);
         }
         root.insert("storage".into(), Value::Table(t));
         let mut t = Table::new();

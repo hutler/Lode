@@ -5,11 +5,12 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
 use lode_core::ErrorCode;
-use lode_meta::{BranchRow, BranchState, MetaError, PrincipalKind, Reads, RevisionRow};
+use lode_meta::{BranchRow, BranchState, MetaError, PrincipalKind, Reads, RevisionRow, StreamType};
+use lode_proto::commit::MergedFrom;
 use lode_proto::consts::paths;
 use lode_proto::depot::{
-    BranchList, BranchPoint, BranchView, CreateBranchRequest, MergeInfo, MergedRange,
-    PatchBranchRequest,
+    BranchList, BranchPoint, BranchView, CreateBranchRequest, Flow, FlowDirection, MergeInfo,
+    MergedRange, PatchBranchRequest,
 };
 use serde_json::json;
 
@@ -64,8 +65,9 @@ pub(crate) fn revision_created(
     author: &lode_meta::PrincipalRow,
     submitter: &lode_meta::PrincipalRow,
     origin: &str,
+    forced_flow: bool,
 ) -> String {
-    json!({
+    let mut v = json!({
         "rev": rev,
         "branch": branch,
         "author": author.name,
@@ -75,8 +77,57 @@ pub(crate) fn revision_created(
         },
         "submitter": submitter.name,
         "origin": origin,
-    })
-    .to_string()
+    });
+    if forced_flow {
+        v["forced_flow"] = json!(true);
+    }
+    v.to_string()
+}
+
+fn wire_stream(t: StreamType) -> lode_proto::depot::StreamType {
+    match t {
+        StreamType::Mainline => lode_proto::depot::StreamType::Mainline,
+        StreamType::Development => lode_proto::depot::StreamType::Development,
+        StreamType::Release => lode_proto::depot::StreamType::Release,
+    }
+}
+
+fn meta_stream(t: lode_proto::depot::StreamType) -> StreamType {
+    match t {
+        lode_proto::depot::StreamType::Mainline => StreamType::Mainline,
+        lode_proto::depot::StreamType::Development => StreamType::Development,
+        lode_proto::depot::StreamType::Release => StreamType::Release,
+    }
+}
+
+/// SPEC §5.3a: whether `stream` may be set on a branch whose parent is `parent`.
+/// `Err` carries the reason.
+fn stream_parent_rule(
+    name: &str,
+    stream: Option<StreamType>,
+    parent: Option<&BranchRow>,
+) -> Result<(), ApiError> {
+    let bad = |msg: String| {
+        ApiError::invalid_request(msg).with_details(json!({ "reason": "stream_parent" }))
+    };
+    match (stream, parent) {
+        (None, _) => Ok(()),
+        (Some(StreamType::Mainline), None) => Ok(()),
+        (Some(StreamType::Mainline), Some(p)) => Err(bad(format!(
+            "`{name}` was created from `{}`; only a branch without a parent can be a mainline",
+            p.name
+        ))),
+        (Some(t), None) => Err(bad(format!(
+            "a {} stream needs a parent stream; `{name}` has no parent",
+            t.as_str()
+        ))),
+        (Some(t), Some(p)) if p.stream_type.is_none() => Err(bad(format!(
+            "a {} stream needs a parent stream; make `{}` a stream first",
+            t.as_str(),
+            p.name
+        ))),
+        (Some(_), Some(_)) => Ok(()),
+    }
 }
 
 fn view(b: &BranchRow, parent_name: Option<String>) -> BranchView {
@@ -92,6 +143,7 @@ fn view(b: &BranchRow, parent_name: Option<String>) -> BranchView {
             BranchState::Active => lode_proto::depot::BranchState::Active,
             BranchState::Archived => lode_proto::depot::BranchState::Archived,
         },
+        stream: b.stream_type.map(wire_stream),
     }
 }
 
@@ -186,41 +238,155 @@ async fn merge_info(
         .meta()
         .read(move |tx| {
             let (Some(t), Some(s)) = (tx.branch(id, &target)?, tx.branch(id, &source)?) else {
-                return Ok(None);
+                return Ok(Err(ApiError::not_found("no such branch")));
             };
-            let t_chain = tx.branch_chain(t.id)?;
-            let s_chain = tx.branch_chain(s.id)?;
-            // The newest shared stretch of history; its end is the branch point.
-            let point = t_chain.iter().find_map(|ts| {
-                s_chain
-                    .iter()
-                    .find(|ss| ss.branch_id == ts.branch_id)
-                    .map(|ss| match (ts.max_rev, ss.max_rev) {
-                        (Some(a), Some(b)) => a.min(b),
-                        (Some(a), None) | (None, Some(a)) => a,
-                        (None, None) => 0,
-                    })
-            });
-            let merged = tx.merges_from(id, &t_chain, s.id)?;
-            let revs = match point {
-                Some(p) => tx.chain_revs_after(id, &s_chain, p)?,
-                None => Vec::new(),
+            let Some(mut info) = compute_merge_info(tx, &t, &s)? else {
+                return Ok(Err(ApiError::invalid_request(format!(
+                    "`{}` and `{}` share no history",
+                    s.name, t.name
+                ))));
             };
-            Ok(Some((t, s, point, merged, revs)))
+            info.flow = Some(flow(tx, &t, &s)?);
+            Ok(Ok(info))
         })
-        .await?;
-    let Some((t, s, point, merged, revs)) = info else {
-        return Err(ApiError::not_found("no such branch"));
-    };
+        .await??;
+    Ok(Json(info))
+}
+
+/// What merging `s` into `t` would start from; `None` when they share no history.
+pub(crate) fn compute_merge_info<R: Reads + ?Sized>(
+    tx: &R,
+    t: &BranchRow,
+    s: &BranchRow,
+) -> lode_meta::Result<Option<MergeInfo>> {
+    let id = t.depot_id;
+    let t_chain = tx.branch_chain(t.id)?;
+    let s_chain = tx.branch_chain(s.id)?;
+    // The newest shared stretch of history; its end is the branch point.
+    let point = t_chain.iter().find_map(|ts| {
+        s_chain
+            .iter()
+            .find(|ss| ss.branch_id == ts.branch_id)
+            .map(|ss| match (ts.max_rev, ss.max_rev) {
+                (Some(a), Some(b)) => a.min(b),
+                (Some(a), None) | (None, Some(a)) => a,
+                (None, None) => 0,
+            })
+    });
     let Some(point) = point else {
-        return Err(ApiError::invalid_request(format!(
-            "`{}` and `{}` share no history",
-            s.name, t.name
-        )));
+        return Ok(None);
     };
-    Ok(Json(merge_base(
+    let merged = tx.merges_from(id, &t_chain, s.id)?;
+    let revs = tx.chain_revs_after(id, &s_chain, point)?;
+    Ok(Some(merge_base(
         &t.name, &s.name, point, s.head_rev, &merged, &revs,
     )))
+}
+
+/// SPEC §5.3a: what the stream rules say about merging `source` into `target`.
+pub(crate) fn flow<R: Reads + ?Sized>(
+    tx: &R,
+    target: &BranchRow,
+    source: &BranchRow,
+) -> lode_meta::Result<Flow> {
+    let verdict = |direction, allowed, pick_allowed, reason: Option<String>, behind| Flow {
+        direction,
+        allowed,
+        pick_allowed,
+        reason,
+        behind,
+    };
+    let (Some(tt), Some(st)) = (target.stream_type, source.stream_type) else {
+        return Ok(verdict(FlowDirection::Untyped, true, true, None, None));
+    };
+    if target.parent_branch_id == Some(source.id) {
+        if tt == StreamType::Release {
+            return Ok(verdict(
+                FlowDirection::MergeDown,
+                false,
+                true,
+                Some(format!(
+                    "`{}` is a release stream: it takes only picked revisions from `{}` (`lode merge {} -r N`)",
+                    target.name, source.name, source.name
+                )),
+                None,
+            ));
+        }
+        return Ok(verdict(FlowDirection::MergeDown, true, true, None, None));
+    }
+    if source.parent_branch_id == Some(target.id) {
+        if st == StreamType::Release {
+            return Ok(verdict(FlowDirection::MergeUp, true, true, None, None));
+        }
+        // A development stream copies up only once it has everything its parent has.
+        let behind = compute_merge_info(tx, source, target)?.map_or(0, |i| i.pending);
+        if behind > 0 {
+            return Ok(verdict(
+                FlowDirection::CopyUp,
+                false,
+                true,
+                Some(format!(
+                    "merge `{}` into `{}` first: it is {behind} revision(s) behind",
+                    target.name, source.name
+                )),
+                Some(behind),
+            ));
+        }
+        return Ok(verdict(FlowDirection::CopyUp, true, true, None, Some(0)));
+    }
+    Ok(verdict(
+        FlowDirection::Sideways,
+        false,
+        false,
+        Some(format!(
+            "`{}` and `{}` are not parent and child; streams merge only up or down",
+            source.name, target.name
+        )),
+        None,
+    ))
+}
+
+/// The `conflict` a refused flow answers.
+pub(crate) fn flow_refused(f: &Flow, source: &str, target: &str) -> ApiError {
+    let mut details = json!({
+        "reason": "stream_flow",
+        "direction": f.direction,
+        "source": source,
+        "target": target,
+    });
+    if let Some(b) = f.behind {
+        details["behind"] = json!(b);
+    }
+    ApiError::new(
+        ErrorCode::Conflict,
+        f.reason
+            .clone()
+            .unwrap_or_else(|| "the stream rules refuse this merge".into()),
+    )
+    .with_details(details)
+}
+
+/// Checks every `merged_from` range of a commit on `target` against the stream rules.
+pub(crate) fn check_flow<R: Reads + ?Sized>(
+    tx: &R,
+    target: &BranchRow,
+    merged_from: &[MergedFrom],
+) -> lode_meta::Result<Result<(), ApiError>> {
+    for m in merged_from {
+        let Some(source) = tx.branch(target.depot_id, &m.branch)? else {
+            continue;
+        };
+        let f = flow(tx, target, &source)?;
+        let ok = if m.from_rev == m.to_rev {
+            f.pick_allowed
+        } else {
+            f.allowed
+        };
+        if !ok {
+            return Ok(Err(flow_refused(&f, &source.name, &target.name)));
+        }
+    }
+    Ok(Ok(()))
 }
 
 /// SPEC §5.4: the base is the highest source revision `R` such that every source revision
@@ -255,6 +421,7 @@ fn merge_base(
         base,
         source_head,
         pending: (source_revs.len() - done) as u64,
+        flow: None,
     }
 }
 
@@ -321,8 +488,15 @@ async fn create(
                     req.from_branch
                 )));
             };
+            let stream = req.stream.map(meta_stream);
+            if let Err(e) = stream_parent_rule(&req.name, stream, Some(src)) {
+                return reject(e);
+            }
             let num = tx.allocate_rev(id)?;
             let branch_id = tx.create_branch(id, &req.name, num, Some((src.id, from_rev)))?;
+            if stream.is_some() {
+                tx.set_branch_stream(branch_id, stream)?;
+            }
             tx.insert_revision(&RevisionRow {
                 depot_id: id,
                 num,
@@ -339,14 +513,17 @@ async fn create(
                 provenance: None,
                 request_id: None,
             })?;
-            let rev_event = revision_created(num, &req.name, &author, &author, "direct");
+            let rev_event = revision_created(num, &req.name, &author, &author, "direct", false);
             tx.append_outbox(Some(id), "revision.created", &rev_event, now)?;
-            let branch_event = json!({
+            let mut branch_event = json!({
                 "branch": req.name,
                 "rev": num,
                 "from_branch": req.from_branch,
                 "from_rev": from_rev,
             });
+            if let Some(t) = stream {
+                branch_event["stream"] = json!(t.as_str());
+            }
             tx.append_outbox(Some(id), "branch.created", &branch_event.to_string(), now)?;
             let row = tx
                 .branch_by_id(branch_id)?
@@ -378,7 +555,7 @@ async fn patch(
     if !access.is_depot_admin() {
         return Err(ApiError::new(
             ErrorCode::PermissionDenied,
-            "archiving a branch needs admin on the depot",
+            "changing a branch needs admin on the depot",
         ));
     }
     let id = d.id;
@@ -391,13 +568,45 @@ async fn patch(
     let lock = state.branch_lock(id, &branch);
     let _guard = lock.lock().await;
     let name = branch.clone();
+    let stream = req.stream;
     let (row, all, changed) = state
         .meta()
         .write(move |tx| {
             let Some(b) = tx.branch(id, &name)? else {
-                return Ok(None);
+                return Ok(Err(ApiError::not_found(format!("no branch `{name}`"))));
             };
             let mut changed = false;
+            if let Some(setting) = stream {
+                let new = setting.stream_type().map(meta_stream);
+                if new != b.stream_type {
+                    let all = tx.branches(id)?;
+                    let parent = b
+                        .parent_branch_id
+                        .and_then(|p| all.iter().find(|x| x.id == p));
+                    if let Err(e) = stream_parent_rule(&b.name, new, parent) {
+                        return Ok(Err(e));
+                    }
+                    if new.is_none() {
+                        if let Some(c) = all
+                            .iter()
+                            .find(|c| c.parent_branch_id == Some(b.id) && c.stream_type.is_some())
+                        {
+                            return Ok(Err(ApiError::invalid_request(format!(
+                                "`{}` is a stream created from `{}`; clear its type first",
+                                c.name, b.name
+                            ))
+                            .with_details(json!({ "reason": "stream_parent" }))));
+                        }
+                    }
+                    tx.set_branch_stream(b.id, new)?;
+                    changed = true;
+                    let data = json!({
+                        "branch": b.name,
+                        "stream": new.map(StreamType::as_str),
+                    });
+                    tx.append_outbox(Some(id), "branch.stream_changed", &data.to_string(), now)?;
+                }
+            }
             if let Some(t) = target {
                 if t != b.state {
                     tx.set_branch_state(b.id, t)?;
@@ -408,12 +617,13 @@ async fn patch(
                     }
                 }
             }
-            let row = tx.branch_by_id(b.id)?;
+            let row = tx
+                .branch_by_id(b.id)?
+                .ok_or_else(|| MetaError::NotFound("branch".into()))?;
             let all = tx.branches(id)?;
-            Ok(row.map(|r| (r, all, changed)))
+            Ok(Ok((row, all, changed)))
         })
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no branch `{branch}`")))?;
+        .await??;
     if changed {
         state.outbox_notify().notify_one();
     }

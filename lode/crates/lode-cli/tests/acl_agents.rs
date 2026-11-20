@@ -26,6 +26,7 @@ async fn agents_deny_write_on_main_keeps_them_on_shelves() {
                 name: "dev".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

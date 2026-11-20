@@ -194,9 +194,21 @@ pub fn config_text(a: &Answers) -> anyhow::Result<String> {
             "\n[backup]\nevery = \"24h\"\nkeep = 7\ndir = {}\n",
             toml_string(&dir.to_string_lossy())
         ));
+        text.push_str(BACKUP_COPY_HINT);
     }
     Ok(text)
 }
+
+/// Written after `[backup]`: how to send copies to another machine, ready to fill in.
+const BACKUP_COPY_HINT: &str =
+    "\n# To also send each backup to an S3-compatible bucket on another machine (Backblaze B2,\n\
+# Wasabi, AWS, Hetzner, or MinIO on a second server), fill this in and restart:\n\
+# [backup.copy_to]\n\
+# bucket = \"lode-backups\"\n\
+# endpoint = \"https://s3.eu-central-003.backblazeb2.com\"   # leave out for AWS\n\
+# region = \"eu-central-003\"\n\
+# access_key_id = \"...\"\n\
+# secret_access_key_file = \"backup-s3-secret.txt\"\n";
 
 fn read_password(args: &SetupArgs, interactive: bool) -> anyhow::Result<String> {
     if let Some(file) = &args.admin_password_file {

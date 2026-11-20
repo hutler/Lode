@@ -195,6 +195,7 @@ async fn merges_resolves_and_shelves_for_review() {
                 name: "feat".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

@@ -252,6 +252,7 @@ impl Worker {
                 let args = cmd::merge::MergeArgs {
                     source: i.branch,
                     rev: i.rev,
+                    force_flow: false,
                 };
                 cmd::merge::merge(&ctx, args).await
             }
@@ -377,6 +378,7 @@ impl Worker {
                     add_all: i.add_all,
                     keep_locks: i.keep_locks,
                     changelist: None,
+                    force_flow: false,
                 };
                 cmd::commit::commit(&ctx, args).await
             }
@@ -523,6 +525,7 @@ async fn resolve(ctx: &Ctx, root: &Path, i: Resolve) -> OpResult<Value> {
                 mine,
                 theirs,
                 merged,
+                tool: None,
             };
             cmd::update::resolve(ctx, args).await
         }

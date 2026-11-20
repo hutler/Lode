@@ -278,6 +278,7 @@ required = [{ name = "ci/build", reporter = "ci" }, { name = "ci/test", reporter
                     name: name.into(),
                     from_branch: "main".into(),
                     from_rev: None,
+                    stream: None,
                 },
             )
             .await

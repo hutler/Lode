@@ -42,10 +42,20 @@ pub struct UpdateArgs {
 
 /// `lode resolve` options.
 #[derive(Debug, Default, clap::Args)]
-#[command(group(clap::ArgGroup::new("how").required(true).args(["mine", "theirs", "merged"])))]
+#[command(group(clap::ArgGroup::new("how").required(true).args(["mine", "theirs", "merged", "tool"])))]
+#[command(
+    long_about = "Settle conflicts left by update, switch, merge or unshelve.
+\n--mine keeps the local version, --theirs takes the incoming one, --merged keeps the file as
+it is now. --tool [NAME] starts a merge tool on base, mine and theirs and takes its result: the
+tool named for the file by the depot's `[merge.tools]`, or NAME, with the command from
+`[merge_tools.NAME]` in your settings.toml. Without paths, --tool walks every conflicted file
+that has a tool.
+\nWith --json: {\"resolved\":[paths],\"using\"}; with --tool also \"failed\":[{\"path\",\"tool\",
+\"reason\"}] and \"skipped\":[paths without a tool]."
+)]
 pub struct ResolveArgs {
     /// Conflicted files (or directories holding them).
-    #[arg(required = true)]
+    #[arg(required_unless_present = "tool")]
     pub paths: Vec<PathBuf>,
     /// Keep the local version as it was before the update.
     #[arg(long)]
@@ -56,6 +66,9 @@ pub struct ResolveArgs {
     /// Keep the file as it is now (conflict markers edited by hand).
     #[arg(long)]
     pub merged: bool,
+    /// Resolve with a merge tool: the one the depot names for the file, or NAME.
+    #[arg(long, value_name = "NAME", num_args = 0..=1, default_missing_value = "")]
+    pub tool: Option<String>,
 }
 
 /// What happened to a path.
@@ -241,11 +254,14 @@ impl Run<'_> {
                 let their_bytes = self.bases.read(&theirs.id).await?;
                 let mine = fs::read(&local)?;
                 if self.is_text(&e.path, &[&base, &mine, &their_bytes]) {
-                    let mut opts = diffy::MergeOptions::new();
-                    opts.set_conflict_style(diffy::ConflictStyle::Merge)
-                        .set_incomplete_hunk_style(diffy::IncompleteHunkStyle::Git);
                     let exec = e.disk.as_ref().is_some_and(|d| d.executable);
-                    match opts.merge_bytes(&base, &mine, &their_bytes) {
+                    match crate::structured::merge3(
+                        &e.path,
+                        self.config.as_ref(),
+                        &base,
+                        &mine,
+                        &their_bytes,
+                    ) {
                         Ok(merged) => {
                             write_through_tmp(ws, &e.path, &merged, exec)?;
                             let mut r = row.clone();
@@ -677,6 +693,10 @@ pub(crate) async fn check_on_branch(
 
 /// Runs `lode resolve`.
 pub async fn resolve(ctx: &Ctx, args: ResolveArgs) -> OpResult<Value> {
+    if let Some(tool) = &args.tool {
+        let name = (!tool.is_empty()).then(|| tool.clone());
+        return crate::cmd::mergetool::resolve_with_tool(ctx, &args.paths, name).await;
+    }
     let mut ws = local::open(ctx)?;
     let _lock = ws.lock()?;
     let named = local::depot_paths(ctx, &ws, &args.paths)?;

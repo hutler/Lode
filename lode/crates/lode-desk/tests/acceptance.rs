@@ -359,7 +359,13 @@ async fn the_desk_guide_end_to_end() {
     // ## Branches and merges, with a conflict resolved in the three-way view.
     let made = alice
         .desk
-        .branch_create(a_root.clone(), "tilt".into(), Some("main".into()), true)
+        .branch_create(
+            a_root.clone(),
+            "tilt".into(),
+            Some("main".into()),
+            true,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(made["switch"]["branch"], "tilt", "{made}");
