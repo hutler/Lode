@@ -39,6 +39,55 @@ pub enum BranchState {
     Archived,
 }
 
+/// A branch's stream type (SPEC §5.3a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamType {
+    /// The trunk: a branch without a parent.
+    Mainline,
+    /// Less stable than its parent: takes merges down freely, copies up when up to date.
+    Development,
+    /// More stable than its parent: takes only picked revisions from it, merges up freely.
+    Release,
+}
+
+impl StreamType {
+    /// The wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StreamType::Mainline => "mainline",
+            StreamType::Development => "development",
+            StreamType::Release => "release",
+        }
+    }
+}
+
+/// A stream type to set, or `none` to make the branch an ordinary branch again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamSetting {
+    /// See [`StreamType::Mainline`].
+    Mainline,
+    /// See [`StreamType::Development`].
+    Development,
+    /// See [`StreamType::Release`].
+    Release,
+    /// No stream type: v1 merge rules.
+    None,
+}
+
+impl StreamSetting {
+    /// The type this sets, `None` for `none`.
+    pub fn stream_type(self) -> Option<StreamType> {
+        match self {
+            StreamSetting::Mainline => Some(StreamType::Mainline),
+            StreamSetting::Development => Some(StreamType::Development),
+            StreamSetting::Release => Some(StreamType::Release),
+            StreamSetting::None => None,
+        }
+    }
+}
+
 /// Where a branch was created from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BranchPoint {
@@ -62,6 +111,9 @@ pub struct BranchView {
     pub parent: Option<BranchPoint>,
     /// Active or archived.
     pub state: BranchState,
+    /// Stream type; absent for an ordinary branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamType>,
 }
 
 /// `GET /depots/{d}/branches`.
@@ -81,6 +133,9 @@ pub struct CreateBranchRequest {
     /// Source revision; the source head when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_rev: Option<u64>,
+    /// Stream type of the new branch (`development` or `release`); none when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamType>,
 }
 
 /// `PATCH /depots/{d}/branches/{b}`.
@@ -89,6 +144,9 @@ pub struct PatchBranchRequest {
     /// New state; `archived` archives the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<BranchState>,
+    /// New stream type, or `none` to clear it (depot admin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<StreamSetting>,
 }
 
 /// `POST /depots/{d}/objects/missing`.
@@ -154,4 +212,41 @@ pub struct MergeInfo {
     pub source_head: u64,
     /// How many source revisions after the base a merge would bring.
     pub pending: u64,
+    /// Whether the stream rules allow this merge (SPEC §5.3a). Absent from servers before
+    /// 0.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<Flow>,
+}
+
+/// Which way a merge goes between two streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowDirection {
+    /// From a parent into its development or release child.
+    MergeDown,
+    /// From a release child into its parent.
+    MergeUp,
+    /// From a development child into its parent.
+    CopyUp,
+    /// Between streams that are not parent and child.
+    Sideways,
+    /// Either side is an ordinary branch: v1 rules, always allowed.
+    Untyped,
+}
+
+/// The stream rules' verdict on a merge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Flow {
+    /// Which way the merge goes.
+    pub direction: FlowDirection,
+    /// Whether a full merge is allowed.
+    pub allowed: bool,
+    /// Whether a single-revision pick is allowed.
+    pub pick_allowed: bool,
+    /// Why not, when refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// For a copy up: parent revisions not yet merged down into the child.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u64>,
 }

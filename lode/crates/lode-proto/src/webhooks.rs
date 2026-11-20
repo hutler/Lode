@@ -9,6 +9,7 @@ pub const EVENTS: &[&str] = &[
     "revision.created",
     "branch.created",
     "branch.archived",
+    "branch.stream_changed",
     "lock.acquired",
     "lock.released",
     "shelf.created",

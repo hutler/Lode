@@ -241,6 +241,7 @@ pub(crate) fn tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
                     let req = SubmitShelfRequest {
                         expected_version: input.expected_version,
                         message: input.message,
+                        force_flow: false,
                     };
                     let resp = submit_shelf(&ctx, &caller, &input.depot, input.id, req).await?;
                     serde_json::to_value(resp).map_err(|_| ApiError::internal())

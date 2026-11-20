@@ -154,6 +154,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
     let a = Rc::clone(app);
     b.on_mark_resolved(move || a.resolve_using(Using::Merged));
     let a = Rc::clone(app);
+    b.on_use_tool(move || a.resolve_using(Using::Tool));
+    let a = Rc::clone(app);
     b.on_save_result(move || a.save_result());
     let a = Rc::clone(app);
     b.on_toggle_folder(move |p| a.toggle_folder(p.to_string()));
@@ -584,6 +586,11 @@ impl App {
             })
         };
         let switch = b.get_new_switch();
+        let stream = match b.get_new_type_index() {
+            1 => Some(lode_ops::cmd::branch::StreamType::Development),
+            2 => Some(lode_ops::cmd::branch::StreamType::Release),
+            _ => None,
+        };
         n.busy = true;
         n.error = ErrorInfo::default();
         b.set_new_branch(n);
@@ -592,7 +599,7 @@ impl App {
         spawn(async move {
             let got = me
                 .desk
-                .branch_create(root.clone(), name.clone(), from, switch)
+                .branch_create(root.clone(), name.clone(), from, switch, stream)
                 .await;
             let Some(w) = me.window.upgrade() else { return };
             let b = w.global::<Branching>();
@@ -835,6 +842,7 @@ impl App {
         let result = v["result"]["text"].as_str();
         c.editable = c.text && result.is_some();
         c.theirs_file = v["theirs_file"].as_str().unwrap_or("").into();
+        c.tool = v["tool"].as_str().unwrap_or("").into();
         let base = v["base"]["text"].as_str().map(merge::lines);
         let base_rows = side_lines(v["base"]["text"].as_str(), None);
         let mine_rows = side_lines(v["mine"]["text"].as_str(), base.as_deref());
@@ -933,6 +941,24 @@ impl App {
             let b = w.global::<Branching>();
             let mut c = b.get_conflict();
             c.busy = false;
+            // A tool that fails leaves the conflict: say why.
+            let got = match got {
+                Ok(v)
+                    if using == Using::Tool
+                        && v["resolved"].as_array().is_none_or(Vec::is_empty) =>
+                {
+                    let reason = v["failed"][0]["reason"]
+                        .as_str()
+                        .unwrap_or("the merge tool did not resolve the file")
+                        .to_owned();
+                    Err(crate::desk::ErrorView {
+                        code: "merge_tool_failed".into(),
+                        message: reason,
+                        details: serde_json::Value::Null,
+                    })
+                }
+                other => other,
+            };
             match got {
                 Ok(_) => {
                     b.set_conflict(c);
@@ -953,6 +979,7 @@ impl App {
             Using::Mine => "kept your version",
             Using::Theirs => "took their version",
             Using::Merged => "marked it resolved",
+            Using::Tool => "used the merge tool",
         };
         self.resolving(how, None, using);
     }

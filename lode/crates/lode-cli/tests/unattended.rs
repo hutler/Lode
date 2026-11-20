@@ -317,6 +317,7 @@ async fn reset_sequence_and_switch_to_a_revision() {
                 name: "rel".into(),
                 from_branch: "main".into(),
                 from_rev: Some(r1),
+                stream: None,
             },
         )
         .await

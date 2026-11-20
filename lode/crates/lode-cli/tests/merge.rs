@@ -24,6 +24,7 @@ async fn branch(server: &TestServer, name: &str) -> u64 {
                 name: name.into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

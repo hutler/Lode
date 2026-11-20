@@ -15,6 +15,10 @@ export struct BranchRow {
     /// "from main@r3", or "first branch".
     origin: string,
     selected: bool,
+    /// `development`, `release` or `mainline` for a stream; empty for an ordinary branch.
+    stream: string,
+    /// How deep in the stream tree (0 outside it).
+    depth: int,
 }
 
 export struct BranchesState {
@@ -103,6 +107,8 @@ export struct ConflictState {
     mine-note: string,
     theirs-note: string,
     theirs-file: string,
+    /// The merge tool the depot names for the file, if any.
+    tool: string,
     regions-left: int,
     busy: bool,
     error: ErrorInfo,
@@ -156,6 +162,8 @@ export global Branching {
     in-out property <int> base-index;
     in-out property <string> base-rev;
     in-out property <bool> new-switch: true;
+    /// 0 an ordinary branch, 1 a development stream, 2 a release stream.
+    in-out property <int> new-type-index;
     in-out property <MergeState> merge;
     in property <[string]> sources;
     in-out property <int> source-index;
@@ -205,6 +213,7 @@ export global Branching {
     callback result-edited();
     callback use-side(string);
     callback mark-resolved();
+    callback use-tool();
     callback save-result();
     callback toggle-folder(string);
     callback tick-folder(string, bool);
@@ -244,7 +253,7 @@ component BranchRowView inherits Rectangle {
     accessible-action-default => { root.clicked(); }
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
-        padding-left: 10px;
+        padding-left: 10px + root.item.depth * 18px;
         padding-right: 10px;
         spacing: 8px;
         Text {
@@ -256,6 +265,7 @@ component BranchRowView inherits Rectangle {
         }
         if root.item.current: VerticalLayout { alignment: center; Tag { text: "current"; } }
         if root.item.archived: VerticalLayout { alignment: center; Tag { text: "archived"; } }
+        if root.item.stream != "": VerticalLayout { alignment: center; Tag { text: root.item.stream; } }
         Rectangle { horizontal-stretch: 1; }
         Muted { text: root.item.head + " · " + root.item.origin; vertical-alignment: center; accessible-role: none; }
     }
@@ -429,6 +439,21 @@ export component NewBranchDialog inherits Card {
                 text <=> Branching.base-rev;
                 edited => { Branching.new-edited(); }
             }
+        }
+        FormLabel { text: "Type"; }
+        ComboBox {
+            model: ["Ordinary branch", "Development stream", "Release stream"];
+            current-index <=> Branching.new-type-index;
+            accessible-label: "Branch type";
+        }
+        Muted {
+            text: Branching.new-type-index == 1
+                ? "Takes merges from its parent any time; merges back once it has everything the parent has."
+                : Branching.new-type-index == 2
+                ? "Takes only single revisions from its parent; its fixes merge back any time."
+                : "No rules about which way merges go.";
+            font-size: 11px;
+            wrap: word-wrap;
         }
         HorizontalLayout {
             spacing: 8px;
@@ -626,6 +651,11 @@ export component ConflictView inherits Rectangle {
             Title { text: "Resolve " + Branching.conflict.name; vertical-alignment: center; }
             Muted { text: Branching.conflict.path; font-family: Reading.mono; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
+            if Branching.conflict.loaded && Branching.conflict.tool != "": Button {
+                text: "Open in " + Branching.conflict.tool;
+                enabled: !Branching.conflict.busy;
+                clicked => { Branching.use-tool(); }
+            }
             if Branching.conflict.loaded: Muted { text: "Theirs came from " + Branching.conflict.from; vertical-alignment: center; }
         }
         if Branching.conflict.error.shown: ErrorBanner {
