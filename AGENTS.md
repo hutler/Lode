@@ -10,6 +10,10 @@ read:
 | `desk/` | `lode/AGENTS.md` (code rules), `desk/README.md` ("The core version") | `lode/docs/tasks/` (the Desk tasks, `T09x` onwards) |
 | `unreal/` | `unreal/docs/SPEC.md` section 9 | `unreal/docs/TASKS.md` |
 
+Use English for project documentation and agent instructions. Keep translations linked from
+the English original. For tasks carried out in a Lode depot, start with the
+[agent workflow guide](docs/agent-guide.md).
+
 ## One task, one subproject
 
 - A task belongs to one subproject. Work only inside that subproject's folder.
