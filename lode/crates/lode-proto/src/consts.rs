@@ -54,6 +54,8 @@ pub mod paths {
     pub const INFO: &str = "/api/v1/info";
     /// `POST` password login.
     pub const LOGIN: &str = "/api/v1/auth/login";
+    /// `POST` change one's own password, given the current one (no token needed).
+    pub const PASSWORD: &str = "/api/v1/auth/password";
     /// `GET` single sign-on: the browser starts here and is sent on to the identity provider.
     /// Query: `redirect_uri` (a loopback `http` address of the client), `state`,
     /// `code_challenge` (S256) and an optional `token_name`.

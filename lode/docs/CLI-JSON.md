@@ -79,6 +79,19 @@ sign-on is a `usage` error; a refused or unfinished sign-in is `sso_failed` (exi
 reason in the message, such as the provider's refusal, an unlinked identity, a domain that
 is not allowed or a disabled user.
 
+A first password that must be changed (`loded setup --generate-admin-password`) is refused
+with `unauthenticated` and `details.reason` `password_change_required`; at a terminal
+without `--json` the command asks for a new password, changes it and signs in with it.
+After 24 hours unused the reason is `password_expired`.
+
+### `lode passwd [url] [--name N] [--password-stdin]`
+
+Changes one's own password through `POST /auth/password` (no token needed, so it also
+replaces a first password before any sign-in). The name defaults to the signed-in account.
+`--password-stdin` reads the current password, then the new one, one per line.
+
+`{ "server", "name" }`
+
 ### `lode logout`
 
 `{ "server", "removed": bool, "revoked": bool }` (`revoked` absent when nothing was stored)
@@ -98,6 +111,18 @@ The caching proxy (0.3) used for the server's file content.
 ### `lode whoami`
 
 `{ "server", "name", "kind": "user"|"agent", "owner": name|null, "scopes": [..] }`
+
+### `lode doctor [url]`
+
+`{ "ok": bool, "server", "status": "ok"|"warn"|"fail", "checks": [{ "name", "status":
+"ok"|"warn"|"fail"|"skip", "detail" }] }`. The checks, in order: `dns`, `tls` (handshake and
+certificate expiry; a warning with fewer than 14 days left), `info`, `versions`, `identity`.
+A step that cannot run because an earlier one failed is `skip`. `ok` is false only when a
+check failed. The exit code is 0 when all is well, 2 on warnings only, 1 on a failure.
+
+`loded doctor --config C --json` on the server prints the same `{ "status", "checks" }`
+shape (no envelope) with the checks `config`, `data_dir`, `disk`, `certificate`, `domain`,
+`backups`, `database`, `store`, and the same exit codes.
 
 ### `lode checkout <url>/<depot> [dir]`
 
@@ -307,8 +332,13 @@ neither `-m` nor `-F` is given.
 
 ### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
 
-`{ "shelf": id, "version": n, "files": n, "uploaded": n, "bytes_uploaded": n, "bytes_reused": n, "kept": bool, "updated": bool,
+`{ "shelf": id, "link": "lode://…/shelf/ID" | null, "version": n, "files": n, "uploaded": n,
+"bytes_uploaded": n, "bytes_reused": n, "kept": bool, "updated": bool,
 "merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
+
+`link` (T176) is the shelf's `lode://` link, to paste for a reviewer; `null` when the server
+address has a path, which links cannot carry. The local MCP server's `shelve` tool returns
+the same document.
 
 A pending merge goes into the shelf's `merged_from` (and leaves the workspace unless `--keep`);
 it must then be shelved whole, like a commit.
@@ -340,6 +370,22 @@ A submit refused by the checks gate exits 1 with code `checks_required`; `detail
 `{ "shelf_id", "shelf_version", "missing": [ { "name", "reporter", "reason", "state"?,
 "reported_by"? } ] }` (`reason`: `absent`, `not_success`, `wrong_reporter`), and the human
 message lists each unmet check on its own line.
+
+### `lode completions <shell>`
+
+Prints the completion script for `bash`, `zsh`, `fish`, `powershell` or `elvish` to stdout,
+also with `--json` (the script is the output). `loded completions` does the same for the
+server.
+
+### `lode link PATH[@REV] [-b BRANCH] | -r REV | --shelf ID [--depot D]`
+
+Prints the `lode://` link Lode Desk would copy (T176), using the workspace's server and depot
+(`--server`/`--depot` outside one). A file without `@REV` or `--branch` links the revision the
+workspace is at (outside a workspace: the head of `main`); with `--branch`, the head of that
+branch. Plain-HTTP servers get `?http=1`. Nothing is asked of the server.
+
+`{ "kind": "file"|"revision"|"shelf", "server", "depot", "path"?, "rev"?, "branch"?, "id"?,
+"link" }`. A server under a path is `bad_link` (exit 1).
 
 ### `lode checks <rN | ID[@VERSION]> [--depot D]`
 
@@ -535,18 +581,18 @@ may also manage that agent's tokens).
 
 | Command | `--json` output |
 | --- | --- |
-| `depot create <name>` / `depot list` | the depot / `{ "depots": [ { "name", "created_at" } ] }` |
+| `depot create <name>` / `depot list` | the depot / `{ "depots": [ { "name", "created_at", "revisions"?, "last_commit_at"?, "size_bytes"? } ] }`; the last three for server administrators (T179), and the text output is then a table |
 | `user create <name> [--display-name D] [--sso IDENTITY] [--password-stdin]` | the principal, with `"sso"` when linked; with `--sso` no password is asked for unless `--password-stdin` is given |
 | `user sso <name> <identity>` / `user sso <name> --remove` | the principal; an identity linked to someone else is `conflict` |
 | `user list` / `agent list` | `{ "principals": [principal] }`, users or agents only |
 | `user disable <name> [--enable]` / `agent disable …` | the principal |
 | `user passwd <name> [--password-stdin]` | the principal |
-| `agent create <name> --owner <user> [--display-name D]` | the principal |
+| `agent create <name> --owner <user> [--display-name D] [--grant DEPOT=LEVEL]… [--with-token [--scope S]]` | the principal, plus `"rules": [rule]` with `--grant` (allow LEVEL on every branch and path of DEPOT) and `"token"` (as `token create`) with `--with-token`; the token alone goes to stdout in text mode. A failure after the agent exists says what was done |
 | `group create <name>` / `group list` | `{ "name", "members" }` / `{ "groups": [ … ] }` |
 | `group add|remove <group> <member>` | `{ "group", "added"|"removed" }` |
 | `token create [--for P] [--name N] [--scope S,…] [--expires-in-days D]` | `{ "token", "info": token }` |
 | `token list [--for P]` / `token revoke <id> [--for P]` | `{ "tokens": [token] }` / `{ "revoked": id }` |
-| `acl list` | `{ "rules": [rule] }` in evaluation order |
+| `acl list [--depot D] [--subject S]` | `{ "rules": [rule] }` in evaluation order; `--depot`: only the rules that can apply in D (its own and server-wide ones; an unknown depot is `not_found`); `--subject`: only that subject's (`user:NAME`, `group:NAME`, `all`) |
 | `acl add <allow|deny> <read|write|admin> <subject> [--depot D] [--branch G] [--path G] [--check P B PATH]` | the rule, plus `"check"` with `--check` |
 | `acl remove <id>` | `{ "removed": id }` |
 
@@ -558,7 +604,7 @@ client cannot read a rule list that holds an `agents` rule.
 | `gc <depot> [--dry-run]` / `fsck <depot> [--full]` | `{ "objects_checked", "objects_affected", "bytes_affected", "dry_run"?, "problems"? }` |
 | `obliterate <depot> <path[@rev]>… --reason R [--dry-run] [--yes]` | `{ "dry_run", "objects": [ { "id", "size", "uses": [ { "rev", "branch", "path" } ] } ], "bytes", "in_use"? }`; `in_use` (`[ { "branch", "path", "id" } ]`) only on a dry run, otherwise it is a `conflict` with `details.in_use` |
 | `obliterated <depot>` | `{ "obliterated": [ { "id", "size", "path", "reason", "by", "at" } ] }`, oldest first |
-| `webhook add <depot> <url> --events E,… [--branch G]` | `{ "hook": hook, "secret" }`; the secret goes to stdout once |
+| `webhook add <depot> <url> --events E,… [--branch G] [--format lode\|slack\|discord\|telegram]` | `{ "hook": hook, "secret" }`; the secret goes to stdout once. `hook.format` is present unless it is `lode` |
 | `webhook list <depot>` | `{ "webhooks": [ { "id", "depot", "url", "events", "branch"?, "active", "created_by", "created_at" } ] }` |
 | `webhook remove <depot> <id>` | `{ "removed": id }` |
 | `webhook deliveries <depot> <id>` | `{ "deliveries": [ { "id", "hook_id", "event", "state": "pending"|"ok"|"failed", "attempts", "next_attempt_at"?, "last_status"?, "last_error"?, "created_at" } ] }`, newest first |

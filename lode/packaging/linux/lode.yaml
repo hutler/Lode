@@ -24,5 +24,28 @@ contents:
     dst: /usr/share/doc/lode/LICENSE
     file_info:
       mode: 0644
+  # Shell completions, written by packaging/linux/completions.sh into ${COMPLETIONS}.
+  - src: ${COMPLETIONS}/lode.bash
+    expand: true
+    dst: /usr/share/bash-completion/completions/lode
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/_lode
+    expand: true
+    dst: /usr/share/zsh/vendor-completions/_lode
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/_lode
+    expand: true
+    dst: /usr/share/zsh/site-functions/_lode
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/lode.fish
+    expand: true
+    dst: /usr/share/fish/vendor_completions.d/lode.fish
+    file_info:
+      mode: 0644
 rpm:
   group: Development/Tools

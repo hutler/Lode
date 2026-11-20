@@ -74,15 +74,58 @@ fn to_view(r: &AclRow, n: &Names) -> AclRule {
     }
 }
 
-async fn list(State(state): State<AppState>, caller: Caller) -> ApiResult<Json<AclList>> {
+/// The `subject` filter of `GET /admin/acl`: `user:NAME` (or `NAME`), `group:NAME` or `all`.
+fn parse_subject(s: &str) -> ApiResult<AclSubject> {
+    match s.split_once(':') {
+        None if s == "all" || s == "*" => Ok(AclSubject::All),
+        None => Ok(AclSubject::User(s.to_owned())),
+        Some(("user", n)) if !n.is_empty() => Ok(AclSubject::User(n.to_owned())),
+        Some(("group", n)) if !n.is_empty() => Ok(AclSubject::Group(n.to_owned())),
+        _ => Err(ApiError::invalid_request(format!(
+            "`{s}` is not a subject: use user:NAME, group:NAME or all"
+        ))),
+    }
+}
+
+/// `GET /admin/acl[?depot=D][&subject=S]`: the rules in evaluation order. With `depot`, only
+/// those that can apply there (that depot's and the server-wide ones); with `subject`, only
+/// that subject's.
+async fn list(
+    State(state): State<AppState>,
+    caller: Caller,
+    q: ApiQuery,
+) -> ApiResult<Json<AclList>> {
     state.permissions().require_server_admin(&caller)?;
-    let rules = state
+    let depot = q.get("depot").filter(|d| !d.is_empty()).map(str::to_owned);
+    let subject = q
+        .get("subject")
+        .filter(|s| !s.is_empty())
+        .map(parse_subject)
+        .transpose()?;
+    let lookup = depot.clone();
+    let (known, rules) = state
         .meta()
-        .read(|tx| {
+        .read(move |tx| {
+            let known = match &lookup {
+                Some(d) => tx.depot_by_name(d)?.is_some(),
+                None => true,
+            };
             let names = load_names(tx)?;
-            Ok(tx.acl_all()?.iter().map(|r| to_view(r, &names)).collect())
+            let rules: Vec<AclRule> = tx.acl_all()?.iter().map(|r| to_view(r, &names)).collect();
+            Ok((known, rules))
         })
         .await?;
+    if !known {
+        return Err(ApiError::not_found(format!(
+            "no depot named `{}`",
+            depot.unwrap_or_default()
+        )));
+    }
+    let rules = rules
+        .into_iter()
+        .filter(|r| depot.is_none() || r.depot.is_none() || r.depot == depot)
+        .filter(|r| subject.as_ref().is_none_or(|s| &r.subject == s))
+        .collect();
     Ok(Json(AclList { rules }))
 }
 

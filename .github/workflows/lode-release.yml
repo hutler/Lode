@@ -122,7 +122,8 @@ jobs:
             x86_64-*) deb_arch=amd64; rpm_arch=x86_64 ;;
             aarch64-*) deb_arch=arm64; rpm_arch=aarch64 ;;
           esac
-          export VERSION="$version" BIN="target/${{ matrix.target }}/release"
+          export VERSION="$version" BIN="target/${{ matrix.target }}/release" COMPLETIONS=dist-completions
+          sh packaging/linux/completions.sh "$BIN" "$COMPLETIONS"
           for p in lode-server lode; do
             ARCH=$deb_arch "$(go env GOPATH)/bin/nfpm" package -f "packaging/linux/$p.yaml" -p deb \
               -t "dist/${p}_${version}_${deb_arch}.deb"

@@ -50,6 +50,13 @@ pub fn finish(routes: Router<AppState>, state: AppState) -> Router {
     }
     // The admin web UI sends its actions to the API router built so far.
     let app = app.clone().merge(crate::admin::routes(state.clone(), app));
+    let app = if state.config().metrics.enabled {
+        app.merge(crate::metrics::routes(state.clone())).layer(
+            axum::middleware::from_fn_with_state(state.clone(), crate::metrics::count),
+        )
+    } else {
+        app
+    };
     app.fallback(fallback)
         .method_not_allowed_fallback(method_not_allowed)
         .layer(DefaultBodyLimit::max(limit))

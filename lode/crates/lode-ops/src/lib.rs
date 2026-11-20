@@ -24,6 +24,7 @@ pub mod cmd;
 pub mod context;
 pub mod crash;
 pub mod error;
+pub mod links;
 pub mod local;
 pub mod materialize;
 pub mod output;

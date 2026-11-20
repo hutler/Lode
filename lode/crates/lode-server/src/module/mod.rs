@@ -221,6 +221,12 @@ pub trait Module: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Gauges for `/metrics` (T181), read from the module's own tables, such as open shelves
+    /// per depot. Only asked when metrics are enabled; keep it to a few cheap counts.
+    fn metrics(&self, _tx: &dyn Reads) -> Result<Vec<crate::metrics::Sample>, MetaError> {
+        Ok(Vec::new())
+    }
+
     /// Tools this module offers to agents.
     fn mcp_tools(&self, _ctx: ModuleCtx) -> Vec<ToolDef> {
         Vec::new()

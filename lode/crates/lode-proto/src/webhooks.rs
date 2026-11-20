@@ -29,6 +29,48 @@ pub const HEADER_DELIVERY: &str = "X-Lode-Delivery";
 /// Header carrying `sha256=<hex HMAC-SHA256 of the body>`, keyed with the hook's secret.
 pub const HEADER_SIGNATURE: &str = "X-Lode-Signature";
 
+/// What a hook's deliveries look like (T175).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebhookFormat {
+    /// The signed JSON event (the default, and the only format before T175).
+    #[default]
+    Lode,
+    /// A Slack incoming webhook: `{"text": …}`.
+    Slack,
+    /// A Discord webhook: `{"content": …}`.
+    Discord,
+    /// The Telegram Bot API's `sendMessage`: `{"chat_id": …, "text": …}`, the chat taken
+    /// from the hook URL's `chat_id` query parameter.
+    Telegram,
+}
+
+impl WebhookFormat {
+    /// Every format, in the order pickers show them.
+    pub const ALL: [WebhookFormat; 4] = [Self::Lode, Self::Slack, Self::Discord, Self::Telegram];
+
+    /// The name in requests, configuration and the CLI.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lode => "lode",
+            Self::Slack => "slack",
+            Self::Discord => "discord",
+            Self::Telegram => "telegram",
+        }
+    }
+
+    /// The format named `s`.
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|f| f.as_str() == s)
+    }
+
+    /// Whether this is the default format, which is left out of JSON so that older peers
+    /// see the documents they know.
+    pub fn is_lode(&self) -> bool {
+        *self == Self::Lode
+    }
+}
+
 /// `POST /depots/{d}/webhooks`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreateWebhookRequest {
@@ -40,6 +82,9 @@ pub struct CreateWebhookRequest {
     /// filtered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// The deliveries' format; `lode` when absent.
+    #[serde(default, skip_serializing_if = "WebhookFormat::is_lode")]
+    pub format: WebhookFormat,
 }
 
 /// A hook, without its secret.
@@ -56,6 +101,9 @@ pub struct WebhookView {
     /// Branch glob, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// The deliveries' format; `lode` when absent.
+    #[serde(default, skip_serializing_if = "WebhookFormat::is_lode")]
+    pub format: WebhookFormat,
     /// Whether the hook is sending.
     pub active: bool,
     /// Who created it.

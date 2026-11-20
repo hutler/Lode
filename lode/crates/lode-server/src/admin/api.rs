@@ -41,6 +41,30 @@ fn failed(message: impl Into<String>) -> ErrorBody {
 }
 
 impl Api<'_> {
+    /// `GET path`, answering the API's response as it is: a file streams through without
+    /// being read here.
+    pub(crate) async fn raw(&self, path: &str) -> Result<axum::response::Response, ErrorBody> {
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .header(header::AUTHORIZATION, format!("Bearer {}", self.token))
+            .body(Body::empty())
+            .map_err(|e| failed(format!("cannot build the request: {e}")))?;
+        let resp = match self.ctx.api.clone().oneshot(req).await {
+            Ok(r) => r,
+            Err(never) => match never {},
+        };
+        if resp.status().is_success() {
+            return Ok(resp);
+        }
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+            .await
+            .map_err(|e| failed(format!("cannot read the answer: {e}")))?;
+        Err(serde_json::from_slice::<ErrorBody>(&bytes)
+            .unwrap_or_else(|_| failed(format!("the server answered {status}"))))
+    }
+
     async fn send(
         &self,
         method: Method,

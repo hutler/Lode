@@ -30,7 +30,7 @@ settle without fixing Desk in the same change, and Desk follows when it is ready
 3. Commit that as its own change, `desk: move to core <version>`.
 
 The boundary: Desk uses only the public operations of `lode-ops` (`cmd::*`, `context`,
-`output`, `error`) and the JSON documents they return (the same as `lode --json`, described in
+`output`, `error`, `links`) and the JSON documents they return (the same as `lode --json`, described in
 `lode/docs/CLI-JSON.md`), plus `lode_client::ServerUrl` and `lode_core::PathGlobSet`. Every call
 into `lode-ops` goes through `src/desk.rs`. Core tests and benches are not Desk's business, and
 the core never depends on Desk.
@@ -81,7 +81,7 @@ and the branch are percent-encoded. A link opens in an open or recent workspace 
 server and depot (the app asks when there are several, putting ones on the link's branch first)
 and offers a checkout when there is none. Anything that is not exactly one of these forms is
 refused with the reason and nothing is opened. A link that arrives while a dialog is open waits
-until it closes. The rules are in `src/links.rs`, tested against `tests/link_cases.json`.
+until it closes. The rules are in `lode-ops` (`src/links.rs`, shared with `lode link`), tested against its `tests/link_cases.json`.
 
 Only one copy of the app runs per user (`src/instance.rs`): the first holds a lock file in the
 app's data folder and listens on a loopback port it writes there with a random token; starting
@@ -97,8 +97,7 @@ starts or brings forward Lode Desk without opening its target.
 
 ## Tests
 
-- `cargo test`: every operation the window calls, against a test server; the link rules
-  (`tests/links.rs`); one copy per user and the link hand-over between two starts
+- `cargo test`: every operation the window calls, against a test server; one copy per user and the link hand-over between two starts
   (`tests/instance.rs`); updates (`tests/update.rs`: the feed, a package signed with the key,
   with another key, and damaged, the settings and `LODE_DESK_NO_UPDATE`); and `tests/ui.rs`, the
   window driven headless through Slint's testing backend against test servers, from sign-in to

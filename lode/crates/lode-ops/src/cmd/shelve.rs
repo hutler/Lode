@@ -307,8 +307,14 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> OpResult<Value> {
             ", reverted in the workspace"
         }
     ));
+    // A link the person (or an agent) can paste; absent for a server under a path.
+    let link = ctx
+        .server_url(Some(&t.ws))
+        .ok()
+        .and_then(|server| crate::cmd::link::shelf_link(&server, &t.depot, view.id));
     Ok(json!({
         "shelf": view.id,
+        "link": link,
         "version": view.version,
         "files": n,
         "uploaded": uploaded.blobs,

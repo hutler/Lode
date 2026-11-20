@@ -168,3 +168,40 @@ module's tables, on the same first start.
 - Access rules take the subject `agents` (T194). A bare `agents` on the command line now means
   this subject; a user named `agents` is written `user:agents`. A 0.3 client cannot list
   rules once one exists.
+
+### Next release: field feedback from the first deployment (M17)
+
+- **Upgrade note:** `loded setup` no longer prints an admin token; the password is the one
+  secret. Scripts that read the token from setup's output need `--print-admin-token`.
+  Without a terminal and without `--admin-password-file`, setup now generates a first
+  password (`--generate-admin-password`) instead of failing.
+- The database gains `principal.password_change_by` (core schema 9), added on the first
+  start. A generated first password is good only for choosing a new one (`POST
+  /auth/password`, `lode passwd`, or the admin web sign-in), and for 24 hours. Logins with it
+  are `unauthenticated` with `details.reason` `password_change_required` (or
+  `password_expired`); older clients show the message.
+- `lode passwd` and `POST /auth/password` let users change their own password.
+  `loded reset-admin --generate-password` prints a new first password instead of a token.
+- `GET /admin/acl` takes optional `depot` and `subject` filters (`lode admin acl list --depot
+  D --subject S`); the admin Access page has the same filter.
+- `lode link` prints `lode://` links; `lode shelve --json` gains `link`.
+- `lode completions` and `loded completions`; the Linux packages install bash, zsh and fish
+  completion.
+- `GET /depots` gives server administrators `revisions`, `last_commit_at` and `size_bytes`
+  per depot; `lode admin depot list` prints them as a table. Older clients ignore the fields.
+- `lode admin agent create` takes `--grant DEPOT=LEVEL` and `--with-token`.
+- Every user can sign in to the web pages now (T173): server administrators land on
+  `/admin/`, everyone else on the read-only depot browser at `/web/`. The session cookie's
+  path is `/` instead of `/admin`; sessions from before the upgrade keep working until they
+  expire. A TLS proxy in front of the server must pass `/web/` through as well.
+- Shelf review on the web (T174): `/web/depots/D/shelves` lists open shelves; a shelf's page
+  shows its diff and checks and offers Submit and Delete, under the API's usual rules.
+- Webhooks gain `format` (T175, webhooks module schema 2, added on the first start):
+  `slack`, `discord` or `telegram` send one line of text to team chat; `lode` (the default)
+  is unchanged byte for byte. `lode admin webhook add --format F`.
+- Optional Prometheus metrics (T181): `[metrics] enabled = true` serves `GET /metrics` in
+  the text format, for tokens with the new `metrics` scope or addresses in `allow_from`.
+  Off by default; nothing changes unless it is turned on.
+- `loded doctor --config C` and `lode doctor [URL]` (T178) check a server's setup and the
+  way to it, one line per check; exit 0, 2 on warnings, 1 on a failure. `--json` gives the
+  report (docs/CLI-JSON.md).

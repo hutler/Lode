@@ -13,6 +13,7 @@ pub mod clock;
 pub mod commit;
 pub mod config;
 pub mod depots;
+pub mod doctor;
 pub mod error;
 pub mod events;
 pub mod extract;
@@ -20,12 +21,14 @@ pub mod failpoint;
 mod idle;
 pub mod lru;
 pub mod maintenance;
+pub mod metrics;
 pub mod module;
 pub mod perm;
 pub mod read;
 pub mod routes;
 mod serve;
 pub mod server;
+pub mod sizes;
 pub mod state;
 pub mod tls;
 pub mod trash;
@@ -33,16 +36,17 @@ pub mod trash;
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
-    AcmeConfig, AdminUiConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, Limits,
-    ModulesConfig, OidcConfig, PasswordLogin, S3Settings, ServerConfig, StorageConfig, StorageKind,
-    TlsConfig, WebhooksConfig,
+    AcmeConfig, AdminUiConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, IpNet,
+    Limits, MetricsConfig, ModulesConfig, OidcConfig, PasswordLogin, S3Settings, ServerConfig,
+    StorageConfig, StorageKind, TlsConfig, WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};
 pub use perm::{BranchAccess, DepotAccess, Level, Permissions};
 pub use routes::{core_routes, finish, router, REQUEST_ID_HEADER};
 pub use server::{
-    init, open_blob_store, open_state, reset_admin, set_admin_password, shutdown_signal,
-    BoundServer, ClientInfo, InitReport, ServerError,
+    generate_admin_password, init, open_blob_store, open_state, reset_admin, revoke_admin_tokens,
+    set_admin_password, shutdown_signal, BoundServer, ClientInfo, InitReport, ServerError,
+    GENERATED_PASSWORD_VALID,
 };
 pub use state::{AppState, BackupRun};

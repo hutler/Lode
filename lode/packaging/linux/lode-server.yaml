@@ -34,6 +34,29 @@ contents:
     dst: /usr/share/doc/lode-server/LICENSE
     file_info:
       mode: 0644
+  # Shell completions, written by packaging/linux/completions.sh into ${COMPLETIONS}.
+  - src: ${COMPLETIONS}/loded.bash
+    expand: true
+    dst: /usr/share/bash-completion/completions/loded
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/_loded
+    expand: true
+    dst: /usr/share/zsh/vendor-completions/_loded
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/_loded
+    expand: true
+    dst: /usr/share/zsh/site-functions/_loded
+    packager: rpm
+    file_info:
+      mode: 0644
+  - src: ${COMPLETIONS}/loded.fish
+    expand: true
+    dst: /usr/share/fish/vendor_completions.d/loded.fish
+    file_info:
+      mode: 0644
 scripts:
   preinstall: packaging/linux/scripts/preinstall.sh
   postinstall: packaging/linux/scripts/postinstall.sh

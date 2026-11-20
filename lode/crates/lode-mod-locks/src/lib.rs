@@ -701,6 +701,26 @@ impl Module for Locks {
         NAME
     }
 
+    fn metrics(&self, tx: &dyn Reads) -> Result<Vec<lode_server::metrics::Sample>, MetaError> {
+        let rows = tx.db().query(
+            "SELECT d.name, count(*) FROM mod_locks_lock t JOIN depot d ON d.id = t.depot_id
+             WHERE d.deleted_at IS NULL GROUP BY d.name ORDER BY d.name",
+            lode_meta::vals![],
+            |r| Ok((r.get::<String>(0)?, r.get::<i64>(1)?)),
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|(depot, n)| {
+                lode_server::metrics::Sample::gauge(
+                    "lode_locks_held",
+                    "Files locked, per depot.",
+                    n as f64,
+                )
+                .label("depot", depot)
+            })
+            .collect())
+    }
+
     fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
         tx.conn().execute(
             "DELETE FROM mod_locks_lock WHERE depot_id = ?1",

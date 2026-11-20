@@ -10,7 +10,9 @@ use lode_proto::admin::{
     PatchPrincipalRequest,
 };
 use lode_proto::auth::{CreateTokenRequest, PrincipalView, TokenView};
-use lode_proto::webhooks::{CreateWebhookRequest, DeliveryState, DeliveryView, WebhookView};
+use lode_proto::webhooks::{
+    CreateWebhookRequest, DeliveryState, DeliveryView, WebhookFormat, WebhookView,
+};
 use lode_proto::PrincipalKind;
 use serde_json::{json, Value};
 
@@ -130,6 +132,10 @@ pub enum WebhookCmd {
         /// Only events on branches matching this glob.
         #[arg(long)]
         branch: Option<String>,
+        /// What to send: lode (signed JSON, the default), or one line of text for slack,
+        /// discord or telegram (a bot's sendMessage URL with ?chat_id=).
+        #[arg(long, default_value = "lode", value_parser = ["lode", "slack", "discord", "telegram"])]
+        format: String,
     },
     /// List the hooks of a depot.
     List {
@@ -261,7 +267,8 @@ pub enum UserCmd {
 /// `lode admin agent`.
 #[derive(Debug, clap::Subcommand)]
 pub enum AgentCmd {
-    /// Create an agent owned by a user. Give it a token with `lode admin token create --for`.
+    /// Create an agent owned by a user; with --with-token and --grant, ready to work in one
+    /// step.
     Create {
         /// Name.
         name: String,
@@ -271,6 +278,17 @@ pub enum AgentCmd {
         /// Display name.
         #[arg(long)]
         display_name: Option<String>,
+        /// Allow the agent LEVEL (read, write or admin) in DEPOT, on every branch and path
+        /// (repeatable): `--grant game=write`.
+        #[arg(long = "grant", value_name = "DEPOT=LEVEL")]
+        grants: Vec<String>,
+        /// Also create a token for it and print it (once). Scopes: the agent defaults (read,
+        /// lock, shelve) unless --scope is given.
+        #[arg(long)]
+        with_token: bool,
+        /// With --with-token: the token's scopes, such as read,shelve (repeatable).
+        #[arg(long = "scope", value_delimiter = ',', requires = "with_token")]
+        scopes: Vec<String>,
     },
     /// List agents.
     List,
@@ -357,7 +375,14 @@ pub enum TokenCmd {
 #[derive(Debug, clap::Subcommand)]
 pub enum AclCmd {
     /// List the rules in evaluation order.
-    List,
+    List {
+        /// Only the rules that can apply in this depot (its own and the server-wide ones).
+        #[arg(long)]
+        depot: Option<String>,
+        /// Only this subject's rules: `user:NAME` (or just NAME), `group:NAME`, or `all`.
+        #[arg(long)]
+        subject: Option<String>,
+    },
     /// Add a rule: EFFECT LEVEL SUBJECT, such as `allow write group:devs`.
     Add {
         /// `allow` or `deny`.
@@ -588,6 +613,40 @@ fn parse_subject(s: &str) -> OpResult<AclSubject> {
     }
 }
 
+/// `game=write` of `agent create --grant`.
+fn parse_grant(g: &str) -> OpResult<(String, AccessLevel)> {
+    let bad = || OpError::usage(format!("`{g}` is not DEPOT=LEVEL, such as game=write"));
+    let (depot, level) = g.split_once('=').ok_or_else(bad)?;
+    let level = match level {
+        "read" => AccessLevel::Read,
+        "write" => AccessLevel::Write,
+        "admin" => AccessLevel::Admin,
+        _ => return Err(bad()),
+    };
+    if depot.is_empty() {
+        return Err(bad());
+    }
+    Ok((depot.to_owned(), level))
+}
+
+/// ` and read in game, write in art`, for the agent's creation message.
+fn grants_text(rules: &[AclRule]) -> String {
+    if rules.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = rules
+        .iter()
+        .map(|r| {
+            format!(
+                "{} in {}",
+                level_name(r.level),
+                r.depot.as_deref().unwrap_or("every depot")
+            )
+        })
+        .collect();
+    format!(", allowed {}", parts.join(", "))
+}
+
 fn subject_text(s: &AclSubject) -> String {
     match s {
         AclSubject::All => "all".to_owned(),
@@ -648,7 +707,7 @@ fn print_check(ctx: &Ctx, c: &AccessCheck) {
 
 fn webhook_line(h: &WebhookView) -> String {
     format!(
-        "{:>4}  {}  events {}{}{}",
+        "{:>4}  {}  events {}{}{}{}",
         h.id,
         h.url,
         h.events.join(","),
@@ -656,6 +715,11 @@ fn webhook_line(h: &WebhookView) -> String {
             .as_deref()
             .map(|b| format!("  branch {b}"))
             .unwrap_or_default(),
+        if h.format.is_lode() {
+            String::new()
+        } else {
+            format!("  format {}", h.format.as_str())
+        },
         if h.active { "" } else { "  (inactive)" }
     )
 }
@@ -693,7 +757,10 @@ async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> OpResult<Value> {
             url,
             events,
             branch,
+            format,
         } => {
+            let format = WebhookFormat::parse(&format)
+                .ok_or_else(|| OpError::usage(format!("unknown webhook format `{format}`")))?;
             if let Some(b) = &branch {
                 check_glob("branch", b)?;
             }
@@ -709,6 +776,7 @@ async fn webhook(ctx: &Ctx, c: &Client, cmd: WebhookCmd) -> OpResult<Value> {
                         url,
                         events,
                         branch,
+                        format,
                     },
                 )
                 .await?;
@@ -890,8 +958,36 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         }
         AdminCmd::Depot(DepotCmd::List) => {
             let list = c.depots().await?;
-            for d in &list.depots {
-                ctx.out.line(&d.name);
+            if list.depots.iter().any(|d| d.revisions.is_some()) {
+                let width = list
+                    .depots
+                    .iter()
+                    .map(|d| d.name.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
+                ctx.out.line(format!(
+                    "{:<width$}  {:>9}  {:>9}  LAST COMMIT",
+                    "DEPOT", "REVISIONS", "SIZE"
+                ));
+                for d in &list.depots {
+                    ctx.out.line(format!(
+                        "{:<width$}  {:>9}  {:>9}  {}",
+                        d.name,
+                        d.revisions.unwrap_or(0),
+                        d.size_bytes
+                            .map(crate::output::human_bytes)
+                            .unwrap_or_else(|| "-".into()),
+                        d.last_commit_at
+                            .map(crate::cmd::history::format_time)
+                            .unwrap_or_else(|| "-".into())
+                    ));
+                }
+            } else {
+                // An older server: names only.
+                for d in &list.depots {
+                    ctx.out.line(&d.name);
+                }
             }
             to_json(&list)
         }
@@ -1003,7 +1099,15 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             name,
             owner,
             display_name,
+            grants,
+            with_token,
+            scopes,
         }) => {
+            // Checked before anything is created.
+            let grants = grants
+                .iter()
+                .map(|g| parse_grant(g))
+                .collect::<OpResult<Vec<_>>>()?;
             let p = c
                 .create_principal(&CreatePrincipalRequest {
                     kind: PrincipalKind::Agent,
@@ -1014,13 +1118,89 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
                     sso: None,
                 })
                 .await?;
-            ctx.out.line(format!(
-                "Created agent {} (owner {}); give it a token with `lode admin token create --for {}`",
-                p.name,
-                p.owner.as_deref().unwrap_or("?"),
-                p.name
-            ));
-            to_json(&p)
+            // From here on the agent exists: a failure says what was already done.
+            let partly = |e: lode_client::Error, done: &str| {
+                let mut e = OpError::from(e);
+                e.message = format!(
+                    "{}; agent {} was created{done}, so finish with `lode admin acl add` and \
+                     `lode admin token create --for {}`",
+                    e.message, p.name, p.name
+                );
+                e
+            };
+            let mut rules = Vec::new();
+            for (depot, level) in grants {
+                let rule = AclRule {
+                    id: None,
+                    depot: Some(depot),
+                    subject: AclSubject::User(p.name.clone()),
+                    branch: "**".into(),
+                    path: "**".into(),
+                    effect: AclEffect::Allow,
+                    level,
+                };
+                let done = if rules.is_empty() {
+                    String::new()
+                } else {
+                    format!(" with {} of its rules", rules.len())
+                };
+                rules.push(c.add_acl_rule(&rule).await.map_err(|e| partly(e, &done))?);
+            }
+            let token = if with_token {
+                let req = CreateTokenRequest {
+                    name: "agent".into(),
+                    scopes,
+                    expires_at: None,
+                };
+                let done = if rules.is_empty() {
+                    String::new()
+                } else {
+                    " with its rules".to_owned()
+                };
+                Some(
+                    c.create_token_for(&p.name, &req)
+                        .await
+                        .map_err(|e| partly(e, &done))?,
+                )
+            } else {
+                None
+            };
+            match &token {
+                Some(t) => {
+                    // The value alone on stdout, as `token create` prints it.
+                    ctx.out.line(&t.token);
+                    ctx.out.note(format!(
+                        "Created agent {} (owner {}){} with a token (scopes {}). It is shown only now.",
+                        p.name,
+                        p.owner.as_deref().unwrap_or("?"),
+                        grants_text(&rules),
+                        t.info.scopes.join(", ")
+                    ));
+                }
+                None => ctx.out.line(format!(
+                    "Created agent {} (owner {}){}; give it a token with `lode admin token create --for {}`",
+                    p.name,
+                    p.owner.as_deref().unwrap_or("?"),
+                    grants_text(&rules),
+                    p.name
+                )),
+            }
+            let mut v = to_json(&p)?;
+            if let Value::Object(m) = &mut v {
+                if !rules.is_empty() {
+                    m.insert(
+                        "rules".into(),
+                        serde_json::to_value(&rules).unwrap_or(Value::Null),
+                    );
+                }
+                if let Some(t) = &token {
+                    m.insert(
+                        "token".into(),
+                        serde_json::to_value(t).unwrap_or(Value::Null),
+                    );
+                }
+            }
+            Ok(v)
         }
         AdminCmd::Agent(AgentCmd::List) => principals_of(ctx, &c, PrincipalKind::Agent).await,
         AdminCmd::Agent(AgentCmd::Disable { name, enable }) => {
@@ -1097,8 +1277,14 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             ctx.out.line(format!("Revoked token {id}"));
             Ok(json!({ "revoked": id }))
         }
-        AdminCmd::Acl(AclCmd::List) => {
-            let list = c.acl().await?;
+        AdminCmd::Acl(AclCmd::List { depot, subject }) => {
+            let subject = subject.as_deref().map(parse_subject).transpose()?;
+            let list = c
+                .acl_filtered(
+                    depot.as_deref(),
+                    subject.as_ref().map(subject_text).as_deref(),
+                )
+                .await?;
             for r in &list.rules {
                 ctx.out.line(rule_line(r));
             }

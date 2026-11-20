@@ -719,3 +719,107 @@ async fn a_disabled_module_has_no_routes_tables_or_deliveries() {
         .unwrap()
         .contains(&json!("webhooks")));
 }
+
+/// T175: the chat formats send one line of text in each service's body; the `lode` format
+/// beside them is unchanged.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_formats_send_one_line_of_text() {
+    let h = setup().await;
+    let (rx, base) = Receiver::start().await;
+    let hook = |path: &str, format: &str| json!({ "url": format!("{base}{path}"), "events": ["revision.created"], "format": format });
+    let mut ids = Vec::new();
+    for (path, format) in [
+        ("/slack", "slack"),
+        ("/discord", "discord"),
+        ("/bot1:abc/sendMessage?chat_id=-100123", "telegram"),
+        ("/lode", "lode"),
+    ] {
+        let (s, v) = h
+            .send(
+                "POST",
+                "/api/v1/depots/game/webhooks",
+                &h.admin,
+                hook(path, format),
+            )
+            .await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        // The default format is left out of the JSON, as before T175.
+        if format == "lode" {
+            assert!(v["hook"].get("format").is_none(), "{v}");
+        } else {
+            assert_eq!(v["hook"]["format"], format);
+        }
+        ids.push(v["hook"]["id"].as_i64().unwrap());
+    }
+    // A telegram hook must name its chat; an unknown format is refused.
+    let (s, v) = h
+        .send(
+            "POST",
+            "/api/v1/depots/game/webhooks",
+            &h.admin,
+            hook("/bot1:abc/sendMessage", "telegram"),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["message"].as_str().unwrap().contains("chat_id"), "{v}");
+    let (s, _) = h
+        .send(
+            "POST",
+            "/api/v1/depots/game/webhooks",
+            &h.admin,
+            hook("/x", "irc"),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let rev = h
+        .commit("main", &[("Source/secret-name.cpp", b"one\n", None)])
+        .await;
+    h.dispatch().await;
+    assert_eq!(h.round().await.delivered, 4);
+    let line = format!("Lode game: admin committed r{rev} to main.");
+    let body = |path: &str| -> Value {
+        let got = rx.at(path);
+        assert_eq!(got.len(), 1, "{path}: {got:?}");
+        assert_eq!(header(&got[0], "content-type"), "application/json");
+        let text = String::from_utf8_lossy(&got[0].body);
+        assert!(!text.contains("secret-name"), "identifiers only: {text}");
+        serde_json::from_slice(&got[0].body).unwrap()
+    };
+    assert_eq!(body("/slack"), json!({ "text": line }));
+    assert_eq!(body("/discord"), json!({ "content": line }));
+    assert_eq!(
+        body("/bot1:abc/sendMessage"),
+        json!({ "chat_id": "-100123", "text": line, "disable_web_page_preview": true })
+    );
+    let lode = body("/lode");
+    let keys: Vec<&str> = lode
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, ["created_at", "data", "depot", "event", "id"]);
+    assert_eq!(lode["data"]["rev"], rev);
+
+    // A test send in a chat format is a line of text too.
+    let (s, _) = h
+        .send(
+            "POST",
+            &format!("/api/v1/depots/game/webhooks/{}/ping", ids[0]),
+            &h.admin,
+            Value::Null,
+        )
+        .await;
+    assert_eq!(s, StatusCode::ACCEPTED);
+    h.round().await;
+    let got = rx.at("/slack");
+    let v: Value = serde_json::from_slice(&got[1].body).unwrap();
+    assert_eq!(
+        v["text"],
+        format!(
+            "Lode game: test message: webhook {} of this depot reaches this chat.",
+            ids[0]
+        )
+    );
+}
