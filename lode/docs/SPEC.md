@@ -180,6 +180,16 @@ caches on people's computers, and webhook payloads already sent.
   cannot be undone. As with obliterate, copies outside the server (backups, workspaces,
   shared caches) are not reached.
 
+### 5.8b Backups on another machine
+
+- Scheduled backups (`[backup]`) can also go to an S3-compatible bucket
+  (`[backup.copy_to]`): Backblaze B2, Wasabi, AWS, Hetzner, or MinIO on a second server.
+  Each copy uploads only new content plus the database; copies beyond `keep` are removed
+  with the content only they needed.
+- `loded restore --config FILE [--name NAME] DEST` brings a data directory back from the
+  bucket, also on a new machine; `--list` shows the copies. `loded backup-copy` sends the
+  newest backup at once. The admin overview shows the last copy.
+
 ### 5.9 Single sign-on (0.2)
 
 - A server with `[oidc]` in `loded.toml` signs people in through an OpenID Connect provider

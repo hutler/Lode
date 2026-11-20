@@ -56,6 +56,31 @@ enum Command {
         /// Destination directory; must be missing or empty.
         dest: PathBuf,
     },
+    /// Send the newest scheduled backup to the bucket in [backup.copy_to] now, instead of
+    /// waiting for the server to do it after the next backup.
+    BackupCopy {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Download a copy of a backup from the bucket in [backup.copy_to] into an empty
+    /// directory, ready to be the data directory. On a new machine, write a loded.toml with
+    /// only that table (and its secret file) to point at the bucket.
+    Restore {
+        /// Path to a loded.toml with [backup.copy_to].
+        #[arg(long)]
+        config: PathBuf,
+        /// List the copies in the bucket instead.
+        #[arg(long, conflicts_with_all = ["name", "dest"])]
+        list: bool,
+        /// The copy to restore, such as lode-backup-20261120T030000Z; the newest when left
+        /// out.
+        #[arg(long)]
+        name: Option<String>,
+        /// Destination directory; must be missing or empty.
+        #[arg(required_unless_present = "list")]
+        dest: Option<PathBuf>,
+    },
     /// Move file content to the S3 bucket named in [storage], then switch loded.toml to it.
     /// Safe to repeat; each run copies only what the bucket lacks.
     MigrateStorage {
@@ -220,6 +245,74 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             if bad {
                 std::process::exit(1);
             }
+            Ok(())
+        }
+        Command::BackupCopy { config } => {
+            let cfg = ServerConfig::load(&config)?;
+            let Some(schedule) = cfg.backup.schedule() else {
+                anyhow::bail!("scheduled backups are off: set `every` under [backup]");
+            };
+            let Some(copy) = cfg.backup.copy_to.clone() else {
+                anyhow::bail!("loded.toml has no [backup.copy_to]");
+            };
+            let Some((_, newest)) = lode_server::maintenance::newest_backup(&schedule.dir) else {
+                anyhow::bail!(
+                    "there is no scheduled backup in {} yet",
+                    schedule.dir.display()
+                );
+            };
+            let bucket = lode_server::maintenance::copy::open_bucket(&copy, &cfg.data_dir).await?;
+            let tmp = cfg.data_dir.join("backup-copy-tmp");
+            let r =
+                lode_server::maintenance::copy::copy_backup(&copy, &bucket, &newest, &tmp).await?;
+            println!(
+                "Copied {} to {}: {} objects, {} uploaded now, {} bytes sent",
+                r.name, copy.s3.bucket, r.objects, r.uploaded, r.bytes
+            );
+            if !r.removed.is_empty() {
+                println!("Removed old copies: {}", r.removed.join(", "));
+            }
+            Ok(())
+        }
+        Command::Restore {
+            config,
+            list,
+            name,
+            dest,
+        } => {
+            let cfg = ServerConfig::load(&config)?;
+            let Some(copy) = cfg.backup.copy_to.clone() else {
+                anyhow::bail!("{} has no [backup.copy_to]", config.display());
+            };
+            let tmp = std::env::temp_dir().join("loded-restore");
+            let bucket = lode_server::maintenance::copy::open_bucket(&copy, &tmp).await?;
+            if list {
+                let copies = lode_server::maintenance::copy::list_remote(&bucket).await?;
+                if copies.is_empty() {
+                    println!("{} holds no complete copy", copy.s3.bucket);
+                }
+                for c in copies {
+                    println!("{}", c.name);
+                }
+                return Ok(());
+            }
+            let Some(dest) = dest else {
+                anyhow::bail!("name the destination directory");
+            };
+            let r =
+                lode_server::maintenance::copy::restore(&bucket, name.as_deref(), &dest).await?;
+            println!(
+                "Restored {} into {}: {} objects, {} bytes",
+                r.name,
+                dest.display(),
+                r.objects,
+                r.bytes
+            );
+            println!(
+                "Next: check it with `loded fsck --config <loded.toml with data_dir = {}>`, \
+                 then start the server on it.",
+                dest.display()
+            );
             Ok(())
         }
         Command::Backup { config, dest } => {
