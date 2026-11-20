@@ -308,3 +308,34 @@ async fn single_revision_pick_shelve_and_abandon() {
     assert_eq!(o.get("y.txt").map(String::as_str), Some("unchanged"));
     assert_eq!(o.get("a.txt").map(String::as_str), Some("unchanged"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn partial_view_cannot_record_an_incomplete_merge() {
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    server
+        .commit_files("game", "main", &[("a", b"old"), ("b", b"old")])
+        .await;
+    branch(&server, "feat").await;
+    let rev = server
+        .commit_files("game", "feat", &[("a", b"new"), ("b", b"new")])
+        .await;
+    let ws = checkout(&server);
+    ws.json(&["view", "exclude", "b", "unrelated"]);
+    let rev = rev.to_string();
+    for args in [vec!["merge", "feat"], vec!["merge", "feat", "-r", &rev]] {
+        let (code, err) = ws.json_status(&args);
+        assert_eq!(code, 1, "{err}");
+        assert_eq!(err["error"]["details"]["reason"], "outside_view");
+        assert_eq!(ws.read("a"), b"old");
+        assert!(!ws.exists("b"));
+        assert_eq!(ws.json(&["status"])["merges"], json!([]));
+    }
+    ws.json(&["view", "exclude", "--remove", "b"]);
+    ws.json(&["merge", "feat"]);
+    ws.json(&["commit", "-m", "Merge both paths"]);
+    let full = checkout(&server);
+    assert_eq!(full.read("a"), b"new");
+    assert_eq!(full.read("b"), b"new");
+    assert_eq!(full.json(&["merge", "feat"])["nothing_to_do"], true);
+}

@@ -1237,6 +1237,9 @@ records `N..N`. Only ranges whose source is the merged branch count toward the b
 that reached the source through other merges is merged again, which three-way merging mostly
 absorbs.
 
+The client checks the full source delta before applying any file. A change outside the workspace view
+refuses the merge or single-revision pick with `conflict` (reason `outside_view`).
+
 Before applying, `lode merge` reads `flow` from `merge-info` and stops when the stream rules
 refuse the merge (§5.4), unless `--force-flow`, which it keeps in `pending_force_flow` for the
 commit to send as `extensions.force_flow`.
@@ -1357,7 +1360,9 @@ from a disk cache and fetches each object from the main server ("upstream") once
 - **Backup:** SQLite online backup of `meta.db` first, then copy `depots/` (objects are
   immutable; any object referenced by the copied database is already on disk).
   `loded backup --config <file> <dest>` runs beside a live server; `dest` must be missing or
-  empty and becomes a data directory, including `loded.toml`. With S3 storage only the
+  empty and becomes a data directory. Its `loded.toml` contains the settings loaded from
+  `--config`, with `data_dir = "."` for restore. Relative references to external certificate
+  and credential files resolve beside the restored configuration. With S3 storage only the
   database and `loded.toml` are copied (`content_in_bucket` in the report); the bucket's
   versioning or replication protects the content.
 - **Obliterate** (T120, SPEC §5.8): `POST /admin/depots/{d}/obliterate` with

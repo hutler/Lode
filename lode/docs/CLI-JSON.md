@@ -497,7 +497,7 @@ of that revision are downloaded.
 ```
 
 Applies the source branch's changes from the merge base (`base`, SPEC §5.4) to its head, as
-`unshelve` applies a shelf: outcomes `applied`, `merged`, `conflicted`, `unchanged`, `skipped`,
+`unshelve` applies a shelf: outcomes `applied`, `merged`, `conflicted`, `unchanged`,
 and (0.4) `rename_conflict`. Renames on either side are followed (ARCHITECTURE §10.5); a file
 whose change was made under another name carries `"from": "<that path>"`.
 A binary conflict leaves the source's content in `<file>.theirs-r<to_rev>`; conflict markers
@@ -505,6 +505,9 @@ name it `<branch> r<to_rev>`. The range `from_rev..to_rev` is kept until the nex
 records it (see `lode status`, `lode revert --merge`). With nothing new on the source,
 `nothing_to_do` is true and `from_rev`/`to_rev` are null. `-r REV` applies one revision's
 change (`parent → REV`) and records `REV..REV`.
+
+A change outside the view refuses the entire merge with `conflict`, `details.reason = "outside_view"`
+and `details.path` naming the first such path. Expand the view and rerun the merge.
 
 Refused with `conflicted` while conflicts remain, `merge_pending` while a merge is not yet
 committed, and `pending_commit`/`update_incomplete` like `update`.

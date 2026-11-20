@@ -179,10 +179,23 @@ pub enum ConfigError {
     },
 }
 
+// Loaded configuration can contain inline secrets. Keep the original settings for backups
+// without exposing them through ServerConfig's Debug implementation.
+#[derive(Clone)]
+pub(crate) struct ConfigSource(pub(crate) std::sync::Arc<str>);
+
+impl std::fmt::Debug for ConfigSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<loaded configuration>")
+    }
+}
+
 /// The server configuration.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
+    #[serde(skip)]
+    pub(crate) source: Option<ConfigSource>,
     /// Listen address.
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
@@ -1474,7 +1487,9 @@ impl ServerConfig {
             source,
         })?;
         let base = path.parent().unwrap_or(Path::new("."));
-        Self::parse(&text, base, path)
+        let mut cfg = Self::parse(&text, base, path)?;
+        cfg.source = Some(ConfigSource(text.into()));
+        Ok(cfg)
     }
 
     /// The configuration as the server uses it, as `loded.toml` text: every setting with its
@@ -1638,6 +1653,7 @@ impl ServerConfig {
     /// embedding.
     pub fn with_data_dir(data_dir: impl Into<PathBuf>) -> Self {
         Self {
+            source: None,
             listen: default_listen(),
             data_dir: data_dir.into(),
             tls: None,

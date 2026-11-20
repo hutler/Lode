@@ -51,7 +51,7 @@ written (`conflict`, details.reason `stream_flow`); a depot admin can pass --for
 the next commit sends on.
 \nWith --json: {\"source\",\"from_rev\",\"to_rev\",\"base\",\"nothing_to_do\":bool,
 \"files\":[{\"path\",\"outcome\",\"from\"?}],\"counts\":{outcome:n},\"flow\"}. Outcomes: applied,
-merged, conflicted, unchanged, skipped (outside the view), rename_conflict.
+merged, conflicted, unchanged, rename_conflict. A source change outside the view refuses the merge (conflict, reason outside_view).
 \nRenames are followed: a file renamed on the source and edited here moves to the new name
 with your edits merged in; a file renamed here and changed on the source gets the change
 under your name (`from` names the path the change was made to). Renamed differently on both
@@ -196,25 +196,23 @@ async fn changes_between(
     depot: &str,
     base: Option<u64>,
     head: u64,
-    include: &[String],
-    exclude: &[String],
 ) -> OpResult<Vec<Change>> {
     let Some(base) = base else {
         let entries: Vec<ManifestEntry> = client
-            .manifest(depot, head, include, exclude)
+            .manifest(depot, head, &[], &[])
             .await?
             .try_collect()
             .await?;
         return Ok(entries.into_iter().map(|e| put(e, None)).collect());
     };
     let forward: Vec<ManifestDelta> = client
-        .manifest_delta(depot, base, head, include, exclude)
+        .manifest_delta(depot, base, head, &[], &[])
         .await?
         .try_collect()
         .await?;
     // The same delta the other way round has the base side of every changed path.
     let backward: Vec<ManifestDelta> = client
-        .manifest_delta(depot, head, base, include, exclude)
+        .manifest_delta(depot, head, base, &[], &[])
         .await?
         .try_collect()
         .await?;
@@ -374,9 +372,19 @@ pub async fn merge(ctx: &Ctx, args: MergeArgs) -> OpResult<Value> {
         }
     };
 
-    let view = ws.view_spec()?;
-    let mut changes =
-        changes_between(&client, &depot, base, head, &view.include, &view.exclude).await?;
+    let view = ws.view_spec()?.compile()?;
+    let mut changes = changes_between(&client, &depot, base, head).await?;
+    // Merge history records a whole revision range, so every changed path must fit the view.
+    if let Some(change) = changes.iter().find(|change| !view.contains(&change.path)) {
+        return Err(OpError::failed(
+            "conflict",
+            format!(
+                "{} is outside the workspace view; expand the view before merging",
+                change.path
+            ),
+        )
+        .with_details(json!({ "reason": "outside_view", "path": change.path })));
+    }
     // Renames on the source side become adds copied from the old name, as a commit of them
     // here should record; renames committed on this branch since the branch point are
     // followed too.

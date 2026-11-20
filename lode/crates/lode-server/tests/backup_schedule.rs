@@ -112,3 +112,37 @@ async fn the_scheduler_backs_up_and_stops() {
         .expect("stops")
         .unwrap();
 }
+
+#[tokio::test]
+async fn scheduled_backup_preserves_the_loaded_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    init(&data).await.unwrap();
+    let active = dir.path().join("custom.toml");
+    std::fs::write(
+        &active,
+        "data_dir = 'data'\n[limits]\nmax_changes_per_commit = 64\n",
+    )
+    .unwrap();
+    let config = ServerConfig::load(&active).unwrap();
+    let state = open_state(config, Arc::new(ManualClock::new(START)), Vec::new())
+        .await
+        .unwrap();
+    // An operator may already be preparing a different configuration for the next restart.
+    std::fs::write(active, "data_dir = 'next'").unwrap();
+    let schedule = BackupSchedule {
+        every: Duration::from_secs(3600),
+        keep: 1,
+        dir: dir.path().join("backups"),
+        copy_to: None,
+    };
+    let BackupTick::Done { path, .. } = backup_tick(&state, &schedule).await.unwrap() else {
+        panic!("expected a backup");
+    };
+    let restored = ServerConfig::load(&path.join("loded.toml")).unwrap();
+    assert_eq!(restored.limits.max_changes_per_commit, 64);
+    assert_eq!(
+        restored.data_dir.canonicalize().unwrap(),
+        path.canonicalize().unwrap()
+    );
+}

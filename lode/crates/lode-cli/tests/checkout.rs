@@ -341,6 +341,14 @@ async fn a_view_change_keeps_local_changes_and_files_committed_or_added_since_th
         "local changes stay"
     );
     let st = w(&["status"]);
+    assert!(
+        st["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "a.txt" && f["status"] == "modified"),
+        "{st}"
+    );
     let added: Vec<&str> = st["files"]
         .as_array()
         .unwrap()
