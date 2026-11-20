@@ -408,7 +408,7 @@ component RevHeader inherits Rectangle {
     }
 }
 
-component StatusChip inherits Rectangle {
+export component StatusChip inherits Rectangle {
     in property <string> letter;
     in property <string> status;
     width: 16px;
@@ -1031,7 +1031,7 @@ export component DiffView inherits Rectangle {
 }
 
 /// A label and value in one short line.
-component SmallFact inherits HorizontalLayout {
+export component SmallFact inherits HorizontalLayout {
     in property <string> label;
     in property <string> value;
     spacing: 4px;
@@ -1049,7 +1049,7 @@ component SmallFact inherits HorizontalLayout {
 }
 
 /// One check of a revision as a chip; its link opens in the browser.
-component CheckChip inherits Rectangle {
+export component CheckChip inherits Rectangle {
     in property <CheckRow> check;
     height: 22px;
     width: t.preferred-width + 16px;
