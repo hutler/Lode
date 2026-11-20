@@ -40,6 +40,7 @@ fn level_text(l: Option<AccessLevel>) -> &'static str {
 fn subject_text(s: &AclSubject) -> Html {
     match s {
         AclSubject::All => html!("everyone"),
+        AclSubject::Agents => html!("every agent"),
         AclSubject::User(n) => html!("user <a href=\"/admin/people/{}\">{}</a>", encode(n), n),
         AclSubject::Group(g) => html!("group {}", g),
     }
@@ -240,7 +241,7 @@ async fn page(ctx: &Ctx, admin: &Admin, q: &CheckQuery, top: Html) -> Response {
          <form class=\"row\" method=\"post\" action=\"/admin/access/rules\">{}\
          <label>Depot<select name=\"depot\">{}</select></label>\
          <label>Who<select name=\"subject\"><option value=\"user\">User</option>\
-         <option value=\"group\">Group</option><option value=\"all\">Everyone</option></select></label>\
+         <option value=\"group\">Group</option><option value=\"all\">Everyone</option><option value=\"agents\">Every agent</option></select></label>\
          <label>Name<input type=\"text\" name=\"name\" placeholder=\"ana or artists\"/></label>\
          <label>Branches<input type=\"text\" name=\"branch\" value=\"**\" required=\"required\"/></label>\
          <label>Paths<input type=\"text\" name=\"path\" value=\"**\" required=\"required\"/></label>\
@@ -276,6 +277,7 @@ fn rule_from(post: &Post) -> Result<AclRule, String> {
     let name = f.text("name");
     let subject = match f.text("subject").as_str() {
         "all" => AclSubject::All,
+        "agents" => AclSubject::Agents,
         "group" if !name.is_empty() => AclSubject::Group(name),
         "user" if !name.is_empty() => AclSubject::User(name),
         "group" | "user" => return Err("name the user or group the rule is for".into()),

@@ -52,6 +52,7 @@ fn to_view(r: &AclRow, n: &Names) -> AclRule {
             .map(|d| n.depots.get(&d.0).cloned().unwrap_or_else(missing)),
         subject: match r.subject {
             lode_meta::AclSubject::All => AclSubject::All,
+            lode_meta::AclSubject::Agents => AclSubject::Agents,
             lode_meta::AclSubject::User(p) => {
                 AclSubject::User(n.principals.get(&p.0).cloned().unwrap_or_else(missing))
             }
@@ -116,6 +117,7 @@ async fn add(
             };
             let subject = match &rule.subject {
                 AclSubject::All => lode_meta::AclSubject::All,
+                AclSubject::Agents => lode_meta::AclSubject::Agents,
                 AclSubject::User(name) => match tx.principal_by_name(name)? {
                     Some(p) => lode_meta::AclSubject::User(p.id),
                     None => return Ok(Err(ApiError::not_found(format!("no principal `{name}`")))),

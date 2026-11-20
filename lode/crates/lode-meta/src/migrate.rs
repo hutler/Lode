@@ -74,6 +74,12 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             sql: include_str!("../migrations/core/0006_deleted.sql"),
             postgres: include_str!("../migrations/core/0006_deleted.postgres.sql"),
         },
+        Migration {
+            version: 7,
+            name: "acl_agents",
+            sql: include_str!("../migrations/core/0007_acl_agents.sql"),
+            postgres: include_str!("../migrations/core/0007_acl_agents.postgres.sql"),
+        },
     ],
 };
 
