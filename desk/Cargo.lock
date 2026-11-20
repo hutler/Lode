@@ -3382,12 +3382,12 @@ dependencies = [
 [[package]]
 name = "lode-build"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 
 [[package]]
 name = "lode-client"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3411,7 +3411,7 @@ dependencies = [
 [[package]]
 name = "lode-core"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "blake3",
  "globset",
@@ -3456,7 +3456,7 @@ dependencies = [
 [[package]]
 name = "lode-import"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "blake3",
  "futures",
@@ -3472,7 +3472,7 @@ dependencies = [
 [[package]]
 name = "lode-meta"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "bytes",
  "futures",
@@ -3489,7 +3489,7 @@ dependencies = [
 [[package]]
 name = "lode-mod-checks"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "axum",
  "lode-core",
@@ -3505,7 +3505,7 @@ dependencies = [
 [[package]]
 name = "lode-mod-feed"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "axum",
  "lode-core",
@@ -3520,7 +3520,7 @@ dependencies = [
 [[package]]
 name = "lode-mod-locks"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "axum",
  "lode-core",
@@ -3536,7 +3536,7 @@ dependencies = [
 [[package]]
 name = "lode-mod-mcp"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "axum",
  "diffy",
@@ -3554,7 +3554,7 @@ dependencies = [
 [[package]]
 name = "lode-mod-shelves"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3572,9 +3572,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-mod-validate"
+version = "0.4.0"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
+dependencies = [
+ "axum",
+ "lode-core",
+ "lode-meta",
+ "lode-mod-checks",
+ "lode-mod-shelves",
+ "lode-proto",
+ "lode-server",
+ "lode-store",
+ "lode-validate",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "lode-mod-webhooks"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "axum",
  "futures",
@@ -3597,7 +3617,7 @@ dependencies = [
 [[package]]
 name = "lode-ops"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -3609,6 +3629,7 @@ dependencies = [
  "lode-core",
  "lode-import",
  "lode-proto",
+ "lode-validate",
  "lode-workspace",
  "serde",
  "serde_json",
@@ -3622,7 +3643,7 @@ dependencies = [
 [[package]]
 name = "lode-proto"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "lode-core",
  "serde",
@@ -3633,7 +3654,7 @@ dependencies = [
 [[package]]
 name = "lode-server"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3675,7 +3696,7 @@ dependencies = [
 [[package]]
 name = "lode-store"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "async-trait",
  "blake3",
@@ -3697,7 +3718,7 @@ dependencies = [
 [[package]]
 name = "lode-testkit"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -3709,6 +3730,7 @@ dependencies = [
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",
+ "lode-mod-validate",
  "lode-mod-webhooks",
  "lode-proto",
  "lode-server",
@@ -3722,9 +3744,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-validate"
+version = "0.4.0"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
+dependencies = [
+ "lode-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "lode-workspace"
 version = "0.4.0"
-source = "git+https://github.com/hutler/Lode?rev=d6b7e4135bf292ae9f1828ddc6026d46575e8579#d6b7e4135bf292ae9f1828ddc6026d46575e8579"
+source = "git+https://github.com/hutler/Lode?rev=689fc84867752225e6191ddd5d0a1025a0e4eb1a#689fc84867752225e6191ddd5d0a1025a0e4eb1a"
 dependencies = [
  "blake3",
  "ignore",

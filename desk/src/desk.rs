@@ -784,6 +784,7 @@ impl Desk {
                     changelist: request.changelist,
                     keep: request.keep,
                     update: request.update,
+                    no_verify: false,
                 },
             )
             .await
