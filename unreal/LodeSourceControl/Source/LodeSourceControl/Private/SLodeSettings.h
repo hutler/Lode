@@ -28,7 +28,7 @@ private:
 	FText GetWorkspaceText() const;
 	FText GetProblemText() const;
 	EVisibility GetProblemVisibility() const;
-	TOptional<int32> GetRefreshSeconds() const;
+	int32 GetRefreshSeconds() const;
 	void OnRefreshSecondsCommitted(int32 InValue, ETextCommit::Type InCommitType);
 	ECheckBoxState GetKeepLocks() const;
 	void OnKeepLocksChanged(ECheckBoxState InState);

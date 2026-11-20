@@ -21,20 +21,20 @@ namespace
 	struct FProviderFixture
 	{
 		FString Root;
-		FString LogPath;
+		FString CallLogPath;
 		FLodeProvider Provider;
 
 		FProviderFixture()
 		{
 			Root = LodeTest::MakeTempDir(TEXT("provider"));
-			LogPath = Root / TEXT("tmp") / TEXT("calls.jsonl");
+			CallLogPath = Root / TEXT("tmp") / TEXT("calls.jsonl");
 			IFileManager::Get().MakeDirectory(*(Root / TEXT(".lode")), true);
 			IFileManager::Get().MakeDirectory(*(Root / TEXT("tmp")), true);
 			for (const TCHAR* File : { TEXT("Content/Hero/Hero.uasset"), TEXT("Content/Maps/Main.umap"), TEXT("Config/DefaultGame.ini") })
 			{
 				FFileHelper::SaveStringToFile(TEXT("data"), *(Root / File));
 			}
-			Provider.SetRunnerOverride(LodeTest::FakeConfig(TEXT("provider"), LogPath, Root));
+			Provider.SetRunnerOverride(LodeTest::FakeConfig(TEXT("provider"), CallLogPath, Root));
 			Provider.SetWorkspaceRootOverride(Root);
 			LodeWorkers::RegisterAll(Provider);
 		}
@@ -66,7 +66,7 @@ namespace
 		TArray<FString> Calls() const
 		{
 			TArray<FString> Out;
-			for (const TSharedPtr<FJsonObject>& Call : LodeTest::ReadLog(LogPath))
+			for (const TSharedPtr<FJsonObject>& Call : LodeTest::ReadLog(CallLogPath))
 			{
 				TArray<FString> Args;
 				Call->TryGetStringArrayField(TEXT("args"), Args);
@@ -142,7 +142,8 @@ bool FLodeProviderCheckOutTest::RunTest(const FString& Parameters)
 	Fixture.Provider.Init(true);
 	Fixture.Provider.WaitForCommands(30.0);
 
-	// Someone else holds Hero: refused, and the message names them.
+	// Someone else holds Hero: refused, and the message names them (in the revision control log).
+	AddExpectedError(TEXT("held by bob"), EAutomationExpectedErrorFlags::Contains, 0);
 	TSharedRef<FCheckOut> Refused = ISourceControlOperation::Create<FCheckOut>();
 	TestEqual(TEXT("locked elsewhere fails"), Fixture.Run(Refused, { Fixture.File(TEXT("Content/Hero/Hero.uasset")) }), ECommandResult::Failed);
 	TestTrue(TEXT("still locked by bob"), Fixture.State(TEXT("Content/Hero/Hero.uasset"))->IsCheckedOutOther());

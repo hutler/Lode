@@ -125,7 +125,9 @@ void LodeParsers::ParseStatus(const FJsonObject& Json, const FString& WorkspaceR
 		Record.bLockRequired = BoolOr(File, LodeJson::LockRequired);
 		Record.bNeedsLock = BoolOr(File, LodeJson::NeedsLock);
 		Record.WorkspaceRev = OutRev;
-		IndexByDepotPath.Add(Record.DepotPath, OutRecords.Add(MoveTemp(Record)));
+		// Copy the key first: argument order is unspecified, and the move may run before it is read.
+		const FString Key = Record.DepotPath;
+		IndexByDepotPath.Add(Key, OutRecords.Add(MoveTemp(Record)));
 	});
 
 	if (const TSharedPtr<FJsonObject> Remote = ObjectOrNull(Json, LodeJson::Remote))
@@ -176,6 +178,21 @@ void LodeParsers::ParseStatus(const FJsonObject& Json, const FString& WorkspaceR
 		{
 			continue;
 		}
+		// A folder of listed files, even when it is not on disk (not synced yet, say).
+		const FString FolderPrefix = DepotPath + TEXT("/");
+		bool bIsFolder = false;
+		for (const TPair<FString, int32>& Item : IndexByDepotPath)
+		{
+			if (Item.Key.StartsWith(FolderPrefix, ESearchCase::CaseSensitive))
+			{
+				bIsFolder = true;
+				break;
+			}
+		}
+		if (bIsFolder)
+		{
+			continue;
+		}
 		FLodeFileRecord Record;
 		Record.Filename = Filename;
 		Record.DepotPath = DepotPath;
@@ -222,6 +239,11 @@ TArray<FLodeRevisionRecord> LodeParsers::ParseFileLog(const FJsonObject& Json, c
 				Change = &Candidate;
 			}
 		});
+		// A full change list without this file: the revision is about other files.
+		if (!Change && !BoolOr(Revision, LodeJson::ChangesTruncated))
+		{
+			return;
+		}
 
 		FLodeRevisionRecord Record;
 		Record.Rev = Rev;

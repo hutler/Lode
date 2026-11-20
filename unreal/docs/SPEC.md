@@ -130,7 +130,7 @@ If measurements in task T04 show that process start time dominates, the fallback
 
 ## 8. Engine versions and platforms
 
-- **Engine.** Unreal Engine 5.4 and later, one source tree, with version checks only where the engine's interface differs. The revision control interface changes between engine releases, so every interface name in this document must be checked against the headers of each supported engine (`Engine/Source/Developer/SourceControl/Public/`) before it is used.
+- **Engine.** Unreal Engine 5.8 only (the current release); no compatibility code for older engines. The revision control interface changes between engine releases, so every interface name in this document must be checked against the 5.8 headers (`Engine/Source/Developer/SourceControl/Public/`) before it is used.
 - **Platforms.** Windows first, since that is where most Unreal work happens. The code must also compile for the Linux and macOS editors.
 - **Distribution.** A zip per engine version with the built plugin, attached to SimpleDevOps releases. A listing on Fab can follow.
 
@@ -154,7 +154,7 @@ If measurements in task T04 show that process start time dominates, the fallback
 
 ## 11. Open questions
 
-- [x] **Which engine versions?** 5.4 and later. `GetStateBranchAtIndex` (new in 5.7) is declared without `override` so one source tree builds for all of them.
+- [x] **Which engine versions?** 5.8 only, the current release. Moving to a newer engine means checking the interface again against its headers.
 - [x] **Accept the proposed Lode task** for items 4, 7, 8 and 9 of section 5? Done in Lode T071, released in 0.2.0.
 - [x] **Who may break a lock from the editor?** Nobody in version 1; admins use `lode unlock --force`.
 - [x] **Show checks on shelves in the editor?** Not in version 1; later, once the UmpaLumpa integration runs.

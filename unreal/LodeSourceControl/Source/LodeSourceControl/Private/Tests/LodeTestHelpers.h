@@ -67,12 +67,12 @@ namespace LodeTest
 		IFileManager::Get().DeleteDirectory(*Dir, false, true);
 	}
 
-	/** Runner settings that run the fake with a scenario, logging each call to LogPath. */
-	inline FLodeRunnerConfig FakeConfig(const FString& ScenarioName, const FString& LogPath, const FString& WorkingDirectory)
+	/** Runner settings that run the fake with a scenario, logging each call to CallLogPath. */
+	inline FLodeRunnerConfig FakeConfig(const FString& ScenarioName, const FString& CallLogPath, const FString& WorkingDirectory)
 	{
 		FLodeRunnerConfig Config;
 		Config.Executable = FindPython();
-		Config.LeadingArgs = { FakeDir() / TEXT("fake_lode.py"), TEXT("--scenario"), Scenario(ScenarioName), TEXT("--log"), LogPath };
+		Config.LeadingArgs = { FakeDir() / TEXT("fake_lode.py"), TEXT("--scenario"), Scenario(ScenarioName), TEXT("--log"), CallLogPath };
 		Config.WorkingDirectory = WorkingDirectory;
 		Config.TempDirectory = WorkingDirectory / TEXT("tmp");
 		return Config;
@@ -86,11 +86,11 @@ namespace LodeTest
 	}
 
 	/** One JSON line per fake call: {"args": [...], "stdin": "...", "paths": [...]}. */
-	inline TArray<TSharedPtr<FJsonObject>> ReadLog(const FString& LogPath)
+	inline TArray<TSharedPtr<FJsonObject>> ReadLog(const FString& CallLogPath)
 	{
 		TArray<TSharedPtr<FJsonObject>> Calls;
 		TArray<FString> Lines;
-		FFileHelper::LoadFileToStringArray(Lines, *LogPath);
+		FFileHelper::LoadFileToStringArray(Lines, *CallLogPath);
 		for (const FString& Line : Lines)
 		{
 			TSharedPtr<FJsonObject> Object;

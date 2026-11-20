@@ -233,7 +233,7 @@ EVisibility SLodeSettings::GetProblemVisibility() const
 	return Provider().GetProblem().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
 }
 
-TOptional<int32> SLodeSettings::GetRefreshSeconds() const
+int32 SLodeSettings::GetRefreshSeconds() const
 {
 	return Provider().GetSettings().GetServerRefreshSeconds();
 }

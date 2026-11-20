@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright SimpleDevOps contributors. Licensed under Apache-2.0.
 # Builds the Lode plugin for one installed engine and zips it (unreal T01, T11).
-#   ./BuildPlugin.sh /path/to/UE_5.4 [Linux|Mac]
+#   ./BuildPlugin.sh /path/to/UE_5.8 [Linux|Mac]
 set -euo pipefail
 ENGINE="${1:?usage: BuildPlugin.sh ENGINE_DIR [PLATFORM]}"
 PLATFORM="${2:-$( [ "$(uname)" = Darwin ] && echo Mac || echo Linux )}"

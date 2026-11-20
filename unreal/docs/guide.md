@@ -1,12 +1,12 @@
 # Lode for Unreal: guide
 
-This guide takes you from a clean machine to submitting an asset from the Unreal Editor with Lode. It covers Unreal Engine 5.4 and later on Windows; Linux and macOS work the same way with the paths changed.
+This guide takes you from a clean machine to submitting an asset from the Unreal Editor with Lode. It covers Unreal Engine 5.8 on Windows; Linux and macOS work the same way with the paths changed.
 
 If something goes wrong, see [troubleshooting.md](troubleshooting.md).
 
 ## 1. What you need
 
-- Unreal Engine 5.4 or later.
+- Unreal Engine 5.8.
 - The `lode` command, version 0.2.0 or later. Install it from the Lode release page (the Windows installer puts `lode` on `PATH`). Check with `lode --version` in a new terminal.
 - A Lode server you can reach, and a user on it. Ask whoever runs the server for its address (such as `https://lode.example.com`) and for a token, or a name and password.
 
@@ -87,7 +87,7 @@ The settings are saved per project in `Saved/Config/<Platform>/SourceControlSett
 
 ## 8. For plugin developers
 
-- Build a zip: `Scripts/BuildPlugin.ps1 -Engine "C:\Program Files\Epic Games\UE_5.4"`.
+- Build a zip: `Scripts/BuildPlugin.ps1 -Engine "C:\Program Files\Epic Games\UE_5.8"`.
 - Run the tests: `Scripts/RunTests.ps1 -Engine ...` runs every `Lode.*` automation test against a fake `lode` (`LodeSourceControl/Tests/FakeLode/fake_lode.py`, run with the engine's own Python).
 - End-to-end tests: `Scripts/RunTests.ps1 -Engine ... -E2E -Lode C:\path\lode.exe -Loded C:\path\loded.exe -Repeat 3` starts a real server with two users each time and runs `Lode.E2E`.
 - After a Lode release, refresh the fake's recorded answers with `Tests/FakeLode/record_scenarios.py --lode ... --loded ...` and run the tests again.

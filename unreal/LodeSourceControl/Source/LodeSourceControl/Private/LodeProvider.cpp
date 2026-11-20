@@ -330,6 +330,21 @@ ECommandResult::Type FLodeProvider::Execute(const FSourceControlOperationRef& In
 			Command->KnownRecords.Add(Normalized, (*State)->GetRecord());
 		}
 	}
+	// A status update for named files reads the workspace only; the server part (locks held
+	// elsewhere, newer revisions) comes from the server refresh. Count these files as shown, and
+	// when history is wanted too (an explicit look at the files), ask the server right after.
+	if (OperationName == TEXT("UpdateStatus") && Command->Files.Num() > 0)
+	{
+		const double Now = FPlatformTime::Seconds();
+		for (const FString& File : Command->Files)
+		{
+			LastAsked.Add(File, Now);
+		}
+		if (StaticCastSharedRef<FUpdateStatus>(InOperation)->ShouldUpdateHistory())
+		{
+			NextServerRefresh = 0.0;
+		}
+	}
 	if (InChangelist.IsValid())
 	{
 		Command->Changelist = static_cast<const FLodeChangelist&>(*InChangelist);
@@ -432,19 +447,33 @@ void FLodeProvider::CancelOperation(const FSourceControlOperationRef& InOperatio
 	}
 }
 
-TOptional<bool> FLodeProvider::IsAtLatestRevision() const
+TOptional<bool> FLodeProvider::HasChangesToSync() const
 {
-	return TOptional<bool>();
-}
-
-TOptional<int> FLodeProvider::GetNumLocalChanges() const
-{
-	int32 Count = 0;
+	// Only the files the editor has asked about are known; with none, say nothing.
+	if (StateCache.Num() == 0)
+	{
+		return TOptional<bool>();
+	}
 	for (const TPair<FString, FLodeStateRef>& Item : StateCache)
 	{
-		Count += Item.Value->HasLocalChange() ? 1 : 0;
+		if (Item.Value->IsSourceControlled() && !Item.Value->IsCurrent())
+		{
+			return true;
+		}
 	}
-	return Count;
+	return false;
+}
+
+TOptional<bool> FLodeProvider::HasChangesToCheckIn() const
+{
+	for (const TPair<FString, FLodeStateRef>& Item : StateCache)
+	{
+		if (Item.Value->HasLocalChange())
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void FLodeProvider::OutputCommandMessages(const FLodeCommand& InCommand) const

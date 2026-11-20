@@ -1,6 +1,6 @@
 # Lode for Unreal
 
-An Unreal Editor plugin that makes Lode a revision control provider, so artists and designers lock, sync, submit and shelve from inside the editor. A subproject of SimpleDevOps. Unreal Engine 5.4 and later; Windows first, with Linux and macOS editors supported.
+An Unreal Editor plugin that makes Lode a revision control provider, so artists and designers lock, sync, submit and shelve from inside the editor. A subproject of SimpleDevOps. Unreal Engine 5.8; Windows first, with Linux and macOS editors supported.
 
 - [docs/guide.md](docs/guide.md): install and daily use.
 - [docs/troubleshooting.md](docs/troubleshooting.md): messages and what to do.

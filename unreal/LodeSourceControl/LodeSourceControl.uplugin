@@ -11,6 +11,7 @@
 	"SupportURL": "https://github.com/hutler/Lode/issues",
 	"EnabledByDefault": true,
 	"CanContainContent": false,
+	"EngineVersion": "5.8.0",
 	"IsBetaVersion": true,
 	"Installed": false,
 	"Modules": [

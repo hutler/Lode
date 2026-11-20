@@ -78,6 +78,7 @@ namespace LodeJson
 	inline constexpr const TCHAR* Author = TEXT("author");
 	inline constexpr const TCHAR* Submitter = TEXT("submitter");
 	inline constexpr const TCHAR* Changes = TEXT("changes");
+	inline constexpr const TCHAR* ChangesTruncated = TEXT("changes_truncated");
 	inline constexpr const TCHAR* Action = TEXT("action");
 	inline constexpr const TCHAR* Size = TEXT("size");
 

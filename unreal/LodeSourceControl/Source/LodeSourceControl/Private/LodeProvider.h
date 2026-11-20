@@ -32,8 +32,7 @@ public:
 	virtual bool QueryStateBranchConfig(const FString& ConfigSrc, const FString& ConfigDest) override { return false; }
 	virtual void RegisterStateBranches(const TArray<FString>& BranchNames, const FString& ContentRoot) override {}
 	virtual int32 GetStateBranchIndex(const FString& BranchName) const override { return INDEX_NONE; }
-	// Added to the interface in UE 5.7; declared without override so 5.4 to 5.6 compile too.
-	virtual bool GetStateBranchAtIndex(int32 BranchIndex, FString& OutBranchName) const { return false; }
+	virtual bool GetStateBranchAtIndex(int32 BranchIndex, FString& OutBranchName) const override { return false; }
 	virtual ECommandResult::Type GetState(const TArray<FString>& InFiles, TArray<FSourceControlStateRef>& OutState, EStateCacheUsage::Type InStateCacheUsage) override;
 	virtual ECommandResult::Type GetState(const TArray<FSourceControlChangelistRef>& InChangelists, TArray<FSourceControlChangelistStateRef>& OutState, EStateCacheUsage::Type InStateCacheUsage) override;
 	virtual TArray<FSourceControlStateRef> GetCachedStateByPredicate(TFunctionRef<bool(const FSourceControlStateRef&)> Predicate) const override;
@@ -50,8 +49,10 @@ public:
 	virtual bool UsesFileRevisions() const override { return false; }
 	virtual bool UsesSnapshots() const override { return false; }
 	virtual bool AllowsDiffAgainstDepot() const override { return true; }
-	virtual TOptional<bool> IsAtLatestRevision() const override;
-	virtual TOptional<int> GetNumLocalChanges() const override;
+	/** Deleting a file marks it for delete in the workspace; it is not reverted softly. */
+	virtual bool UsesSoftRevertOnDelete() const override { return false; }
+	virtual TOptional<bool> HasChangesToSync() const override;
+	virtual TOptional<bool> HasChangesToCheckIn() const override;
 	virtual void Tick() override;
 	virtual TArray<TSharedRef<class ISourceControlLabel>> GetLabels(const FString& InMatchingSpec) const override { return {}; }
 	virtual TArray<FSourceControlChangelistRef> GetChangelists(EStateCacheUsage::Type InStateCacheUsage) override;

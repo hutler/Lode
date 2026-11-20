@@ -48,10 +48,6 @@ ECommandResult::Type FLodeCommand::ReturnResults()
 	{
 		Operation->AddErrorMessge(Message);
 	}
-	if (ErrorMessages.Num() > 0)
-	{
-		Operation->SetErrorText(ErrorMessages[0]);
-	}
 
 	ECommandResult::Type Result = ECommandResult::Failed;
 	if (Cancel->load())

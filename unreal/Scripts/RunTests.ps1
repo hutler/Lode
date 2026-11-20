@@ -8,8 +8,8 @@
   "Automation RunTests Lode" in UnrealEditor-Cmd. With -E2E it first starts a real Lode server
   (Tests/E2E/e2e_server.py) and runs the Lode.E2E tests against it, -Repeat times in a row.
 .EXAMPLE
-  ./RunTests.ps1 -Engine "C:\Program Files\Epic Games\UE_5.4"
-  ./RunTests.ps1 -Engine "C:\Program Files\Epic Games\UE_5.4" -E2E -Lode C:\lode\lode.exe -Loded C:\lode\loded.exe -Repeat 3
+  ./RunTests.ps1 -Engine "C:\Program Files\Epic Games\UE_5.8"
+  ./RunTests.ps1 -Engine "C:\Program Files\Epic Games\UE_5.8" -E2E -Lode C:\lode\lode.exe -Loded C:\lode\loded.exe -Repeat 3
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Engine,
