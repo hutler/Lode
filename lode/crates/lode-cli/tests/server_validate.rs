@@ -70,6 +70,7 @@ async fn setup() -> (TestServer, TestWorkspace) {
             c.modules.checks = true;
             c.modules.validate = true;
             c.validate.python = Some(python());
+            c.validate.workers = 1;
         }),
     })
     .await;
@@ -192,6 +193,69 @@ async fn a_failing_shelf_is_held_until_fixed() {
     assert_eq!(check(&checks, "validate/json")["state"], "success");
     let v = ws.json(&["shelf", "submit", &format!("{id}@2")]);
     assert!(v["rev"].as_u64().is_some(), "{v}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_check_write_keeps_the_whole_run_recoverable() {
+    let (mut server, ws) = setup().await;
+    // Both backends support a partial unique index. Reject the second terminal check
+    // inside a publication, after the first check and its event have been written.
+    server
+        .state()
+        .meta()
+        .write(|tx| {
+            tx.conn().execute(
+                "CREATE UNIQUE INDEX test_one_final ON mod_checks_check (depot_id, target_id)
+             WHERE state IN ('success', 'failure')",
+                lode_meta::vals![],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    ws.write("Data/a.json", "{}");
+    ws.write("Slow/b.txt", "b");
+    ws.json(&["add", "Data/a.json", "Slow/b.txt"]);
+    let id = ws.json(&["shelve", "-m", "two checks", "--no-verify"])["shelf"]
+        .as_u64()
+        .unwrap();
+
+    // With one worker, finishing the next shelf proves the previous attempt returned.
+    ws.write("other.txt", "c");
+    ws.json(&["add", "other.txt"]);
+    let next = ws.json(&["shelve", "-m", "no matching files"])["shelf"]
+        .as_u64()
+        .unwrap();
+    done(&server, next, 1).await;
+    let path = format!("/api/v1/depots/game/validate/{id}/1");
+    let (status, run) = get(&server, &path).await;
+    assert_eq!(status, 200, "{run}");
+    assert_eq!(run["state"], "running", "{run}");
+    let target = format!("{id}@1");
+    let checks = ws.json(&["checks", &target]);
+    for name in ["validate/json", "validate/slow"] {
+        assert_eq!(check(&checks, name)["state"], "pending", "{checks}");
+    }
+    let (_, refusal) = ws.json_status(&["shelf", "submit", &target]);
+    assert_eq!(refusal["error"]["code"], "checks_required", "{refusal}");
+
+    server
+        .state()
+        .meta()
+        .write(|tx| {
+            tx.conn()
+                .execute("DROP INDEX test_one_final", lode_meta::vals![])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    server.restart().await;
+    let results = done(&server, id, 1).await;
+    assert_eq!(result(&results, "json")["outcome"], "passed");
+    assert_eq!(result(&results, "slow")["outcome"], "error");
+    let checks = ws.json(&["checks", &target]);
+    assert_eq!(check(&checks, "validate/json")["state"], "success");
+    assert_eq!(check(&checks, "validate/slow")["state"], "failure");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
