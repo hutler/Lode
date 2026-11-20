@@ -10,6 +10,7 @@ and large binary files. Part of SimpleDevOps.
 - Using and running it: [docs/user-guide.html](docs/user-guide.html)
   ([PDF](docs/Lode-User-Guide.pdf))
 - The desktop app, Lode Desk: [docs/desk-guide.md](docs/desk-guide.md)
+- Deploying a server on a Linux VDS, step by step for AI agents: [docs/deploy-linux-for-agents.md](docs/deploy-linux-for-agents.md)
 - Robustness tests and their findings: [docs/HARDENING.md](docs/HARDENING.md)
 - Performance against the SPEC targets: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 
