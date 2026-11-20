@@ -14,6 +14,7 @@ members = [
     "crates/lode-mod-checks",
     "crates/lode-mod-feed",
     "crates/lode-validate",
+    "crates/lode-mod-validate",
     "crates/lode-client",
     "crates/lode-proxy",
     "crates/lode-workspace",
@@ -40,6 +41,7 @@ publish = false
 lode-build = { path = "crates/lode-build" }
 lode-core = { path = "crates/lode-core" }
 lode-validate = { path = "crates/lode-validate" }
+lode-mod-validate = { path = "crates/lode-mod-validate" }
 lode-proto = { path = "crates/lode-proto" }
 lode-store = { path = "crates/lode-store" }
 lode-meta = { path = "crates/lode-meta" }

@@ -275,14 +275,52 @@ pub async fn report_check(
     if let Some(u) = &req.url {
         check_url(u)?;
     }
-    let (kind, id, version) = stored_target(&req.target)?;
+    let (kind, _, _) = stored_target(&req.target)?;
     if kind == CheckTargetKind::Revision {
-        readable(ctx, caller, d.id, id).await?;
+        readable(ctx, caller, d.id, req.target.id).await?;
     }
+    store_check(ctx, d.id, &caller.principal, req).await
+}
+
+/// Stores a check that another module reports on its own behalf, as `reporter` (the
+/// validation module's service user). No token or access check; the name and sizes are
+/// checked as for [`report_check`].
+pub async fn report_check_as(
+    ctx: &ModuleCtx,
+    depot: DepotId,
+    reporter: &lode_meta::PrincipalRow,
+    req: ReportCheckRequest,
+) -> ApiResult<CheckView> {
+    if !valid_name(&req.name) {
+        return Err(ApiError::invalid_request(format!(
+            "check names are 1 to {MAX_NAME_LEN} of a-z, 0-9, `.`, `_`, `/` and `-`"
+        )));
+    }
+    if req
+        .summary
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_SUMMARY_LEN)
+    {
+        return Err(ApiError::invalid_request(format!(
+            "summary is longer than {MAX_SUMMARY_LEN} bytes"
+        )));
+    }
+    if let Some(u) = &req.url {
+        check_url(u)?;
+    }
+    store_check(ctx, depot, reporter, req).await
+}
+
+async fn store_check(
+    ctx: &ModuleCtx,
+    depot_id: DepotId,
+    principal: &lode_meta::PrincipalRow,
+    req: ReportCheckRequest,
+) -> ApiResult<CheckView> {
+    let (kind, id, version) = stored_target(&req.target)?;
     let now = ctx.clock().now_ms();
-    let me = caller.principal.id.0;
-    let depot_id = d.id;
-    let reporter = caller.principal.name.clone();
+    let me = principal.id.0;
+    let reporter = principal.name.clone();
     let view = ctx
         .meta()
         .store()

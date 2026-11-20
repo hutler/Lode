@@ -93,7 +93,10 @@ async fn an_agent_gets_the_same_refusal() {
     call(&c, "add", json!({ "paths": ["Data/a.json"] })).await;
 
     // The agent cannot trust the depot's scripts itself.
-    assert_eq!(call_err(&c, "validate", json!({})).await, "validation_untrusted");
+    assert_eq!(
+        call_err(&c, "validate", json!({})).await,
+        "validation_untrusted"
+    );
     assert_eq!(
         call_err(&c, "shelve", json!({ "description": "a" })).await,
         "validation_untrusted"
@@ -108,7 +111,10 @@ async fn an_agent_gets_the_same_refusal() {
     assert_eq!(r.is_error, Some(true));
     let e = r.structured_content.unwrap();
     assert_eq!(e["code"], "validation_failed", "{e}");
-    assert_eq!(e["details"]["results"][0]["problems"][0]["path"], "Data/a.json");
+    assert_eq!(
+        e["details"]["results"][0]["problems"][0]["path"],
+        "Data/a.json"
+    );
     assert_eq!(
         call_err(&c, "shelve", json!({ "description": "a" })).await,
         "validation_failed"

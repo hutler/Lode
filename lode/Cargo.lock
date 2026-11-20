@@ -1691,6 +1691,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-mod-validate"
+version = "0.4.0"
+dependencies = [
+ "axum",
+ "http-body-util",
+ "lode-core",
+ "lode-meta",
+ "lode-mod-checks",
+ "lode-mod-locks",
+ "lode-mod-shelves",
+ "lode-proto",
+ "lode-server",
+ "lode-store",
+ "lode-validate",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "lode-mod-webhooks"
 version = "0.4.0"
 dependencies = [
@@ -1862,6 +1885,7 @@ dependencies = [
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",
+ "lode-mod-validate",
  "lode-mod-webhooks",
  "lode-proto",
  "lode-server",
@@ -1919,6 +1943,7 @@ dependencies = [
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",
+ "lode-mod-validate",
  "lode-mod-webhooks",
  "lode-proxy",
  "lode-server",

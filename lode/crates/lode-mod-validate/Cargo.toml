@@ -1,0 +1,33 @@
+[package]
+name = "lode-mod-validate"
+description = "Lode module: runs a depot's validation scripts on every shelf version and gates submits on them"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+axum.workspace = true
+lode-core.workspace = true
+lode-meta.workspace = true
+lode-mod-checks.workspace = true
+lode-mod-shelves.workspace = true
+lode-proto.workspace = true
+lode-server.workspace = true
+lode-store.workspace = true
+lode-validate.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util = "0.1"
+lode-mod-locks.workspace = true
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }
