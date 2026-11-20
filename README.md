@@ -16,8 +16,8 @@ Rules for agents working here are in [AGENTS.md](AGENTS.md).
 ## Status
 
 Lode v1 (milestones M0 to M6), its packaging and 0.2 features (M7 to M12), Lode Desk with a
-native Slint UI (M13), the server's admin web UI (M14), and chunked large files, Postgres and
-a caching proxy (M15) are implemented. The current release is 0.3.0. Lode for Unreal
+native Slint UI (M13), the server's admin web UI (M14), chunked large files, Postgres and
+a caching proxy (M15), and streams with smarter merges (M16) are implemented. The current release is 0.4.0. Lode for Unreal
 (T01 to T11) is implemented and builds on Unreal Engine 5.8. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
 [unreal/docs/TASKS.md](unreal/docs/TASKS.md).
 
