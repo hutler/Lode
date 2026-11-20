@@ -361,6 +361,7 @@ impl Worker {
                     changelist: i.changelist,
                     keep: i.keep,
                     update: i.update,
+                    no_verify: false,
                 };
                 cmd::shelve::shelve(&ctx, args).await
             }
@@ -380,6 +381,7 @@ impl Worker {
                     changelist: None,
                     force_flow: false,
                     override_reason: None,
+                    no_verify: false,
                 };
                 cmd::commit::commit(&ctx, args).await
             }

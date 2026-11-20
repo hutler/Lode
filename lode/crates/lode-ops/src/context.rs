@@ -50,6 +50,12 @@ pub struct Settings {
     /// `[merge.tools]` gives a file. Only this file decides what runs.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub merge_tools: BTreeMap<String, MergeToolSetting>,
+    /// Validation scripts (T202): which Python, and which depots' scripts are trusted.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::cmd::validate::ValidateSettings::is_empty"
+    )]
+    pub validate: crate::cmd::validate::ValidateSettings,
 }
 
 /// `[merge_tools.NAME]` in `settings.toml`.

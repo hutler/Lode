@@ -49,6 +49,9 @@ pub struct ShelveArgs {
     /// Replace the content of this shelf.
     #[arg(long = "update", value_name = "ID")]
     pub update: Option<u64>,
+    /// Do not run the depot's validation scripts first (the server checks shelves again).
+    #[arg(long)]
+    pub no_verify: bool,
 }
 
 /// `lode shelves` options.
@@ -246,6 +249,14 @@ pub async fn shelve(ctx: &Ctx, args: ShelveArgs) -> OpResult<Value> {
     }
     let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
     validate_changes(&changes).map_err(|e| OpError::failed("invalid_change", e.to_string()))?;
+    crate::cmd::validate::before_send(
+        ctx,
+        &t.ws,
+        crate::cmd::validate::Phase::Shelve,
+        &changes,
+        args.no_verify,
+    )
+    .await?;
     let uploaded = upload(ctx, &t.client, &t.depot, &out).await?;
     // Checked against the head: the touched files must be up to date, as for a commit.
     let head = t.client.branch(&t.depot, &t.branch).await?.head_rev;

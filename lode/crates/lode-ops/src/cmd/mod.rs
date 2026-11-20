@@ -25,4 +25,5 @@ pub mod revert;
 pub mod shelve;
 pub mod status;
 pub mod update;
+pub mod validate;
 pub mod view;

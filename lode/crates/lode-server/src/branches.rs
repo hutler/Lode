@@ -517,7 +517,8 @@ async fn create(
                 provenance: None,
                 request_id: None,
             })?;
-            let rev_event = revision_created(num, &req.name, &author, &author, "direct", false, false);
+            let rev_event =
+                revision_created(num, &req.name, &author, &author, "direct", false, false);
             tx.append_outbox(Some(id), "revision.created", &rev_event, now)?;
             let mut branch_event = json!({
                 "branch": req.name,

@@ -17,8 +17,8 @@ use lode_meta::{
     RevisionRow,
 };
 use lode_proto::commit::{
-    CommitRequest, CommitResponse, MergedFrom, Provenance, ShelfOnlyOverride, Via,
-    EXT_FORCE_FLOW, EXT_OVERRIDE_SHELF_ONLY, MAX_OVERRIDE_REASON_BYTES,
+    CommitRequest, CommitResponse, MergedFrom, Provenance, ShelfOnlyOverride, Via, EXT_FORCE_FLOW,
+    EXT_OVERRIDE_SHELF_ONLY, MAX_OVERRIDE_REASON_BYTES,
 };
 use lode_proto::consts::MAX_PROVENANCE_BYTES;
 use lode_store::{PutOptions, StoreError};
@@ -600,8 +600,9 @@ fn check_shelf_only(
         if !shelves_on {
             msg.push_str(" (the shelves module is off on this server, so only a depot admin override can commit here)");
         }
-        return Err(ApiError::new(ErrorCode::ShelfRequired, msg)
-            .with_details(json!({ "branch": branch })));
+        return Err(
+            ApiError::new(ErrorCode::ShelfRequired, msg).with_details(json!({ "branch": branch }))
+        );
     };
     let reason = requested.as_str().map(str::trim).unwrap_or_default();
     if reason.is_empty() || reason.len() > MAX_OVERRIDE_REASON_BYTES {

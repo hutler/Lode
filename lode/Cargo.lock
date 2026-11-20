@@ -1731,6 +1731,7 @@ dependencies = [
  "lode-proto",
  "lode-server",
  "lode-testkit",
+ "lode-validate",
  "lode-workspace",
  "serde",
  "serde_json",
@@ -1874,6 +1875,17 @@ dependencies = [
  "tempfile",
  "tokio",
  "zstd",
+]
+
+[[package]]
+name = "lode-validate"
+version = "0.4.0"
+dependencies = [
+ "lode-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

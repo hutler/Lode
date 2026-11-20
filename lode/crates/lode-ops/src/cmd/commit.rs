@@ -60,6 +60,9 @@ pub struct CommitArgs {
     /// giving the reason the revision records. Depot admins only.
     #[arg(long = "override", value_name = "REASON")]
     pub override_reason: Option<String>,
+    /// Do not run the depot's validation scripts first.
+    #[arg(long)]
+    pub no_verify: bool,
 }
 
 /// The refusal for a direct commit to a `[branches].shelf_only` branch, as the server words
@@ -209,7 +212,11 @@ pub(crate) fn explain(e: lode_client::Error) -> OpError {
         .unwrap_or_default();
     let mut err = OpError::from(e);
     if err.code == "shelf_required" {
-        let branch = err.details.get("branch").and_then(Value::as_str).unwrap_or("?");
+        let branch = err
+            .details
+            .get("branch")
+            .and_then(Value::as_str)
+            .unwrap_or("?");
         return shelf_required(branch);
     }
     if let Some(hint) = advice(&err.code) {
@@ -556,7 +563,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
 
     // Refuse before uploading anything; the server checks again against the branch head.
     if args.override_reason.is_none()
-        && local_config(ws.root()).is_some_and(|c| c.shelf_only.matches_str(&branch))
+        && crate::cmd::update::local_config(&ws).is_some_and(|c| c.shelf_only.matches_str(&branch))
     {
         return Err(shelf_required(&branch));
     }
@@ -605,6 +612,14 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
     }
     let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
     validate_changes(&changes).map_err(|e| OpError::failed("invalid_change", e.to_string()))?;
+    crate::cmd::validate::before_send(
+        ctx,
+        &ws,
+        crate::cmd::validate::Phase::Commit,
+        &changes,
+        args.no_verify,
+    )
+    .await?;
     let summary: Vec<String> = changes
         .iter()
         .map(|c| {
@@ -705,10 +720,4 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
         "forced_flow": force_flow,
         "shelf_only_override": args.override_reason.is_some(),
     }))
-}
-
-/// The `.lodeconfig` in the workspace, if it parses.
-pub(crate) fn local_config(root: &Path) -> Option<lode_core::LodeConfig> {
-    let bytes = fs::read(root.join(lode_core::LodeConfig::PATH)).ok()?;
-    lode_core::LodeConfig::parse(&bytes).ok()
 }

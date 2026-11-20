@@ -89,8 +89,7 @@ impl ValidateScript {
 pub fn valid_validate_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= MAX_VALIDATE_NAME_LEN
-        && s
-            .bytes()
+        && s.bytes()
             .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
 }
 
@@ -608,9 +607,18 @@ timeout = 5
             )
         };
         assert!(one("").is_ok());
-        assert!(matches!(one("timeout = \"0s\""), Err(ConfigError::Validate(_))));
-        assert!(matches!(one("timeout = \"11m\""), Err(ConfigError::Validate(_))));
-        assert!(matches!(one("timeout = \"soon\""), Err(ConfigError::Validate(_))));
+        assert!(matches!(
+            one("timeout = \"0s\""),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            one("timeout = \"11m\""),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            one("timeout = \"soon\""),
+            Err(ConfigError::Validate(_))
+        ));
         assert!(matches!(one("timeout = -1"), Err(ConfigError::Validate(_))));
         assert!(matches!(
             one("[[validate.script]]\nname = \"a\"\nrun = \"t/b.py\"\npaths = [\"**\"]"),
@@ -618,17 +626,40 @@ timeout = 5
         ));
         let script = |name: &str, run: &str, paths: &str| {
             LodeConfig::parse(
-                format!("[[validate.script]]\nname = \"{name}\"\nrun = \"{run}\"\npaths = {paths}\n")
-                    .as_bytes(),
+                format!(
+                    "[[validate.script]]\nname = \"{name}\"\nrun = \"{run}\"\npaths = {paths}\n"
+                )
+                .as_bytes(),
             )
         };
-        assert!(matches!(script("A", "t/a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
-        assert!(matches!(script("a/b", "t/a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
-        assert!(matches!(script("", "t/a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
-        assert!(matches!(script("a", "t/a.sh", "[\"**\"]"), Err(ConfigError::Validate(_))));
-        assert!(matches!(script("a", "../a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
-        assert!(matches!(script("a", "t/a.py", "[]"), Err(ConfigError::Validate(_))));
-        assert!(matches!(script("a", "t/a.py", "[\"a/[b\"]"), Err(ConfigError::Glob(_))));
+        assert!(matches!(
+            script("A", "t/a.py", "[\"**\"]"),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            script("a/b", "t/a.py", "[\"**\"]"),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            script("", "t/a.py", "[\"**\"]"),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            script("a", "t/a.sh", "[\"**\"]"),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            script("a", "../a.py", "[\"**\"]"),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            script("a", "t/a.py", "[]"),
+            Err(ConfigError::Validate(_))
+        ));
+        assert!(matches!(
+            script("a", "t/a.py", "[\"a/[b\"]"),
+            Err(ConfigError::Glob(_))
+        ));
         assert!(matches!(
             LodeConfig::parse(b"[[validate.script]]\nname = \"a\"\npaths = [\"**\"]\n"),
             Err(ConfigError::Toml(_))
@@ -643,7 +674,10 @@ timeout = 5
             );
         }
         assert_eq!(
-            LodeConfig::parse(b"[validate]\npython = \"3.9.2\"\n").unwrap().validate.python,
+            LodeConfig::parse(b"[validate]\npython = \"3.9.2\"\n")
+                .unwrap()
+                .validate
+                .python,
             Some((3, 9, 2))
         );
     }

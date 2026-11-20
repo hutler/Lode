@@ -62,12 +62,7 @@ async fn a_shelf_is_judged_by_the_head_rule_not_its_own() {
     let (h, ana) = shelf_only().await;
     // Lifting the rule takes a shelf; once submitted, direct commits work again.
     let (s, v) = h
-        .try_commit(
-            &ana,
-            "main",
-            &[(".lodeconfig", b"", Some(RULE))],
-            json!({}),
-        )
+        .try_commit(&ana, "main", &[(".lodeconfig", b"", Some(RULE))], json!({}))
         .await;
     refused(s, &v);
     let shelf = h
@@ -84,9 +79,7 @@ async fn a_shelf_is_judged_by_the_head_rule_not_its_own() {
 #[tokio::test]
 async fn a_depot_admin_can_override_with_a_reason() {
     let (h, ana) = shelf_only().await;
-    let boss = h
-        .user("boss", &["read", "write", "admin"], "admin")
-        .await;
+    let boss = h.user("boss", &["read", "write", "admin"], "admin").await;
     let why = json!({ "override_shelf_only": "checks server is down" });
 
     // A writer cannot.
@@ -168,7 +161,10 @@ async fn a_depot_admin_can_override_with_a_reason() {
             Value::Null,
         )
         .await;
-    assert!(view["provenance"].get("shelf_only_override").is_none(), "{view}");
+    assert!(
+        view["provenance"].get("shelf_only_override").is_none(),
+        "{view}"
+    );
 }
 
 #[tokio::test]
@@ -215,7 +211,10 @@ async fn without_the_shelves_module_the_refusal_says_so() {
         .await;
     refused(s, &v);
     assert!(
-        v["message"].as_str().unwrap().contains("shelves module is off"),
+        v["message"]
+            .as_str()
+            .unwrap()
+            .contains("shelves module is off"),
         "{v}"
     );
 }
@@ -230,8 +229,14 @@ async fn validate_scripts_must_exist_in_the_revision() {
         .try_commit(&h.admin, "main", &[(".lodeconfig", cfg, None)], json!({}))
         .await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
-    assert!(v["message"].as_str().unwrap().contains("tools/v/json.py"), "{v}");
-    assert_eq!(v["details"]["paths"], json!([".lodeconfig", "tools/v/json.py"]));
+    assert!(
+        v["message"].as_str().unwrap().contains("tools/v/json.py"),
+        "{v}"
+    );
+    assert_eq!(
+        v["details"]["paths"],
+        json!([".lodeconfig", "tools/v/json.py"])
+    );
     // A bad setting is refused like any other invalid file.
     let (s, v) = h
         .try_commit(

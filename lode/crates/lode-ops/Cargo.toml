@@ -21,6 +21,7 @@ lode-client.workspace = true
 lode-core.workspace = true
 lode-import.workspace = true
 lode-proto.workspace = true
+lode-validate.workspace = true
 lode-workspace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
