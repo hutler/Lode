@@ -45,3 +45,17 @@ mod tests {
         assert!(!verify_password("correct horse", Some("not a hash")));
     }
 }
+
+/// Letters and digits that cannot be mistaken for one another when read aloud or copied by
+/// hand (no 0/O, 1/l/I).
+const GENERATED_ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/// Length of a generated password: about 116 bits.
+pub const GENERATED_PASSWORD_LEN: usize = 20;
+
+/// A random password for a first sign-in, from an unambiguous alphabet.
+pub fn generate_password(rng: &mut impl rand::RngCore) -> String {
+    use rand::Rng;
+    (0..GENERATED_PASSWORD_LEN)
+        .map(|_| char::from(GENERATED_ALPHABET[rng.gen_range(0..GENERATED_ALPHABET.len())]))
+        .collect()
+}

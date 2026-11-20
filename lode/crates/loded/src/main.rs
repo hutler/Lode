@@ -36,6 +36,10 @@ enum Command {
         /// Path to loded.toml.
         #[arg(long)]
         config: PathBuf,
+        /// Print a new random password instead of a token. It must be changed at the first
+        /// sign-in and stops working after 24 hours if unused.
+        #[arg(long)]
+        generate_password: bool,
     },
     /// Check depots for missing, damaged or inconsistent data. Exits with 1 on problems.
     Fsck {
@@ -139,7 +143,22 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             println!("{}", report.admin_token);
             Ok(())
         }
-        Command::ResetAdmin { config } => {
+        Command::ResetAdmin {
+            config,
+            generate_password: true,
+        } => {
+            let cfg = ServerConfig::load(&config)?;
+            let password = lode_server::generate_admin_password(&cfg).await?;
+            println!("Revoked every token of the admin user.");
+            println!(
+                "New admin password (shown only now; it must be changed at the first sign-in, \
+                 and it stops working after {} hours if unused):",
+                lode_server::GENERATED_PASSWORD_VALID.as_secs() / 3600
+            );
+            println!("{password}");
+            Ok(())
+        }
+        Command::ResetAdmin { config, .. } => {
             let cfg = ServerConfig::load(&config)?;
             let token = lode_server::reset_admin(&cfg).await?;
             println!("Revoked every token of the admin user.");

@@ -387,6 +387,15 @@ impl Client {
             .await
     }
 
+    /// `POST /auth/password`: change one's own password (no token needed).
+    pub async fn change_password(
+        &self,
+        req: &lode_proto::auth::ChangePasswordRequest,
+    ) -> Result<lode_proto::auth::ChangePasswordResponse> {
+        self.json_body(Retry::No, Method::POST, self.url(&["auth", "password"])?, req)
+            .await
+    }
+
     /// `GET /auth/whoami`.
     pub async fn whoami(&self) -> Result<WhoAmI> {
         self.json(Retry::Yes, Method::GET, self.url(&["auth", "whoami"])?)

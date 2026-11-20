@@ -79,6 +79,19 @@ sign-on is a `usage` error; a refused or unfinished sign-in is `sso_failed` (exi
 reason in the message, such as the provider's refusal, an unlinked identity, a domain that
 is not allowed or a disabled user.
 
+A first password that must be changed (`loded setup --generate-admin-password`) is refused
+with `unauthenticated` and `details.reason` `password_change_required`; at a terminal
+without `--json` the command asks for a new password, changes it and signs in with it.
+After 24 hours unused the reason is `password_expired`.
+
+### `lode passwd [url] [--name N] [--password-stdin]`
+
+Changes one's own password through `POST /auth/password` (no token needed, so it also
+replaces a first password before any sign-in). The name defaults to the signed-in account.
+`--password-stdin` reads the current password, then the new one, one per line.
+
+`{ "server", "name" }`
+
 ### `lode logout`
 
 `{ "server", "removed": bool, "revoked": bool }` (`revoked` absent when nothing was stored)

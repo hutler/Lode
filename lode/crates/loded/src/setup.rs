@@ -41,8 +41,17 @@ pub struct SetupArgs {
     #[arg(long)]
     pub no_backup: bool,
     /// File holding the admin password on its first line; `-` reads standard input.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "generate_admin_password")]
     pub admin_password_file: Option<PathBuf>,
+    /// Make a random admin password and print it once. It must be changed at the first
+    /// sign-in and stops working after 24 hours if unused. Taken anyway when there is no
+    /// terminal and no --admin-password-file.
+    #[arg(long)]
+    pub generate_admin_password: bool,
+    /// Also print an admin token, as setup did before 0.2.1 (for scripts). Without it the
+    /// password is the only secret.
+    #[arg(long)]
+    pub print_admin_token: bool,
     /// Ask nothing: take the defaults for anything not given.
     #[arg(long, short = 'y')]
     pub yes: bool,
@@ -115,7 +124,8 @@ fn answers(args: &SetupArgs, mut prompter: Option<Prompter<'_>>) -> anyhow::Resu
         (None, true, _) | (None, false, None) => None,
         (None, false, Some(p)) => {
             let d = p.ask(
-                "Domain name for HTTPS with Let's Encrypt (empty: this machine only)",
+                "Domain name for HTTPS with Let's Encrypt (no domain? <public-ip>.sslip.io; \
+                 empty: this machine only)",
                 "",
             )?;
             (!d.is_empty()).then_some(d)
@@ -198,7 +208,11 @@ pub fn config_text(a: &Answers) -> anyhow::Result<String> {
     Ok(text)
 }
 
-fn read_password(args: &SetupArgs, interactive: bool) -> anyhow::Result<String> {
+/// The admin password from a file, standard input or the terminal; `None` means generate one.
+fn read_password(args: &SetupArgs, interactive: bool) -> anyhow::Result<Option<String>> {
+    if args.generate_admin_password {
+        return Ok(None);
+    }
     if let Some(file) = &args.admin_password_file {
         let mut text = String::new();
         if file.as_os_str() == "-" {
@@ -207,12 +221,11 @@ fn read_password(args: &SetupArgs, interactive: bool) -> anyhow::Result<String> 
             text = std::fs::read_to_string(file)
                 .with_context(|| format!("cannot read {}", file.display()))?;
         }
-        return Ok(text.lines().next().unwrap_or("").to_owned());
+        return Ok(Some(text.lines().next().unwrap_or("").to_owned()));
     }
     if !interactive {
-        bail!(
-            "give the admin password with --admin-password-file (a file, or - for standard input)"
-        );
+        // Nobody to ask: a generated password, printed once, is the way in.
+        return Ok(None);
     }
     loop {
         let first = rpassword::prompt_password("Admin password (at least 8 characters): ")?;
@@ -222,7 +235,7 @@ fn read_password(args: &SetupArgs, interactive: bool) -> anyhow::Result<String> 
         }
         let again = rpassword::prompt_password("Admin password again: ")?;
         if first == again {
-            return Ok(first);
+            return Ok(Some(first));
         }
         println!("The passwords differ.");
     }
@@ -238,7 +251,10 @@ pub async fn run(args: SetupArgs) -> anyhow::Result<()> {
         answers(&args, None)?
     };
     let password = read_password(&args, interactive)?;
-    if password.chars().count() < lode_server::auth::MIN_PASSWORD_LEN {
+    if password
+        .as_ref()
+        .is_some_and(|p| p.chars().count() < lode_server::auth::MIN_PASSWORD_LEN)
+    {
         bail!(
             "the admin password must have at least {} characters",
             lode_server::auth::MIN_PASSWORD_LEN
@@ -271,7 +287,16 @@ pub async fn run(args: SetupArgs) -> anyhow::Result<()> {
     }
     let report = lode_server::init(data_dir).await?;
     let config = ServerConfig::load(&config_path)?;
-    lode_server::set_admin_password(&config, &password).await?;
+    let generated = match &password {
+        Some(p) => {
+            lode_server::set_admin_password(&config, p).await?;
+            None
+        }
+        None => Some(lode_server::generate_admin_password(&config).await?),
+    };
+    if !args.print_admin_token {
+        lode_server::revoke_admin_tokens(&config).await?;
+    }
     if let Some(dir) = config.backup.schedule().map(|s| s.dir) {
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("cannot create {}", dir.display()))?;
@@ -287,9 +312,20 @@ pub async fn run(args: SetupArgs) -> anyhow::Result<()> {
     println!("Configuration: {}", config_path.display());
     println!("Server address for clients: {url}");
     println!();
-    println!("Admin token (shown only now; you can also sign in as admin with the password):");
-    println!("{}", report.admin_token);
-    println!();
+    if let Some(p) = &generated {
+        println!(
+            "Admin password (shown only now; it must be changed at the first sign-in, and it \
+             stops working after {} hours if unused):",
+            lode_server::GENERATED_PASSWORD_VALID.as_secs() / 3600
+        );
+        println!("{p}");
+        println!();
+    }
+    if args.print_admin_token {
+        println!("Admin token (shown only now; you can also sign in as admin with the password):");
+        println!("{}", report.admin_token);
+        println!();
+    }
     println!("Next:");
     if packaged_unit() {
         // Installed from the lode-server package, whose unit runs as `lode`.

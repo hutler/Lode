@@ -177,7 +177,9 @@ depot      (id INTEGER PK, name TEXT UNIQUE, next_rev INTEGER NOT NULL, created_
 principal  (id INTEGER PK, kind TEXT CHECK(kind IN ('user','agent')), name TEXT UNIQUE,
             display_name, owner_id REFERENCES principal, password_hash, disabled INT, created_at,
             sso_id TEXT NULL,   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
-            deleted_at NULL)    -- deleted: row kept for history, name stays taken (schema 6)
+            deleted_at NULL,    -- deleted: row kept for history, name stays taken (schema 6)
+            password_change_by NULL) -- set: a first password, good only for choosing a new
+                                     -- one, and only until this time (schema 7)
 grp        (id INTEGER PK, name TEXT UNIQUE)
 grp_member (grp_id, principal_id, PRIMARY KEY (grp_id, principal_id))
 token      (id INTEGER PK, principal_id, name, hash BLOB UNIQUE, scopes TEXT,
@@ -310,6 +312,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /info` | Server version, API version, enabled modules |
 | `GET /info` with single sign-on | Adds `sso: {label, password_login}` when `[oidc]` is configured |
 | `POST /auth/login` · `GET /auth/whoami` | Password login → token; identity, scopes |
+| `POST /auth/password` | Change one's own password given the current one (no token); the only use of a must-change first password |
 | `GET /auth/sso/start?redirect_uri=&state=&code_challenge=[&token_name=]` · `GET /auth/sso/callback` · `POST /auth/sso/token {code, code_verifier}` | Single sign-on (§7). Start and callback are browser pages; the token call answers like a password login |
 | `GET/POST/DELETE /tokens[/{id}]` | Own tokens |
 | `GET/POST /depots` | List; create (admin) |

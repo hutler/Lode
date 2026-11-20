@@ -1,6 +1,6 @@
 //! `lode login`, `lode logout`, `lode whoami`.
 
-use lode_proto::auth::LoginRequest;
+use lode_proto::auth::{ChangePasswordRequest, LoginRequest, REASON_PASSWORD_CHANGE_REQUIRED};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
@@ -125,14 +125,37 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
             }
             ui.prompt("Password: ", true)?
         };
-        let resp = anon
-            .login(&LoginRequest {
-                name,
-                password,
-                token_name: Some(token_label()),
-            })
-            .await?;
-        resp.token
+        let req = LoginRequest {
+            name,
+            password,
+            token_name: Some(token_label()),
+        };
+        match anon.login(&req).await {
+            Ok(resp) => resp.token,
+            Err(lode_client::Error::Api(e))
+                if e.details["reason"] == REASON_PASSWORD_CHANGE_REQUIRED
+                    && ui.interactive()
+                    && !ctx.g.json =>
+            {
+                // A first password: choose a new one now, then sign in with it.
+                ui.note("This password must be changed before it can be used.");
+                let new_password = ask_new_password(ui)?;
+                anon.change_password(&ChangePasswordRequest {
+                    name: req.name.clone(),
+                    password: req.password,
+                    new_password: new_password.clone(),
+                })
+                .await?;
+                ui.note("Password changed.");
+                anon.login(&LoginRequest {
+                    password: new_password,
+                    ..req
+                })
+                .await?
+                .token
+            }
+            Err(e) => return Err(e.into()),
+        }
     };
     // Check the token before keeping it.
     let me = anon.with_token(token.clone()).whoami().await?;
@@ -150,6 +173,83 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
         "token_file": file,
         "sso": args.sso,
     }))
+}
+
+/// Asks for a new password twice, without echo, until both agree.
+fn ask_new_password(ui: &dyn Ui) -> OpResult<String> {
+    loop {
+        let first = ui.prompt("New password: ", true)?;
+        if first.chars().count() < MIN_PASSWORD_LEN {
+            ui.note(&format!(
+                "Too short; use at least {MIN_PASSWORD_LEN} characters."
+            ));
+            continue;
+        }
+        if ui.prompt("New password again: ", true)? == first {
+            return Ok(first);
+        }
+        ui.note("The passwords differ.");
+    }
+}
+
+/// Shortest password the server takes (it checks too).
+const MIN_PASSWORD_LEN: usize = 8;
+
+/// `lode passwd` options.
+#[derive(Debug, Default, clap::Args)]
+pub struct PasswdArgs {
+    /// Server URL [default: the workspace's or the last one signed in to].
+    pub url: Option<String>,
+    /// Whose password [default: who you are signed in as].
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Read the current and the new password from stdin, one per line.
+    #[arg(long)]
+    pub password_stdin: bool,
+}
+
+/// Changes one's own password, given the current one. Also replaces a first password that
+/// must be changed, before any sign-in.
+pub async fn passwd(ctx: &Ctx, args: PasswdArgs) -> OpResult<Value> {
+    let server = match &args.url {
+        Some(u) => ctx.parse_server(u)?,
+        None => ctx.server_url(ctx.workspace().ok().as_ref())?,
+    };
+    let anon = ctx.anonymous_client(&server)?;
+    let ui = ctx.out.ui();
+    let name = match args.name {
+        Some(n) => n,
+        None => match ctx.client(&server) {
+            Ok(c) => match c.whoami().await {
+                Ok(me) => me.principal.name,
+                Err(_) => prompt(ui, "Name: ")?,
+            },
+            Err(_) => prompt(ui, "Name: ")?,
+        },
+    };
+    let (password, new_password) = if args.password_stdin {
+        (
+            read_stdin_line(ui, "current password")?,
+            read_stdin_line(ui, "new password")?,
+        )
+    } else {
+        if !ui.interactive() {
+            return Err(OpError::usage(
+                "passwords needed but stdin is not a terminal; use --password-stdin",
+            ));
+        }
+        (ui.prompt("Current password: ", true)?, ask_new_password(ui)?)
+    };
+    let resp = anon
+        .change_password(&ChangePasswordRequest {
+            name,
+            password,
+            new_password,
+        })
+        .await?;
+    ctx.out
+        .line(format!("Changed the password of {} on {server}.", resp.name));
+    Ok(json!({ "server": server.as_str(), "name": resp.name }))
 }
 
 /// The single sign-on a server offers (`{label, password_login}`), or `null` when it offers

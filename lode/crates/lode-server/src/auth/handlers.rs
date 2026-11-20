@@ -15,7 +15,8 @@ use lode_proto::admin::{
     PatchPrincipalRequest, PrincipalList,
 };
 use lode_proto::auth::{
-    CreateTokenRequest, CreateTokenResponse, LoginRequest, LoginResponse, PrincipalView, TokenList,
+    ChangePasswordRequest, ChangePasswordResponse, CreateTokenRequest, CreateTokenResponse,
+    LoginRequest, LoginResponse, PrincipalView, TokenList,
     TokenView, WhoAmI,
 };
 use lode_proto::consts::paths;
@@ -34,6 +35,7 @@ use crate::state::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(paths::LOGIN, post(login))
+        .route(paths::PASSWORD, post(change_password))
         .route(paths::WHOAMI, get(whoami))
         .route(paths::TOKENS, get(list_tokens).post(create_token))
         .route(paths::TOKEN, axum::routing::delete(delete_token))
@@ -219,10 +221,85 @@ async fn login(
     }))
 }
 
-/// Checks a sign-in with a name and password: the failed-attempt limit, the password, and
-/// `[oidc] password_login`. `POST /auth/login` and the admin web UI both sign in through
-/// this.
+/// Checks a sign-in with a name and password: the failed-attempt limit, the password, a
+/// password that must be changed first, and `[oidc] password_login`. `POST /auth/login` and
+/// the admin web UI both sign in through this.
 pub(crate) async fn check_password_sign_in(
+    state: &AppState,
+    addr: Option<IpAddr>,
+    name: &str,
+    password: String,
+) -> ApiResult<PrincipalRow> {
+    let principal = verify_name_and_password(state, addr, name, password).await?;
+    if principal.password_change_by.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "this password must be changed before it can be used; choose a new one with \
+             `lode passwd` or on the web sign-in page",
+        )
+        .with_details(serde_json::json!({
+            "reason": lode_proto::auth::REASON_PASSWORD_CHANGE_REQUIRED
+        })));
+    }
+    if state
+        .config()
+        .oidc
+        .as_ref()
+        .is_some_and(|o| o.password_login == PasswordLogin::Admins)
+        && !would_be_server_admin(state, &principal).await?
+    {
+        return Err(ApiError::new(
+            ErrorCode::Unauthenticated,
+            "password sign-in is turned off on this server except for server administrators; \
+             sign in with single sign-on (lode login URL --sso)",
+        ));
+    }
+    Ok(principal)
+}
+
+/// `POST /auth/password`: the current password (an ordinary one, or one that must be
+/// changed and has not run out) is traded for a new one. Shares the sign-in attempt limit.
+async fn change_password(
+    State(state): State<AppState>,
+    ClientAddr(addr): ClientAddr,
+    ApiJson(req): ApiJson<ChangePasswordRequest>,
+) -> ApiResult<Json<ChangePasswordResponse>> {
+    let principal =
+        change_own_password(&state, addr, &req.name, req.password, req.new_password).await?;
+    Ok(Json(ChangePasswordResponse {
+        name: principal.name,
+    }))
+}
+
+/// Trades a user's current password for a new one; `POST /auth/password` and the admin web
+/// sign-in's "choose a new password" form both go through this.
+pub(crate) async fn change_own_password(
+    state: &AppState,
+    addr: Option<IpAddr>,
+    name: &str,
+    password: String,
+    new_password: String,
+) -> ApiResult<PrincipalRow> {
+    check_password(&new_password)?;
+    if new_password == password {
+        return Err(ApiError::invalid_request(
+            "the new password must differ from the current one",
+        ));
+    }
+    let principal = verify_name_and_password(state, addr, name, password).await?;
+    let hash = hash_password_blocking(new_password).await?;
+    let id = principal.id;
+    state
+        .meta()
+        .write(move |tx| tx.set_password_hash(id, Some(&hash)))
+        .await?;
+    tracing::info!(principal = %principal.name, "password changed by its owner");
+    Ok(principal)
+}
+
+/// The attempt limit and the password check alone. A must-change password that ran out is
+/// refused here (`password_expired`); one still good passes, for the caller to decide.
+async fn verify_name_and_password(
     state: &AppState,
     addr: Option<IpAddr>,
     name: &str,
@@ -261,20 +338,18 @@ pub(crate) async fn check_password_sign_in(
             ));
         }
     };
-    limiter.record_success(name);
-    if state
-        .config()
-        .oidc
-        .as_ref()
-        .is_some_and(|o| o.password_login == PasswordLogin::Admins)
-        && !would_be_server_admin(state, &principal).await?
-    {
+    if principal.password_change_by.is_some_and(|by| now > by) {
+        limiter.record_failure(name, addr, now);
         return Err(ApiError::new(
             ErrorCode::Unauthenticated,
-            "password sign-in is turned off on this server except for server administrators; \
-             sign in with single sign-on (lode login URL --sso)",
-        ));
+            "this first password ran out unused; make a new one on the server with \
+             `loded reset-admin --generate-password`",
+        )
+        .with_details(serde_json::json!({
+            "reason": lode_proto::auth::REASON_PASSWORD_EXPIRED
+        })));
     }
+    limiter.record_success(name);
     Ok(principal)
 }
 

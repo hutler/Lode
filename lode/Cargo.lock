@@ -1422,6 +1422,7 @@ dependencies = [
  "lode-build",
  "lode-client",
  "lode-core",
+ "lode-meta",
  "lode-ops",
  "lode-proto",
  "lode-server",

@@ -6,6 +6,7 @@ use lode_proto::admin::{
 };
 use lode_proto::PrincipalKind;
 use lode_testkit::web::{Browser, Page};
+use lode_server::Clock as _;
 use lode_testkit::{TestServer, TestServerOptions};
 
 const PASSWORD: &str = "correct horse battery";
@@ -1546,4 +1547,54 @@ async fn a_depot_goes_to_the_trash_and_comes_back_or_is_erased() {
     assert_eq!(r.status, 303, "{}", r.body);
     assert!(s.admin().trash().await.unwrap().depots.is_empty());
     assert!(s.admin().depots().await.unwrap().depots.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_must_change_password_leads_to_the_change_page() {
+    let s = server().await;
+    let by = s.clock().now_ms() + 60_000;
+    s.state()
+        .meta()
+        .write(move |tx| {
+            let p = lode_meta::Reads::principal_by_name(tx, "admin")?.unwrap();
+            tx.set_password(p.id, p.password_hash.as_deref(), Some(by))
+        })
+        .await
+        .unwrap();
+    let mut b = Browser::new(s.url());
+    let page = sign_in_as(&mut b, "admin", PASSWORD).await;
+    assert_eq!(page.status, 200, "{}", page.body);
+    assert!(page.body.contains("Choose a new password"), "{}", page.body);
+    assert!(page.cookie("lode_admin").is_none(), "no session yet");
+
+    let differ = b
+        .submit(
+            &page,
+            "/admin/sign-in/password",
+            &[
+                ("password", PASSWORD),
+                ("new_password", "my new password"),
+                ("new_password_again", "my other password"),
+            ],
+        )
+        .await;
+    assert_eq!(differ.status, 400);
+    assert_eq!(error_text(&differ), "The new passwords differ.");
+
+    let ok = b
+        .submit(
+            &differ,
+            "/admin/sign-in/password",
+            &[
+                ("password", PASSWORD),
+                ("new_password", "my new password"),
+                ("new_password_again", "my new password"),
+            ],
+        )
+        .await;
+    assert_eq!(ok.status, 303, "{}", ok.body);
+    assert_eq!(ok.location(), Some("/admin/"));
+    assert!(ok.cookie("lode_admin").is_some());
+    let mut again = Browser::new(s.url());
+    assert_eq!(sign_in_as(&mut again, "admin", "my new password").await.status, 303);
 }

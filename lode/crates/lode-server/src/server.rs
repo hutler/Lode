@@ -196,10 +196,56 @@ pub async fn reset_admin(config: &ServerConfig) -> Result<String, ServerError> {
     Ok(token)
 }
 
+/// How long a generated first password works if nobody uses it.
+pub const GENERATED_PASSWORD_VALID: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// Offline: sets the built-in `admin` user's password, so the administrator can sign in with
 /// `lode login` (used by `loded setup`). The password must have at least
 /// [`MIN_PASSWORD_LEN`](crate::auth::MIN_PASSWORD_LEN) characters.
 pub async fn set_admin_password(config: &ServerConfig, password: &str) -> Result<(), ServerError> {
+    write_admin_password(config, password, None, false).await
+}
+
+/// Offline: gives the built-in `admin` user a random password that must be changed at the
+/// first sign-in and stops working after [`GENERATED_PASSWORD_VALID`] if unused. The admin's
+/// tokens are revoked and the account enabled, so this one secret is the only way in. Used by
+/// `loded setup --generate-admin-password` and `loded reset-admin --generate-password`.
+pub async fn generate_admin_password(config: &ServerConfig) -> Result<String, ServerError> {
+    let password = crate::auth::generate_password(&mut rand::rngs::OsRng);
+    let by = SystemClock.now_ms() + GENERATED_PASSWORD_VALID.as_millis() as i64;
+    write_admin_password(config, &password, Some(by), true).await?;
+    Ok(password)
+}
+
+/// Offline: revokes every token of the built-in `admin` user (`loded setup` keeps only the
+/// password unless asked for a token).
+pub async fn revoke_admin_tokens(config: &ServerConfig) -> Result<(), ServerError> {
+    let db = check_initialized(&config.data_dir)?;
+    let meta = open_meta(db, Vec::new()).await?;
+    let found = meta
+        .write(move |tx| {
+            let Some(admin) = tx
+                .principal_by_name(ADMIN_USER)?
+                .filter(|p| p.kind == PrincipalKind::User)
+            else {
+                return Ok(false);
+            };
+            tx.delete_tokens_of(admin.id)?;
+            Ok(true)
+        })
+        .await?;
+    if !found {
+        return Err(ServerError::NoAdmin);
+    }
+    Ok(())
+}
+
+async fn write_admin_password(
+    config: &ServerConfig,
+    password: &str,
+    change_by: Option<i64>,
+    reset: bool,
+) -> Result<(), ServerError> {
     if password.chars().count() < crate::auth::MIN_PASSWORD_LEN {
         return Err(ServerError::WeakPassword);
     }
@@ -224,7 +270,11 @@ pub async fn set_admin_password(config: &ServerConfig, password: &str) -> Result
             else {
                 return Ok(false);
             };
-            tx.set_password_hash(admin.id, Some(&hash))?;
+            tx.set_password(admin.id, Some(&hash), change_by)?;
+            if reset {
+                tx.delete_tokens_of(admin.id)?;
+                tx.set_principal_disabled(admin.id, false)?;
+            }
             Ok(true)
         })
         .await?;

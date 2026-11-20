@@ -106,3 +106,17 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   records the last garbage collection and check per depot, added on the first start.
   `GET /admin/acl/check` (`lode admin acl check --json`) gains the optional fields
   `depot_admin`, `matched` and `decided_by`; older clients ignore them.
+
+### Next release: field feedback from the first deployment (M17)
+
+- **Upgrade note:** `loded setup` no longer prints an admin token; the password is the one
+  secret. Scripts that read the token from setup's output need `--print-admin-token`.
+  Without a terminal and without `--admin-password-file`, setup now generates a first
+  password (`--generate-admin-password`) instead of failing.
+- The database gains `principal.password_change_by` (core schema 7), added on the first
+  start. A generated first password is good only for choosing a new one (`POST
+  /auth/password`, `lode passwd`, or the admin web sign-in), and for 24 hours. Logins with it
+  are `unauthenticated` with `details.reason` `password_change_required` (or
+  `password_expired`); older clients show the message.
+- `lode passwd` and `POST /auth/password` let users change their own password.
+  `loded reset-admin --generate-password` prints a new first password instead of a token.

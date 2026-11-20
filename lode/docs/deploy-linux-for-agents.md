@@ -8,14 +8,20 @@ same material is chapter 2 of Part II in the user guide (`docs/user-guide.html`)
 ## 0. Rules
 
 - **Ask, do not guess**, for: the SSH host and user, the domain name, the email for certificate
-  notices, and where backups go. If the person has no domain, ask whether a plain-HTTP server
-  that only listens on the machine itself (`--local`) is what they want.
-- **Never handle the admin password yourself.** Do not type it, put it in a command line,
-  echo it, or write it to a file you created. Ask the person to put it on the server in a file
-  only root can read, such as `/root/lode-admin-password.txt` (first line only), and tell you
-  the path. Remove the file when setup is done (step 4), after asking.
-- **Never print or store the admin token** that `loded setup` shows. If you saw it, tell the
-  person it is in the output and that they can also sign in as `admin` with the password.
+  notices, and where backups go. If the person has no domain, offer `<public-ip>.sslip.io`
+  (step 1): HTTPS with a real certificate and nothing to register. Offer `--local` (plain
+  HTTP on the machine itself) only for a test on that machine or behind their own proxy.
+- **Never choose the admin password yourself.** Do not type one, put it in a command line,
+  echo it, or write it to a file you created. Ask the person which way they want:
+  - *They can use SSH:* they put the password on the server in a file only root can read,
+    such as `/root/lode-admin-password.txt` (first line only), and tell you the path. Remove
+    the file when setup is done (step 4), after asking.
+  - *They cannot use SSH:* setup generates a first password (`--generate-admin-password`)
+    and prints it once. Pass it to the person in your reply, once, and do not store it or
+    repeat it later. It only lets them choose their own password at the first sign-in (web
+    page or `lode login`), and it stops working after 24 hours if unused.
+- `loded setup` prints no admin token. Do not ask for one (`--print-admin-token`) unless the
+  person needs it for a script; then never print it again or store it.
 - Changes to the machine (installing packages, opening ports, starting services) are what the
   person asked for. Deleting data is not: never remove `/var/lib/lode` or a backup directory.
 - Use `sudo` when you are not root. Run commands one at a time and read the output.
@@ -40,6 +46,20 @@ getent hosts <domain>          # on the server; compare with: curl -s https://ap
 
 Stop and tell the person if the address differs. The certificate cannot be issued until DNS is
 right.
+
+**No domain:** use `<public-ip>.sslip.io` as the domain, for example `203.0.113.7.sslip.io`
+(for IPv6, dashes instead of colons: `2001-db8--7.sslip.io`). sslip.io is a free public DNS
+service that answers every such name with the address inside it, so Let's Encrypt works
+unchanged. Check it the same way:
+
+```
+curl -s https://api.ipify.org                  # the public address, say 203.0.113.7
+getent hosts 203.0.113.7.sslip.io              # must print that address
+```
+
+Tell the person that this depends on a third-party DNS service and suits a trial; for a team
+that stays, a domain of their own is better (switching later means a new `acme_domain` in
+`loded.toml` and a new server address for clients).
 
 ## 2. Open the port
 
@@ -79,22 +99,25 @@ systemctl cat loded | head -3
 
 ## 4. Set up the server
 
-The `lode` user cannot read a file in `/root`, so the password goes in on standard input
-(`--admin-password-file -`). It never appears in a command line or in the output.
-
-With a domain:
+With a password file from the person: the `lode` user cannot read a file in `/root`, so the
+password goes in on standard input (`--admin-password-file -`). It never appears in a command
+line or in the output.
 
 ```
 sudo cat /root/lode-admin-password.txt | sudo -u lode loded setup --yes \
     --domain <domain> --email <email> --admin-password-file -
 ```
 
-Without a domain (plain HTTP on 127.0.0.1:7480; only for a test, or behind the person's own
-TLS proxy):
+Without SSH for the person: setup makes the first password and prints it once, under "Admin
+password (shown only now …)".
 
 ```
-sudo cat /root/lode-admin-password.txt | sudo -u lode loded setup --yes --local --admin-password-file -
+sudo -u lode loded setup --yes --domain <domain> --email <email> --generate-admin-password
 ```
+
+`<domain>` is the person's domain or the `sslip.io` name from step 1. Only for a test on
+the machine itself, or behind the person's own TLS proxy, replace `--domain <domain> --email
+<email>` with `--local` (plain HTTP on 127.0.0.1:7480).
 
 Options worth knowing (all are in `loded setup --help`):
 
@@ -118,8 +141,8 @@ sudo systemctl edit loded       # add the two lines below, save
 ReadWritePaths=<backup-dir>
 ```
 
-Then ask the person whether to delete `/root/lode-admin-password.txt`, and delete it if they
-agree.
+Then, if there is one, ask the person whether to delete `/root/lode-admin-password.txt`, and
+delete it if they agree.
 
 ## 5. Start it
 
@@ -144,6 +167,11 @@ curl -fsS https://<domain>/api/v1/info           # JSON with the server version
 lode login https://<domain> --name admin         # the person types the password
 lode whoami
 ```
+
+With a generated first password, the person's first sign-in (the admin web page or `lode
+login`) asks them to choose their own password; until then the generated one works for
+nothing else. If it ran out (24 hours), make a new one on the server with
+`sudo -u lode loded reset-admin --generate-password --config /var/lib/lode/loded.toml`.
 
 With `--local`, run the `curl` on the server against `http://127.0.0.1:7480/api/v1/info`.
 
@@ -195,3 +223,6 @@ history with `lode import git <repo> https://<domain>/game --branch main`.
   user guide, Part II, chapter 3.
 - **Port 443 refused from outside but fine on the server:** the provider firewall (step 2).
 - **"permission denied" writing backups:** step 4b.
+- **Forgotten admin password:** `sudo -u lode loded reset-admin --generate-password --config
+  /var/lib/lode/loded.toml` (with the server stopped) prints a new first password; give it to
+  the person once, as in step 4.

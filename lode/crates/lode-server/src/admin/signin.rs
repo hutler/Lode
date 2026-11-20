@@ -12,12 +12,14 @@ use super::html;
 use super::session::{cookie, set_cookie, Post, SESSION_COOKIE, SESSION_HOURS, SIGN_IN_COOKIE};
 use super::{html_response, Admin, Ctx, Nav, Page};
 use crate::auth::{
-    check_password_sign_in, ct_eq, finish_admin, issue_token, random_verifier, start_admin,
+    change_own_password, check_password_sign_in, ct_eq, finish_admin, issue_token, random_verifier, start_admin,
     would_be_server_admin, ClientAddr,
 };
 
 /// The sign-in page.
 pub(crate) const SIGN_IN: &str = "/admin/sign-in";
+/// The "choose a new password" form for a password that must be changed.
+pub(crate) const SIGN_IN_PASSWORD: &str = "/admin/sign-in/password";
 /// Starts a single sign-on.
 pub(crate) const SSO_START: &str = "/admin/sign-in/sso";
 /// Signs out.
@@ -122,6 +124,41 @@ fn sign_in_page(
     r
 }
 
+/// The page that replaces a must-change password before the first sign-in.
+fn change_page(
+    ctx: &Ctx,
+    status: StatusCode,
+    csrf: &str,
+    next: &str,
+    name: &str,
+    message: Option<html::Html>,
+) -> Response {
+    let body = html!(
+        "<div class=\"signin card\"><h1>Choose a new password</h1>\
+         <p class=\"muted\">The password for {} must be changed before it can be used.</p>{}\
+         <form class=\"stack\" method=\"post\" action=\"{}\">\
+         <input type=\"hidden\" name=\"csrf\" value=\"{}\"/>\
+         <input type=\"hidden\" name=\"next\" value=\"{}\"/>\
+         <input type=\"hidden\" name=\"name\" value=\"{}\"/>\
+         <label>Current password<input type=\"password\" name=\"password\" \
+         autocomplete=\"current-password\" required=\"required\" autofocus=\"autofocus\"/></label>\
+         <label>New password<input type=\"password\" name=\"new_password\" \
+         autocomplete=\"new-password\" required=\"required\" minlength=\"8\"/></label>\
+         <label>New password again<input type=\"password\" name=\"new_password_again\" \
+         autocomplete=\"new-password\" required=\"required\" minlength=\"8\"/></label>\
+         <button type=\"submit\" class=\"primary\">Change and sign in</button></form></div>",
+        name,
+        message,
+        SIGN_IN_PASSWORD,
+        csrf,
+        next,
+        name
+    );
+    let mut r = Page::new("Choose a new password", Nav::None).render(ctx, None, body);
+    *r.status_mut() = status;
+    r
+}
+
 pub(crate) async fn form(
     State(ctx): State<Ctx>,
     headers: HeaderMap,
@@ -213,18 +250,82 @@ pub(crate) async fn submit(
     };
     let principal = match check_password_sign_in(ctx.state(), addr, &name, password).await {
         Ok(p) => p,
+        Err(e)
+            if e.body().details["reason"]
+                == lode_proto::auth::REASON_PASSWORD_CHANGE_REQUIRED =>
+        {
+            return change_page(&ctx, StatusCode::OK, &expected, &next, &name, None);
+        }
         Err(e) => return refuse(StatusCode::UNAUTHORIZED, &e.body().message),
     };
-    match would_be_server_admin(ctx.state(), &principal).await {
+    finish_sign_in(&ctx, &principal, &next, refuse).await
+}
+
+/// Lets an administrator in: the session cookie and a redirect to `next`.
+async fn finish_sign_in(
+    ctx: &Ctx,
+    principal: &PrincipalRow,
+    next: &str,
+    refuse: impl Fn(StatusCode, &str) -> Response,
+) -> Response {
+    match would_be_server_admin(ctx.state(), principal).await {
         Ok(true) => {}
         Ok(false) => return refuse(StatusCode::FORBIDDEN, NOT_ADMIN),
         Err(e) => return refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.body().message),
     }
-    let r = Redirect::to(&next).into_response();
-    match start_session(&ctx, &principal, r).await {
+    let r = Redirect::to(next).into_response();
+    match start_session(ctx, principal, r).await {
         Ok(r) => r,
         Err(message) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &message),
     }
+}
+
+/// The "choose a new password" form: changes the password, then signs in with the new one.
+pub(crate) async fn change_password(
+    State(ctx): State<Ctx>,
+    ClientAddr(addr): ClientAddr,
+    headers: HeaderMap,
+    form: Result<Form<Vec<(String, String)>>, FormRejection>,
+) -> Response {
+    let fields = super::Fields::from(form.map(|Form(f)| f).unwrap_or_default());
+    let next = safe_next(fields.get("next"));
+    let (expected, new) = sign_in_cookie(&headers);
+    let sent = fields.get("csrf").unwrap_or("");
+    if new || !ct_eq(sent.as_bytes(), expected.as_bytes()) {
+        let message =
+            html!("<p class=\"error\" role=\"alert\">The sign-in form expired. Try again.</p>");
+        let r = sign_in_page(&ctx, StatusCode::FORBIDDEN, &expected, &next, "", Some(message));
+        return with_sign_in_cookie(&ctx, r, &expected, new);
+    }
+    let name = fields.text("name");
+    let again = |status, text: &str| {
+        let message = html!(
+            "<p class=\"error\" role=\"alert\">{}</p>",
+            super::layout::sentence(text)
+        );
+        change_page(&ctx, status, &expected, &next, &name, Some(message))
+    };
+    let new_password = fields.get("new_password").unwrap_or("").to_owned();
+    if fields.get("new_password_again").unwrap_or("") != new_password {
+        return again(StatusCode::BAD_REQUEST, "The new passwords differ.");
+    }
+    let current = fields.get("password").unwrap_or("").to_owned();
+    let principal =
+        match change_own_password(ctx.state(), addr, &name, current, new_password).await {
+            Ok(p) => p,
+            Err(e) if e.body().code == "invalid_request" => {
+                return again(StatusCode::BAD_REQUEST, &e.body().message)
+            }
+            Err(e) => return again(StatusCode::UNAUTHORIZED, &e.body().message),
+        };
+    let refuse = |status, text: &str| {
+        let message = html!(
+            "<p class=\"error\" role=\"alert\">{}</p>",
+            super::layout::sentence(text)
+        );
+        sign_in_page(&ctx, status, &expected, &next, &name, Some(message))
+    };
+    finish_sign_in(&ctx, &principal, &next, refuse).await
 }
 
 pub(crate) async fn sso_start(

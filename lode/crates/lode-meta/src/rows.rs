@@ -92,6 +92,9 @@ pub struct PrincipalRow {
     /// When it was deleted. A deleted principal cannot authenticate, is left out of lists
     /// and lookups by name, and keeps its name for history.
     pub deleted_at: Option<Millis>,
+    /// Set when the password must be changed before it can be used (a generated first
+    /// password): the time after which it stops working altogether.
+    pub password_change_by: Option<Millis>,
 }
 
 /// Fields for a new principal.

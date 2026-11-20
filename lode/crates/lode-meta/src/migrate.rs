@@ -59,6 +59,11 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             name: "deleted",
             sql: include_str!("../migrations/core/0006_deleted.sql"),
         },
+        Migration {
+            version: 7,
+            name: "password_change",
+            sql: include_str!("../migrations/core/0007_password_change.sql"),
+        },
     ],
 };
 

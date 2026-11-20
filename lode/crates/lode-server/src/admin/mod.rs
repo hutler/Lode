@@ -73,6 +73,7 @@ pub fn routes(state: AppState, api: Router) -> Router {
         .route("/admin", get(|| async { Redirect::permanent("/admin/") }))
         .route("/admin/", get(overview::page))
         .route(signin::SIGN_IN, get(signin::form).post(signin::submit))
+        .route(signin::SIGN_IN_PASSWORD, post(signin::change_password))
         .route(signin::SSO_START, get(signin::sso_start))
         .route(crate::auth::ADMIN_SSO_DONE, get(signin::sso_done))
         .route(signin::SIGN_OUT, post(signin::sign_out))

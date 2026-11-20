@@ -493,6 +493,7 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 <table>
   <tr><th style="width:44%">Command</th><th>Purpose</th></tr>
   <tr><td><code>lode login</code> · <code>logout</code> · <code>whoami</code></td><td>Sign in and out; show the current account</td></tr>
+  <tr><td><code>lode passwd</code></td><td>Change your own password</td></tr>
   <tr><td><code>lode checkout URL/DEPOT [DIR]</code></td><td>Create a workspace</td></tr>
   <tr><td><code>lode init URL/DEPOT [--template T] [--dry-run]</code></td><td>Make the current folder a new depot</td></tr>
   <tr><td><code>lode import git REPO URL/DEPOT --branch B</code></td><td>Import a Git branch with its history</td></tr>
@@ -557,16 +558,17 @@ Admin password again:
 
 Lode is set up in /var/lib/lode
 Server address for clients: https://lode.example.com
-Admin token (shown only now; you can also sign in as admin with the password):
-lode_3q…
 
 loded service install --config /var/lib/lode/loded.toml
 loded service start</code></pre>
-<p><code>setup</code> writes a commented <code>loded.toml</code> with your answers, checks it, creates the data directory and an administrator account named <code>admin</code> with your password, and prints the admin token once. With a domain, the server gets its HTTPS certificate from Let's Encrypt when it starts (chapter 4); the name must already point at the machine. Without one, it serves plain HTTP on this machine only, for a single user or behind your own proxy.</p>
+<p><code>setup</code> writes a commented <code>loded.toml</code> with your answers, checks it, creates the data directory and an administrator account named <code>admin</code> with your password. Your password is the only secret it hands out; add <code>--print-admin-token</code> if a script also needs an admin token. With a domain, the server gets its HTTPS certificate from Let's Encrypt when it starts (chapter 4); the name must already point at the machine. Without one, it serves plain HTTP on this machine only, for a single user or behind your own proxy.</p>
+<p><strong>No domain?</strong> Use <code>&lt;public-ip&gt;.sslip.io</code>, such as <code>203.0.113.7.sslip.io</code> (dashes instead of colons for IPv6). sslip.io is a free public DNS service that answers each such name with the address inside it, so Let's Encrypt works with no registration. It suits a trial; a team that stays is better off with a domain of its own.</p>
+<p><strong>No password at hand?</strong> <code>--generate-admin-password</code> (also taken when there is no terminal and no <code>--admin-password-file</code>) makes a random first password and prints it once. It only lets <code>admin</code> choose a new password, at the first sign-in on the admin web page or with <code>lode login</code>, and it stops working after 24 hours if unused. <code>loded reset-admin --generate-password --config …</code> makes a new one offline, for a lost password too.</p>
 <p>Every answer can be a flag, for scripted installs; <code>--yes</code> (or no terminal) takes the defaults for the rest:</p>
 <pre><code>loded setup --yes --data-dir /var/lib/lode --domain lode.example.com \
     --email admin@example.com --backup-dir /mnt/backup/lode --admin-password-file pw.txt
-loded setup --yes --local --no-backup --admin-password-file -     # password on standard input</code></pre>
+loded setup --yes --local --no-backup --admin-password-file -     # password on standard input
+loded setup --yes --domain 203.0.113.7.sslip.io --generate-admin-password</code></pre>
 <p><code>loded service install</code> registers the server to start at boot (chapter 5). To try it in a terminal first, run <code>loded serve --config /var/lib/lode/loded.toml</code> and stop it with Ctrl-C.</p>
 <p>The older way still works: <code>loded init /var/lib/lode</code> creates the data directory with the default configuration (plain HTTP on 127.0.0.1:7480) and prints the admin token, and you edit <code>loded.toml</code> yourself.</p>
 <p>From your own machine, sign in as <code>admin</code> with the password (or the token) and set the server up:</p>
@@ -574,7 +576,7 @@ loded setup --yes --local --no-backup --admin-password-file -     # password on 
 lode admin depot create game
 lode admin user create alice                       # prompts for her first password
 lode admin acl add allow write user:alice --depot game</code></pre>
-<p>Alice can now run <code>lode login</code> with her name and password, and check out <code>game</code>.</p>
+<p>Alice can now run <code>lode login</code> with her name and password, and check out <code>game</code>. She changes her password herself with <code>lode passwd</code> (it asks for the current one first).</p>
 
 <h1>3. Configuration</h1>
 <p>All settings are in <code>loded.toml</code>, which <code>loded init</code> writes with a comment on every key. An unknown key is an error, so typing mistakes are caught at start. The defaults:</p>

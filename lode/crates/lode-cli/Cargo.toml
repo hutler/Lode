@@ -40,6 +40,7 @@ base64.workspace = true
 insta.workspace = true
 lode-client.workspace = true
 lode-core.workspace = true
+lode-meta.workspace = true
 lode-server.workspace = true
 lode-store = { workspace = true, features = ["test-util"] }
 lode-testkit.workspace = true
