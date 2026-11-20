@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 
 use lode_desk::app::{
     self, ChangesState, CheckoutState, Dialog, ErrorInfo, ListDialogState, Options, Recent,
-    SignInState, WorkspaceTab,
+    ServerRowData, SignInState, WorkspaceTab,
 };
 use lode_desk::app::{BlameState, DiffNote, DiffState, HistoryState, ImageState, Pane, Reading};
 use lode_desk::app::{
@@ -92,6 +92,20 @@ fn main() {
         recent("art-source", "main", "E:\\art", "art.example.com:8443"),
     ]));
     w.set_recent(ModelRc::from(recent));
+    w.set_servers(ModelRc::from(Rc::new(VecModel::from(vec![
+        ServerRowData {
+            url: "https://lode.example.com".into(),
+            host: "lode.example.com".into(),
+            signed_in: true,
+            status: "Signed in as alice".into(),
+        },
+        ServerRowData {
+            url: "https://art.example.com:8443".into(),
+            host: "art.example.com:8443".into(),
+            signed_in: false,
+            status: "Not signed in".into(),
+        },
+    ]))));
 
     for dark in [false, true] {
         w.invoke_use_dark(dark);
@@ -108,21 +122,41 @@ fn main() {
             name: "alice".into(),
             sso_label: "Example Corp".into(),
             password_login: true,
+            probe: "ok".into(),
+            probe_text: "Lode server 0.2.0 at lode.example.com. It offers Example Corp sign-in."
+                .into(),
             ..SignInState::default()
         });
         w.set_dialog(Dialog::SignIn);
         shot("sign-in");
 
         w.set_sign_in(SignInState {
+            server: "https://lode.example.com/admin/".into(),
+            name: "alice".into(),
+            password_login: true,
+            probe: "bad".into(),
+            probe_text: "No Lode server answers at this address. The server is at \
+                         https://lode.example.com; /admin/ is its web admin page."
+                .into(),
+            suggested: "https://lode.example.com".into(),
+            ..SignInState::default()
+        });
+        shot("sign-in-path");
+
+        w.set_sign_in(SignInState {
             server: "https://lode.example.com".into(),
             name: "alice".into(),
             password: "wrong".into(),
             password_login: true,
-            error: app::error_info(&lode_desk::desk::ErrorView {
+            probe: "ok".into(),
+            probe_text: "Lode server 0.2.0 at lode.example.com.".into(),
+            error: ErrorInfo {
+                shown: true,
+                message: "The name or password is wrong.".into(),
+                next: "Check both and try again. A server administrator can reset your password."
+                    .into(),
                 code: "unauthenticated".into(),
-                message: "the name or password is wrong".into(),
-                details: serde_json::Value::Null,
-            }),
+            },
             ..SignInState::default()
         });
         shot("sign-in-refused");
@@ -159,6 +193,25 @@ fn main() {
             },
         ]))));
         w.set_current_tab(1);
+        w.global::<Reading>().set_pane(Pane::Changes);
+        w.global::<Reading>().set_diff(DiffState::default());
+        w.set_change_rows(ModelRc::default());
+        w.set_picked_rows(ModelRc::default());
+        w.set_pending_rows(ModelRc::default());
+        w.set_list_rows(ModelRc::default());
+        w.set_changes(ChangesState {
+            loaded: true,
+            ..ChangesState::default()
+        });
+        w.set_commit_message("".into());
+        let b = w.global::<Branching>();
+        b.set_side_rows(ModelRc::from(Rc::new(VecModel::from(
+            branches::branch_rows(&sample_branches(), "main", "", "")
+                .into_iter()
+                .filter(|r| !r.archived)
+                .collect::<Vec<_>>(),
+        ))));
+        b.set_behind(4);
         shot("workspace");
 
         // T131: the changes view, a refused commit and changelists.
@@ -168,10 +221,25 @@ fn main() {
             .map(String::from)
             .collect();
         let selected = "Source/Game/Boat.cpp";
-        w.set_change_rows(ModelRc::from(Rc::new(VecModel::from(changes::rows(
-            &pending,
-            &picked,
-            Some(selected),
+        let rows = changes::rows(&pending, &picked, Some(selected));
+        let (picked_rows, pending_rows, list_rows) = changes::split_rows(&rows);
+        w.set_change_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+        w.set_picked_rows(ModelRc::from(Rc::new(VecModel::from(picked_rows))));
+        w.set_pending_rows(ModelRc::from(Rc::new(VecModel::from(pending_rows))));
+        w.set_list_rows(ModelRc::from(Rc::new(VecModel::from(list_rows))));
+        let r = w.global::<Reading>();
+        r.set_diff(DiffState {
+            path: selected.into(),
+            name: "Boat.cpp".into(),
+            r#where: "Source/Game/Boat.cpp (working copy)".into(),
+            insertions: 5,
+            deletions: 3,
+            layout: "unified".into(),
+            ..DiffState::default()
+        });
+        r.set_diff_rows(ModelRc::from(Rc::new(VecModel::from(diffs::rows(
+            &diffs::parse_patch(SAMPLE_PATCH),
+            diffs::Layout::Unified,
         )))));
         let state = ChangesState {
             loaded: true,
@@ -231,6 +299,15 @@ fn main() {
             lanes: 2,
             scroll_to: -1,
             ..HistoryState::default()
+        });
+        r.set_diff(DiffState {
+            path: "Source/Game/Boat.cpp".into(),
+            name: "Boat.cpp".into(),
+            r#where: "Source/Game/Boat.cpp in r1478".into(),
+            insertions: 5,
+            deletions: 3,
+            layout: "unified".into(),
+            ..DiffState::default()
         });
         r.set_pane(Pane::History);
         shot("history");
@@ -869,6 +946,7 @@ fn recent(depot: &str, branch: &str, path: &str, host: &str) -> Recent {
         branch: branch.into(),
         path: path.into(),
         host: host.into(),
+        initial: depot[..1].to_uppercase().into(),
     }
 }
 

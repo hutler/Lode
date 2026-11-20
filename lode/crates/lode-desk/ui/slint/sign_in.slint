@@ -4,6 +4,7 @@
 
 import { Button, LineEdit, Palette } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel } from "parts.slint";
+import { Logo } from "brand.slint";
 
 export struct SignInState {
     server: string,
@@ -21,6 +22,63 @@ export struct SignInState {
     sso-url: string,
     /// "Signed in to … as …" once done.
     done: string,
+    /// What answers at the address: empty (nothing asked yet), checking, ok or bad.
+    probe: string,
+    /// The server found, or why none was.
+    probe-text: string,
+    /// The address to use instead, when the one typed has a path the server is not at.
+    suggested: string,
+}
+
+/// What answers at the address being typed, under the address.
+component ProbeLine inherits Rectangle {
+    in property <SignInState> state;
+    callback use-suggested();
+    property <bool> good: root.state.probe == "ok";
+    height: line.preferred-height;
+    border-radius: 6px;
+    background: root.state.probe == "ok" ? #16a34a1c : root.state.probe == "bad" ? #dc26261c : transparent;
+    accessible-role: text;
+    accessible-label: "Server check";
+    accessible-value: root.state.probe == "checking" ? "Checking the address…" : root.state.probe-text;
+    line := HorizontalLayout {
+        padding: root.state.probe == "checking" ? 0 : 8px;
+        spacing: 8px;
+        Text {
+            text: root.state.probe == "ok" ? "✓" : root.state.probe == "bad" ? "✕" : "";
+            font-weight: 700;
+            color: root.good ? #16a34a : #dc2626;
+            width: root.state.probe == "checking" ? 0 : self.preferred-width;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            spacing: 6px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.state.probe == "checking" ? "Checking the address…" : root.state.probe-text;
+                wrap: word-wrap;
+                color: root.state.probe == "checking" ? Palette.foreground.transparentize(0.4) : Palette.foreground;
+                accessible-role: none;
+            }
+            if root.state.suggested != "": HorizontalLayout {
+                alignment: start;
+                Button {
+                    text: "Use " + root.state.suggested;
+                    primary: true;
+                    clicked => { root.use-suggested(); }
+                }
+            }
+        }
+    }
+}
+
+/// "or with a password" between two rules.
+component OrLine inherits HorizontalLayout {
+    in property <string> text;
+    spacing: 10px;
+    Rectangle { height: 1px; y: (parent.height - 1px) / 2; background: Palette.border; horizontal-stretch: 1; }
+    Muted { text: root.text; font-size: 12px; horizontal-stretch: 0; }
+    Rectangle { height: 1px; y: (parent.height - 1px) / 2; background: Palette.border; horizontal-stretch: 1; }
 }
 
 export component SignInDialog inherits Card {
@@ -29,14 +87,29 @@ export component SignInDialog inherits Card {
     callback submit();
     callback sso();
     callback close();
+    property <bool> blocked: root.state.probe == "bad";
     width: 460px;
     accessible-role: groupbox;
     accessible-label: "Sign in";
     VerticalLayout {
-        padding: 24px;
-        spacing: 10px;
-        Title { text: "Sign in"; }
+        // The header: the app's mark and what this signs in to.
+        Rectangle {
+            height: head.preferred-height;
+            head := HorizontalLayout {
+                padding: 20px;
+                padding-bottom: 14px;
+                spacing: 12px;
+                Logo { size: 36px; y: (parent.height - self.height) / 2; }
+                VerticalLayout {
+                    alignment: center;
+                    Title { text: "Sign in to a Lode server"; font-size: 18px; }
+                    Muted { text: "Lode Desk and the lode command share this sign-in."; font-size: 12px; }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+        }
         if root.state.done != "": VerticalLayout {
+            padding: 20px;
             spacing: 16px;
             Text {
                 text: root.state.done;
@@ -52,9 +125,11 @@ export component SignInDialog inherits Card {
             }
         }
         if root.state.done == "": VerticalLayout {
-            spacing: 10px;
-            FormLabel { text: "Server"; }
-            LineEdit {
+            padding: 20px;
+            padding-top: 16px;
+            spacing: 8px;
+            FormLabel { text: "Server address"; }
+            server-input := LineEdit {
                 accessible-label: "Server";
                 placeholder-text: "https://lode.example.com";
                 text: root.state.server;
@@ -62,8 +137,17 @@ export component SignInDialog inherits Card {
                 edited(t) => { root.state.server = t; root.server-edited(t); }
                 accepted => { root.submit(); }
             }
+            if root.state.probe != "": ProbeLine {
+                state: root.state;
+                use-suggested => {
+                    server-input.text = root.state.suggested;
+                    root.state.server = root.state.suggested;
+                    root.server-edited(root.state.suggested);
+                }
+            }
             if root.state.sso-label != "": VerticalLayout {
-                spacing: 6px;
+                spacing: 8px;
+                padding-top: 4px;
                 Button {
                     text: "Sign in with " + root.state.sso-label;
                     primary: true;
@@ -80,8 +164,9 @@ export component SignInDialog inherits Card {
                     accessible-label: "Browser sign-in";
                     accessible-value: self.text;
                 }
-                Muted {
-                    text: root.state.password-login ? "Or sign in with a password:" : "Password sign-in is for server administrators only.";
+                if root.state.password-login: OrLine { text: "or with a password"; }
+                if !root.state.password-login: Muted {
+                    text: "Password sign-in is for server administrators only.";
                     wrap: word-wrap;
                 }
             }
@@ -104,13 +189,19 @@ export component SignInDialog inherits Card {
             }
             if root.state.error.shown: ErrorBanner { error: root.state.error; }
             HorizontalLayout {
-                alignment: end;
                 spacing: 8px;
+                padding-top: 4px;
+                Muted {
+                    text: root.blocked ? "Fix the address to sign in." : "";
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    font-size: 12px;
+                }
                 Button { text: "Cancel"; enabled: !root.state.busy || root.state.waiting; clicked => { root.close(); } }
                 Button {
                     text: root.state.busy && !root.state.waiting ? "Signing in…" : "Sign in";
                     primary: root.state.sso-label == "";
-                    enabled: !root.state.busy;
+                    enabled: !root.state.busy && !root.blocked;
                     clicked => { root.submit(); }
                 }
             }
