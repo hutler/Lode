@@ -1432,3 +1432,57 @@ async fn view_show_preview_exclude_include_and_refuse() {
         .unwrap_err();
     assert_ne!(err.code, "internal", "{err:?}");
 }
+
+#[tokio::test]
+async fn commit_and_shelve_require_trust_for_workspace_validators() {
+    let s = setup().await;
+    s.server
+        .commit_files(
+            "game",
+            "main",
+            &[
+                (
+                    ".lodeconfig",
+                    br#"[[validate.script]]
+name = "text"
+run = "tools/check.py"
+paths = ["*.txt"]
+"#,
+                ),
+                ("tools/check.py", b"pass\n"),
+            ],
+        )
+        .await;
+    let root = checked_out(&s).await;
+    let path = std::path::Path::new(&root).join("a.txt");
+    std::fs::write(&path, "pending edit\n").unwrap();
+
+    let commit = s
+        .desk
+        .commit(root.clone(), vec!["a.txt".into()], "Edit".into())
+        .await;
+    let shelf = s
+        .desk
+        .shelve(
+            root.clone(),
+            ShelveRequest {
+                paths: vec!["a.txt".into()],
+                message: Some("Edit".into()),
+                ..Default::default()
+            },
+        )
+        .await;
+    for result in [commit, shelf] {
+        let err = result.unwrap_err();
+        assert_eq!(err.code, "validation_untrusted", "{err:?}");
+        assert_eq!(
+            err.details["scripts"],
+            serde_json::json!(["tools/check.py"])
+        );
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "pending edit\n");
+    assert!(s.desk.shelves(root, true, None).await.unwrap()["shelves"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
