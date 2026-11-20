@@ -8,10 +8,12 @@
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Engine,
-    [string]$Output = (Join-Path $PSScriptRoot "..\Build"),
+    [string]$Output = "",
     [string]$Platforms = "Win64"
 )
 $ErrorActionPreference = "Stop"
+# Set here, not in param(): Windows PowerShell 5.1 leaves $PSScriptRoot empty in parameter defaults.
+if (-not $Output) { $Output = Join-Path $PSScriptRoot "..\Build" }
 $Plugin = Resolve-Path (Join-Path $PSScriptRoot "..\LodeSourceControl\LodeSourceControl.uplugin")
 $Uat = Join-Path $Engine "Engine\Build\BatchFiles\RunUAT.bat"
 if (-not (Test-Path $Uat)) { throw "RunUAT.bat not found under $Engine. Pass the engine folder, such as C:\Program Files\Epic Games\UE_5.8." }
