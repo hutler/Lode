@@ -1,0 +1,70 @@
+name: desk
+
+# Lode Desk, the desktop client in `desk/`. It builds against the Lode core at the version
+# pinned in desk/Cargo.toml, so it runs only when Desk itself changes: a change to the core
+# never has to fix Desk in the same pull request. `core-main` (weekly and by hand) builds Desk
+# against the core on main instead, to show early what the next pin move will need.
+
+on:
+  push:
+    branches: [main]
+    paths: ["desk/**", ".github/workflows/desk.yml"]
+  pull_request:
+    paths: ["desk/**", ".github/workflows/desk.yml"]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: desk
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  desk:
+    name: Lode Desk (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desk
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      # The Slint screens, light and dark, for visual review.
+      - run: cargo run --example screenshots -- target/screenshots
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: lode-desk-slint-screenshots
+          path: desk/target/screenshots/
+
+  core-main:
+    name: Lode Desk against the core on main
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+      - name: Build and test with the core from this checkout
+        run: scripts/with-local-core.sh cargo test

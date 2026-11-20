@@ -1,2 +1,2 @@
 # Signed test files must keep their exact bytes.
-lode/crates/lode-desk/tests/fixtures/* -text
+desk/tests/fixtures/* -text

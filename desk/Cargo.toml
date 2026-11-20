@@ -22,7 +22,7 @@ homepage = "https://github.com/hutler/Lode"
 publisher = "SimpleDevOps"
 authors = ["The SimpleDevOps contributors"]
 copyright = "Copyright the SimpleDevOps contributors"
-license-file = "../../LICENSE"
+license-file = "../LICENSE"
 category = "DeveloperTool"
 binaries = [{ path = "lode-desk", main = true }]
 icons = ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.png", "icons/icon.icns", "icons/icon.ico"]
@@ -76,10 +76,11 @@ slint-build = "1.18"
 embed-resource = "3"
 
 [dependencies]
-lode-build = { path = "../lode-build" }
-lode-client = { path = "../lode-client" }
-lode-ops = { path = "../lode-ops" }
-lode-core = { path = "../lode-core" }
+# The Lode core, at a pinned version (see "The core version" in README.md). Desk moves to a new
+# core in its own change: set the same `rev` (or `tag`) on all six lines and run `cargo update`.
+lode-client = { git = "https://github.com/hutler/Lode", rev = "d6b7e4135bf292ae9f1828ddc6026d46575e8579" }
+lode-ops = { git = "https://github.com/hutler/Lode", rev = "d6b7e4135bf292ae9f1828ddc6026d46575e8579" }
+lode-core = { git = "https://github.com/hutler/Lode", rev = "d6b7e4135bf292ae9f1828ddc6026d46575e8579" }
 base64 = "0.22"
 directories = "6"
 # Decodes the two sides of an image diff (Slint takes pixels); already in the tree through rfd.
@@ -102,9 +103,9 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 [dev-dependencies]
 i-slint-backend-testing = "=1.18.1"
 png = "0.17"
-lode-proto = { path = "../lode-proto" }
-lode-server = { path = "../lode-server" }
-lode-testkit = { path = "../lode-testkit" }
+lode-proto = { git = "https://github.com/hutler/Lode", rev = "d6b7e4135bf292ae9f1828ddc6026d46575e8579" }
+lode-server = { git = "https://github.com/hutler/Lode", rev = "d6b7e4135bf292ae9f1828ddc6026d46575e8579" }
+lode-testkit = { git = "https://github.com/hutler/Lode", rev = "d6b7e4135bf292ae9f1828ddc6026d46575e8579" }
 minisign = "0.10.0"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
