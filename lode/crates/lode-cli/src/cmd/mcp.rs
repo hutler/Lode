@@ -235,6 +235,17 @@ impl Worker {
                 };
                 cmd::locks::locks(&ctx, args).await
             }
+            "validate" => {
+                let i: Validate = parse(input)?;
+                let args = cmd::validate::ValidateArgs {
+                    paths: confine_all(root, &i.paths)?,
+                    changelist: i.changelist,
+                    script: i.script,
+                    // Trusting the depot's scripts is the person's decision, never the agent's.
+                    trust: false,
+                };
+                cmd::validate::validate(&ctx, args).await
+            }
             "conflicts" => {
                 let i: Conflicts = parse(input)?;
                 conflicts(&ctx, root, i).await
@@ -649,6 +660,15 @@ struct Branches {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct Validate {
+    #[serde(default)]
+    paths: Vec<String>,
+    changelist: Option<String>,
+    script: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Locks {
     #[serde(default)]
     paths: Vec<String>,
@@ -949,7 +969,9 @@ fn tools(can_write: bool) -> Vec<Tool> {
             "shelve",
             "Put local changes on a shelf on the server, for a person to review and submit. \
              Afterwards the changes are taken out of the workspace unless `keep`. With \
-             `update`, replace the content of an existing shelf of yours.",
+             `update`, replace the content of an existing shelf of yours. The depot's \
+             validation scripts run first; a failure is the error `validation_failed` with \
+             each script's problems in `details.results` (fix them and shelve again).",
             schema(
                 json!({
                     "description": { "type": "string", "description": "What the changes do and why" },
@@ -1013,6 +1035,23 @@ fn tools(can_write: bool) -> Vec<Tool> {
                 json!({
                     "paths": paths_prop("Only locks under this one file or directory"),
                     "mine": { "type": "boolean", "description": "Only your own locks" }
+                }),
+                &[],
+            ),
+        ),
+        Tool::new(
+            "validate",
+            "Run the depot's validation scripts (`[validate]` in .lodeconfig) on the local \
+             changes, as `shelve` and `commit` will. Answers `passed` and per script its \
+             `outcome` (passed, failed, error, skipped) and `problems` (path, line, level, \
+             message). Call it before `shelve` when the depot has content rules. \
+             `validation_untrusted` means the person has not allowed this depot's scripts to \
+             run on this computer yet: ask them to run `lode validate --trust`.",
+            schema(
+                json!({
+                    "paths": paths_prop("Only changes to these files or directories"),
+                    "changelist": { "type": "string", "description": "Only this changelist" },
+                    "script": { "type": "string", "description": "Only this script, by name" }
                 }),
                 &[],
             ),
@@ -1117,7 +1156,9 @@ fn tools(can_write: bool) -> Vec<Tool> {
         t.push(Tool::new(
             "commit",
             "Send local changes to the server as a new revision on the workspace's branch. \
-             Prefer `shelve` unless you were asked to commit.",
+             Prefer `shelve` unless you were asked to commit. The depot's validation scripts \
+             run first (`validation_failed` on failure), and a branch that takes shelves only \
+             refuses with `shelf_required`: shelve instead.",
             schema(
                 json!({
                     "message": { "type": "string", "description": "Commit message" },
