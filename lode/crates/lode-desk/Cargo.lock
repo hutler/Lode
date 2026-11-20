@@ -3308,6 +3308,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-build"
+version = "0.2.0"
+
+[[package]]
 name = "lode-client"
 version = "0.2.0"
 dependencies = [
@@ -3352,6 +3356,7 @@ dependencies = [
  "embed-resource",
  "i-slint-backend-testing",
  "image",
+ "lode-build",
  "lode-client",
  "lode-core",
  "lode-ops",
@@ -3538,6 +3543,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "instant-acme",
+ "lode-build",
  "lode-core",
  "lode-meta",
  "lode-proto",

@@ -149,9 +149,12 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Arc::new(term::Terminal::new(cli.json)),
     )?;
     if cli.version {
-        let v = env!("CARGO_PKG_VERSION");
-        ctx.out.line(format!("lode {v}"));
-        return Ok(json!({ "version": v, "api": lode_proto::consts::API_VERSION }));
+        ctx.out.line(format!("lode {}", lode_build::VERSION));
+        return Ok(json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "build": lode_build::VERSION,
+            "api": lode_proto::consts::API_VERSION,
+        }));
     }
     match cli.command {
         None => Err(OpError::usage("no command given; see `lode --help`")),

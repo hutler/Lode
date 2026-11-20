@@ -148,7 +148,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     }
     let recent = Rc::new(VecModel::<Recent>::default());
     let workspaces = Rc::new(VecModel::<WorkspaceTab>::default());
-    window.set_version(env!("CARGO_PKG_VERSION").into());
+    window.set_version(lode_build::VERSION.into());
     window.set_recent(ModelRc::from(Rc::clone(&recent)));
     window.set_workspaces(ModelRc::from(Rc::clone(&workspaces)));
     let change_rows = Rc::new(VecModel::<ChangeRow>::default());

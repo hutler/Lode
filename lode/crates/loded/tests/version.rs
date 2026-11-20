@@ -9,5 +9,5 @@ fn prints_workspace_version() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(text.trim(), concat!("loded ", env!("CARGO_PKG_VERSION")));
+    assert_eq!(text.trim(), format!("loded {}", lode_build::VERSION));
 }

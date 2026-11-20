@@ -128,7 +128,7 @@ impl<'a> Page<'a> {
             super::assets::JS_PATH,
             refresh,
             server_name(ctx),
-            env!("CARGO_PKG_VERSION"),
+            lode_build::VERSION,
             nav,
             who,
             note,

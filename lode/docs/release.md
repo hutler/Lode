@@ -47,15 +47,35 @@ These are set up once, by someone with admin rights on the repository.
 ## Before the tag
 
 - [ ] `main` is green in `.github/workflows/lode.yml`, including the Lode Desk jobs.
-- [ ] The version is the same in `lode/Cargo.toml` (workspace) and
-      `lode/crates/lode-desk/Cargo.toml`. The workflow takes the version from the tag, so these
-      only matter for builds without a tag, but they should agree.
+- [ ] The version in `lode/Cargo.toml` (workspace) is the tag's, and
+      `lode/crates/lode-desk/Cargo.toml` agrees. The programs report the workspace version, so
+      the workflow stops if it differs from the tag.
 - [ ] `docs/UPGRADING.md` says what changes for people upgrading a server, if anything.
 - [ ] The user guide and the Lode Desk guide describe what changed; the PDF is regenerated.
 - [ ] A manual run of the workflow ("Run workflow" on `lode-release`) passed on the commit to
       be tagged. It builds everything without publishing; its `lode-desk-release` artifact
       holds the installers and, when the update key is set, a `latest.json` checked against
       `lode/crates/lode-desk/packaging/feed.schema.json`.
+
+## Build versions
+
+Every commit builds programs that say which commit they came from, so a build from any push
+to `main` can be told apart from the release and from other pushes. `lode --version`,
+`loded --version`, `/api/v1/info` (`server_version`), the admin pages and Lode Desk's About
+show it; `lode --version --json` has it as `build`. The crate `lode-build` works it out in its
+`build.rs`:
+
+| Built from | Build version |
+|---|---|
+| The commit tagged `lode-v0.2.0` | `0.2.0` |
+| Five commits later, at `4a33c89` | `0.2.0+5.g4a33c89` |
+| A shallow clone, no tag reachable | `0.2.0+g4a33c89` |
+| No Git (a source archive, the Docker build) | `0.2.0` |
+| `LODE_BUILD_VERSION` set | that value |
+
+The part after `+` is SemVer build metadata: version comparisons (`lode self-update`, Lode Desk
+updates, the Unreal plugin's minimum version) use the release version and ignore it. Nothing
+needs bumping by hand for this; the release version in `Cargo.toml` changes only for a release.
 
 ## The tag
 
