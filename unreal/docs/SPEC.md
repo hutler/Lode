@@ -4,7 +4,7 @@ Status: draft v0.1, 2026-11-12. Licence: Apache-2.0. Language: C++ (Unreal Engin
 
 ## 1. Purpose
 
-Lode is built for teams with code plus large binary files, and Unreal projects are the main case. This plugin makes Lode appear in the Unreal Editor as a revision control provider, next to the built-in Perforce, Git and Subversion providers. People who never open a terminal can then lock an asset, get the latest files, submit, and shelve work for review.
+Lode is built for teams with code plus large binary files, and Unreal projects are the main case. This plugin makes Lode appear in the Unreal Editor as a revision control provider, next to the editor's built-in providers. People who never open a terminal can then lock an asset, get the latest files, submit, and shelve work for review.
 
 It is planned from the start, together with Lode itself, so that Lode's command line gives an editor what it needs before that interface is frozen.
 
@@ -22,7 +22,7 @@ It is planned from the start, together with Lode itself, so that Lode's command 
 
 - Talking to the Lode server directly, or linking Lode's Rust code into the editor.
 - Branch creation, switching and merging from the editor. These stay in the `lode` command.
-- Showing build results from UmpaLumpa in the editor. A later version can read Lode's checks.
+- Showing build results from a build server in the editor. A later version can read Lode's checks.
 - Engines before Unreal Engine 5, and any runtime (non-editor) module.
 
 ## 3. How it works
@@ -157,5 +157,5 @@ If measurements in task T04 show that process start time dominates, the fallback
 - [x] **Which engine versions?** 5.8 only, the current release. Moving to a newer engine means checking the interface again against its headers.
 - [x] **Accept the proposed Lode task** for items 4, 7, 8 and 9 of section 5? Done in Lode T071, released in 0.2.0.
 - [x] **Who may break a lock from the editor?** Nobody in version 1; admins use `lode unlock --force`.
-- [x] **Show checks on shelves in the editor?** Not in version 1; later, once the UmpaLumpa integration runs.
+- [x] **Show checks on shelves in the editor?** Not in version 1; later, once a build server reports checks.
 - [ ] **Items 13 to 16 of section 5.** Proposed to Lode; the plugin has workarounds for each.

@@ -9,7 +9,7 @@ Status: draft v0.1 · Licence: Apache-2.0 · Language: Rust
 Lode is a centralized, open-source version control system for small teams (up to about 100
 users) that work with a mix of source code and large binary assets.
 
-It takes Subversion's simple model as the base, adds the few Perforce features such teams miss
+It takes Subversion's simple model as the base, adds the few features such teams miss
 (exclusive locks, shelves, changelists), and treats AI agents as first-class users through MCP.
 
 ## 2. Goals
@@ -27,7 +27,7 @@ It takes Subversion's simple model as the base, adds the few Perforce features s
 ## 3. Non-goals (v1)
 
 - Offline or distributed commits. A commit needs the server.
-- Perforce-style per-file integration history and complex client view mappings.
+- Per-file integration history and complex client view mappings.
 - Built-in code review UI, issue tracking, or server-side scripting.
 - Replication, edge servers, clustering.
 - Keyword expansion, line-ending conversion, versioned empty directories.

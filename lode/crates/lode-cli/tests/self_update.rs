@@ -49,7 +49,7 @@ async fn serve(release: Release) -> String {
                     })
                     .collect();
                 Json(serde_json::json!([
-                    { "tag_name": "umpalumpa-v9.0.0", "assets": [] },
+                    { "tag_name": "other-v9.0.0", "assets": [] },
                     { "tag_name": r.tag, "draft": false, "prerelease": false, "assets": assets },
                 ]))
             }),
