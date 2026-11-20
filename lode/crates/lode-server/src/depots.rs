@@ -115,6 +115,15 @@ pub async fn create_depot(state: &AppState, caller: &Caller, name: &str) -> ApiR
                     format!("depot `{owned}` already exists"),
                 )));
             }
+            if tx.trashed_depot(&owned)?.is_some() {
+                return Ok(Err(ApiError::new(
+                    lode_core::ErrorCode::Conflict,
+                    format!(
+                        "a depot named `{owned}` is in the trash; restore it, or erase it for \
+                         good with a forced delete, before using the name again"
+                    ),
+                )));
+            }
             Ok(Ok(tx.create_depot(&owned, now)?))
         })
         .await??;

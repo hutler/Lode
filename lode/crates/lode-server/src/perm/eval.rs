@@ -443,6 +443,7 @@ mod tests {
                 disabled: false,
                 created_at: 0,
                 sso_id: None,
+                deleted_at: None,
             },
             scopes: scopes.iter().map(|s| (*s).to_owned()).collect(),
             token_id: TokenId(1),

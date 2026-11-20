@@ -312,3 +312,58 @@ async fn webhooks_from_the_command_line() {
     let list = admin.json(&["admin", "webhook", "list", "game"]);
     assert_eq!(list["webhooks"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn users_and_depots_are_deleted() {
+    let server = TestServer::start().await;
+    let admin = TestWorkspace::new(&server).with_token(server.admin_token());
+    admin.json(&["admin", "depot", "create", "game"]);
+    admin.json(&["admin", "depot", "create", "art"]);
+    json_in(
+        &admin,
+        &["admin", "user", "create", "ana", "--password-stdin"],
+        "password-ana\n",
+    );
+    admin.json(&["admin", "agent", "create", "bot", "--owner", "ana"]);
+
+    // Without a terminal, --yes is required.
+    let (code, err) = admin.json_status(&["admin", "user", "delete", "ana"]);
+    assert_eq!(code, 2, "{err}");
+    let r = admin.json(&["admin", "user", "delete", "ana", "--yes"]);
+    assert_eq!(r["name"], "ana");
+    assert_eq!(r["agents"][0], "bot");
+    assert!(names(&admin.json(&["admin", "user", "list"]), "principals")
+        .iter()
+        .all(|n| n != "ana"));
+
+    // A depot goes to the trash and comes back.
+    let (code, _) = admin.json_status(&["admin", "depot", "delete", "game"]);
+    assert_eq!(code, 2);
+    let r = admin.json(&["admin", "depot", "delete", "game", "--yes"]);
+    assert_eq!(r["purged"], false);
+    assert!(r["purge_after"].is_string());
+    assert_eq!(
+        names(&admin.json(&["admin", "depot", "trash"]), "depots"),
+        ["game"]
+    );
+    assert_eq!(
+        names(&admin.json(&["admin", "depot", "list"]), "depots"),
+        ["art"]
+    );
+    admin.json(&["admin", "depot", "restore", "game"]);
+    assert_eq!(
+        names(&admin.json(&["admin", "depot", "list"]), "depots"),
+        ["art", "game"]
+    );
+
+    // --force erases at once.
+    let r = admin.json(&["admin", "depot", "delete", "art", "--force", "--yes"]);
+    assert_eq!(r["purged"], true);
+    assert!(names(&admin.json(&["admin", "depot", "trash"]), "depots").is_empty());
+    assert_eq!(
+        names(&admin.json(&["admin", "depot", "list"]), "depots"),
+        ["game"]
+    );
+    let (code, err) = admin.json_status(&["admin", "depot", "restore", "art"]);
+    assert_eq!(code, 1, "{err}");
+}

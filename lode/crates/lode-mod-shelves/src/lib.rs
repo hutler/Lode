@@ -904,6 +904,19 @@ impl Module for Shelves {
         NAME
     }
 
+    fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
+        tx.conn().execute(
+            "DELETE FROM mod_shelves_change WHERE shelf_id IN \
+             (SELECT id FROM mod_shelves_shelf WHERE depot_id = ?1)",
+            [depot.0],
+        )?;
+        tx.conn().execute(
+            "DELETE FROM mod_shelves_shelf WHERE depot_id = ?1",
+            [depot.0],
+        )?;
+        Ok(())
+    }
+
     fn scopes(&self) -> &'static [ScopeDef] {
         SCOPES
     }

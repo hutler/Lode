@@ -161,6 +161,25 @@ Content still in the head of an active branch cannot be obliterated; commit its 
 fixed file first. Copies outside the server are not reached: backups, workspaces and shared
 caches on people's computers, and webhook payloads already sent.
 
+### 5.8a Deleting users and depots
+
+- `lode admin user delete NAME` (and `lode admin agent delete NAME`) deletes a principal.
+  A deleted user cannot sign in, every token stops working, and they disappear from lists;
+  their group memberships, access rules that name them and their locks are removed, and
+  the agents they own are deleted with them. History keeps showing their name, so the
+  name stays taken and cannot be given to someone else. The built-in `admin` cannot be
+  deleted, nor can an administrator delete themselves. To stop access only for a while,
+  disable instead.
+- `lode admin depot delete NAME` moves a depot to the trash after the name is typed again
+  as confirmation (`--yes` for scripts). It disappears for everyone at once and keeps its
+  name; `lode admin depot restore NAME` brings it back unchanged within 30 days, and
+  `lode admin depot trash` lists what is there. After 30 days the server erases it: its
+  stored content, history, access rules and module data (locks, shelves, checks,
+  webhooks). Its name is then free for a new depot.
+- `--force` erases at once, for a depot that is live or already in the trash. This
+  cannot be undone. As with obliterate, copies outside the server (backups, workspaces,
+  shared caches) are not reached.
+
 ### 5.9 Single sign-on (0.2)
 
 - A server with `[oidc]` in `loded.toml` signs people in through an OpenID Connect provider
@@ -190,7 +209,8 @@ caches on people's computers, and webhook payloads already sent.
 - Pages: an overview of the server's health (version, uptime, TLS and certificate expiry,
   storage and database size, counts, backups, last maintenance per depot, recent commits);
   depots with branches, revisions, locks, garbage collection, checks and obliterate (dry run
-  first); users, agents, groups and tokens (a new token's value shown once); access rules
+  first, and deleting a depot to the trash or for good, with the trash to restore from);
+  users, agents, groups and tokens (a new token's value shown once; deleting a user); access rules
   with a check that names the deciding rule; webhooks and their deliveries (with the
   module); the effective settings with secrets hidden.
 - Every action goes through the API, so permissions, validation and errors match
@@ -351,6 +371,8 @@ lode view show|include|exclude
 lode checks <rN | shelf-id[@version]>          (with the checks module)
 lode mcp
 lode admin depot|user|agent|group|token|acl|gc|fsck …
+lode admin depot delete <name> [--force] | restore <name> | trash
+lode admin user|agent delete <name>
 lode admin webhook add|list|remove|deliveries|ping …   (with the webhooks module)
 ```
 

@@ -247,8 +247,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
-/// Runs the server until `shutdown` completes: modules' workers, the event dispatcher and
-/// scheduled backups start and stop with it.
+/// Runs the server until `shutdown` completes: modules' workers, the event dispatcher, the
+/// trash purge and scheduled backups start and stop with it.
 pub(crate) async fn serve(
     cfg: ServerConfig,
     shutdown: impl Future<Output = ()> + Send + 'static,
@@ -261,6 +261,10 @@ pub(crate) async fn serve(
     });
     let (stop_workers, stop) = lode_server::module::Stop::new();
     let mut workers = lode_server::module::spawn_workers(&state, &stop);
+    workers.push(tokio::spawn(lode_server::trash::run_purge(
+        state.clone(),
+        stop.clone(),
+    )));
     if let Some(schedule) = cfg.backup.schedule() {
         tracing::info!(
             dir = %schedule.dir.display(),

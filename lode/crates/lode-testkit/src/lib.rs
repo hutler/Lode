@@ -358,7 +358,18 @@ impl TestServer {
     /// Commits `files` (path, content) as additions or modifications to `branch` with the
     /// admin token, uploading what is missing. Returns the revision.
     pub async fn commit_files(&self, depot: &str, branch: &str, files: &[(&str, &[u8])]) -> u64 {
-        let c = self.admin();
+        self.commit_files_as(&self.admin(), depot, branch, files)
+            .await
+    }
+
+    /// Like [`Self::commit_files`], as the principal `c` is signed in as.
+    pub async fn commit_files_as(
+        &self,
+        c: &Client,
+        depot: &str,
+        branch: &str,
+        files: &[(&str, &[u8])],
+    ) -> u64 {
         let head = must(c.branch(depot, branch).await, "branch").head_rev;
         let mut changes = Vec::new();
         for (path, content) in files {

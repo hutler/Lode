@@ -171,10 +171,12 @@ and ship their own migrations.
 ### 4.2 Core schema
 
 ```sql
-depot      (id INTEGER PK, name TEXT UNIQUE, next_rev INTEGER NOT NULL, created_at)
+depot      (id INTEGER PK, name TEXT UNIQUE, next_rev INTEGER NOT NULL, created_at,
+            deleted_at NULL, purged_at NULL)   -- in the trash / erased tombstone (schema 6)
 principal  (id INTEGER PK, kind TEXT CHECK(kind IN ('user','agent')), name TEXT UNIQUE,
             display_name, owner_id REFERENCES principal, password_hash, disabled INT, created_at,
-            sso_id TEXT NULL)   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
+            sso_id TEXT NULL,   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
+            deleted_at NULL)    -- deleted: row kept for history, name stays taken (schema 6)
 grp        (id INTEGER PK, name TEXT UNIQUE)
 grp_member (grp_id, principal_id, PRIMARY KEY (grp_id, principal_id))
 token      (id INTEGER PK, principal_id, name, hash BLOB UNIQUE, scopes TEXT,
@@ -204,6 +206,18 @@ maintenance_run (depot_id, kind TEXT /*gc|fsck|fsck-full*/, at, objects_checked,
 ```
 
 `rev_change` is the per-path history index (drives `log <path>`, `blame`, rename following).
+
+**Deleted principals and depots (schema 6).** Deleting a principal sets `deleted_at` and
+`disabled`, clears `password_hash` and `sso_id`, and removes its tokens, `grp_member` rows
+and `acl` rows with it as subject, raising the access epoch. Revisions keep pointing at the
+row, so history shows the name; lookups by name (`principal_by_name`, `principal_by_sso`)
+and `principals()` leave deleted rows out. A deleted depot first only gets `deleted_at`
+("the trash"): `depot_by_name` and `depots()` leave it out, its name stays taken, and
+clearing the column restores it. Purging (after 30 days, checked hourly, or at once with
+`force`) removes the depot's objects from storage, then in one transaction every module's
+rows (`Module::purge_depot`) and the core rows keyed by `depot_id`; the depot row stays as a
+tombstone named `#<id>` with `purged_at`, so the id is never reused. Content first, rows
+second: an interrupted purge leaves the depot in the trash and the next attempt finishes.
 `rev_meta` keys are namespaced `<module>.<key>`.
 
 ### 4.3 Branch ancestry
@@ -298,6 +312,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /auth/sso/start?redirect_uri=&state=&code_challenge=[&token_name=]` · `GET /auth/sso/callback` · `POST /auth/sso/token {code, code_verifier}` | Single sign-on (§7). Start and callback are browser pages; the token call answers like a password login |
 | `GET/POST/DELETE /tokens[/{id}]` | Own tokens |
 | `GET/POST /depots` | List; create (admin) |
+| `DELETE /admin/depots/{d}` `{confirm, force?}` · `POST /admin/depots/{d}/restore` · `GET /admin/trash` | Delete a depot: `confirm` must repeat its name. Without `force` it goes to the trash, answering `{name, purged: false, purge_after}`; with `force` it is erased at once (also from the trash), `{name, purged: true}`. A depot already in the trash is `conflict` without `force`. Restore answers the depot; the trash lists `{depots: [{name, created_at, deleted_at, purge_after}]}`. Server admin only |
 | `GET/POST /depots/{d}/branches` · `GET/PATCH …/{b}` | List, create, show, archive |
 | `GET /depots/{d}/branches/{b}/merge-info?source=<branch>` | Merging `source` into `b`: `{target, source, branch_point, merged: [{rev, from_rev, to_rev}], base, source_head, pending}`. `branch_point` is the newest revision both histories share; `merged` the ranges from `source` recorded in `b`'s history (§4.3); `base` the merge base of SPEC §5.4; `pending` how many source revisions come after it. Needs read on both branches |
 | `POST /depots/{d}/objects/missing` | `{ids}` → `{missing}`; at most 10,000 ids per call. Needs scope `write` or `shelve`, like upload, because the answer reveals whether content exists |
@@ -311,7 +326,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision of a text file: `{path, rev, id, lines: [{rev, text}], revisions: [{rev, branch, author, created_at, summary}], truncated?}`. Walks `rev_change` for the path along the branch chain and through `copy_from`, diffing successive versions line by line (Myers, 2 s per pair before settling for a less minimal diff). At most 1000 versions and 1 MiB per version; history the caller cannot read ends the walk. Either sets `truncated`, and the oldest version looked at takes the remaining lines. Binary or symlink is `invalid_request`, over 1 MiB `too_large`. Results are cached in memory (64 entries) by depot, path and the revision of the newest version, which fixes the history walked; walks cut short by access are not cached |
 | `GET /admin/acl/check?principal=&depot=&branch=&path=` | The level the rules give a principal there, `{principal, depot, branch, path, level: read|write|admin|null, depot_admin?, matched?, decided_by?}`, evaluated as for a token with every scope; `matched` are the ids of the rules that apply and `decided_by` the one that set the level (T142). Server admin only |
-| `…/admin/principals[/{name}]` (`GET`/`POST` with optional `sso`; `PATCH` `{disabled?, password?, sso?}`, an empty `sso` removes the link), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
+| `…/admin/principals[/{name}]` (`GET`/`POST` with optional `sso`; `PATCH` `{disabled?, password?, sso?}`, an empty `sso` removes the link; `DELETE` deletes a user with the agents they own, or an agent, answering `{name, agents}`, refused for `admin` and for the caller), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
 
 Manifests and trees are filtered by read permission and by `include`/`exclude` (repeatable
@@ -480,6 +495,8 @@ pub trait Module: Send + Sync + 'static {
     fn worker(&self, ctx: ModuleCtx, stop: Stop) -> Option<BoxFuture<'static, ()>> { None } // background task
     fn gc_roots(&self, tx: &dyn Reads, depot: DepotId, out: &mut dyn FnMut(ObjectId)) -> Result<(), MetaError> { Ok(()) }
     fn mcp_tools(&self, ctx: ModuleCtx) -> Vec<ToolDef> { vec![] }       // tools this module offers to agents
+    fn purge_depot(&self, tx: &WriteTx, depot: DepotId) -> Result<(), MetaError> { Ok(()) } // depot erased: drop its rows
+    fn principal_deleted(&self, tx: &WriteTx, p: PrincipalId, now: Millis) -> Result<(), MetaError> { Ok(()) } // e.g. release locks
 }
 ```
 

@@ -203,6 +203,14 @@ impl BlobStore for FsBlobStore {
         }
     }
 
+    async fn delete_depot(&self, depot: DepotId) -> Result<()> {
+        match tfs::remove_dir_all(self.depot_dir(depot)).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     fn list(&self, depot: DepotId) -> BoxStream<'_, Result<(ObjectId, SystemTime)>> {
         let dir = self.depot_dir(depot).join("objects");
         stream::once(async move {

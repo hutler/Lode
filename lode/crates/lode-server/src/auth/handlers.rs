@@ -11,8 +11,8 @@ use lode_meta::{
     MetaError, NewPrincipal, PrincipalId, PrincipalKind, PrincipalRow, Reads, TokenRow,
 };
 use lode_proto::admin::{
-    CreateGroupRequest, CreatePrincipalRequest, GroupList, GroupView, PatchPrincipalRequest,
-    PrincipalList,
+    CreateGroupRequest, CreatePrincipalRequest, DeletePrincipalResponse, GroupList, GroupView,
+    PatchPrincipalRequest, PrincipalList,
 };
 use lode_proto::auth::{
     CreateTokenRequest, CreateTokenResponse, LoginRequest, LoginResponse, PrincipalView, TokenList,
@@ -41,7 +41,10 @@ pub fn routes() -> Router<AppState> {
             paths::ADMIN_PRINCIPALS,
             get(list_principals).post(create_principal),
         )
-        .route(paths::ADMIN_PRINCIPAL, patch(patch_principal))
+        .route(
+            paths::ADMIN_PRINCIPAL,
+            patch(patch_principal).delete(delete_principal),
+        )
         .route(
             paths::ADMIN_PRINCIPAL_TOKENS,
             get(list_tokens_for).post(create_token_for),
@@ -496,6 +499,21 @@ async fn create_principal(
     let now = state.clock().now_ms();
     let name = req.name;
     let display_name = req.display_name;
+    let taken = name.clone();
+    if state
+        .meta()
+        .read(move |tx| tx.deleted_principal(&taken))
+        .await?
+        .is_some()
+    {
+        return Err(ApiError::new(
+            ErrorCode::Conflict,
+            format!(
+                "the name `{name}` belonged to a deleted user or agent; it stays taken because \
+                 history shows it"
+            ),
+        ));
+    }
     let owner = req.owner;
     let owner_for_tx = owner.clone();
     let created = state
@@ -587,6 +605,63 @@ async fn patch_principal(
         })
         .await
         .map_err(map_conflict)??;
+    Ok(Json(result))
+}
+
+/// Deletes a user or agent (and a user's agents): they can no longer sign in, disappear from
+/// lists, and lose their tokens, group memberships, access rules and locks. Their name stays
+/// in history and stays taken.
+async fn delete_principal(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(name): Path<String>,
+) -> ApiResult<Json<DeletePrincipalResponse>> {
+    caller.require_scope(crate::auth::SCOPE_ADMIN)?;
+    state.permissions().require_server_admin(&caller)?;
+    if name == crate::auth::ADMIN_USER {
+        return Err(ApiError::invalid_request(
+            "the built-in administrator cannot be deleted; disable it instead",
+        ));
+    }
+    let me = caller.principal.id;
+    let modules = state.modules().to_vec();
+    let now = state.clock().now_ms();
+    let result = state
+        .meta()
+        .write(move |tx| {
+            let Some(p) = tx.principal_by_name(&name)? else {
+                return Ok(Err(ApiError::not_found("no such principal")));
+            };
+            let agents: Vec<PrincipalRow> = tx
+                .principals()?
+                .into_iter()
+                .filter(|a| a.kind == PrincipalKind::Agent && a.owner_id == Some(p.id))
+                .collect();
+            if p.id == me || agents.iter().any(|a| a.id == me) {
+                return Ok(Err(ApiError::invalid_request(
+                    "you cannot delete yourself; sign in as another administrator",
+                )));
+            }
+            for victim in agents.iter().chain(std::iter::once(&p)) {
+                tx.delete_principal(victim.id, now)?;
+                for m in &modules {
+                    m.principal_deleted(tx, victim.id, now)?;
+                }
+            }
+            Ok(Ok(DeletePrincipalResponse {
+                name: p.name,
+                agents: agents.into_iter().map(|a| a.name).collect(),
+            }))
+        })
+        .await??;
+    state.permissions().reload(state.meta()).await?;
+    state.outbox_notify().notify_one();
+    tracing::info!(
+        principal = %result.name,
+        agents = result.agents.len(),
+        by = %caller.principal.name,
+        "principal deleted"
+    );
     Ok(Json(result))
 }
 

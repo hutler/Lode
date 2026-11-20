@@ -700,7 +700,12 @@ docker exec lode loded fsck --config /var/lib/lode/loded.toml</code></pre>
 
 <h1>6. Depots</h1>
 <pre><code>lode admin depot create game
-lode admin depot list</code></pre>
+lode admin depot list
+lode admin depot delete game          # asks you to type the name; to the trash for 30 days
+lode admin depot trash                # what is in the trash and when it will be erased
+lode admin depot restore game         # back, unchanged
+lode admin depot delete game --force  # erase now: history and content, cannot be undone</code></pre>
+<p>A deleted depot disappears for everyone at once but stays in the trash for 30 days, keeping its name, then the server erases it. The admin web page offers the same, with a Trash section on the Depots page.</p>
 <p>A new depot has one branch, <code>main</code>, at revision <code>r1</code> with no files. Depots are independent: each has its own revision numbers, storage and permissions. Use separate depots for unrelated projects, and one depot for things that change together.</p>
 
 <h1>7. Users, groups and tokens</h1>
@@ -708,11 +713,13 @@ lode admin depot list</code></pre>
 lode admin user passwd bob
 lode admin user disable bob           # blocks sign-in and every token, keeps history
 lode admin user disable bob --enable  # lets him in again
+lode admin user delete bob            # for good: tokens, groups, rules, locks and his agents go
 lode admin user list
 lode admin group create artists
 lode admin group add artists bob
 lode admin group add artists carol
 lode admin group list</code></pre>
+<p>A deleted user's name stays in history and cannot be given to anyone else. Prefer <code>disable</code> when the person may come back.</p>
 <p>Accounts are never deleted, because history refers to them. Disable them instead. In scripts, <code>--password-stdin</code> reads the password from standard input.</p>
 <h3>Single sign-on</h3>
 <p>People can sign in through your company's identity provider instead of a Lode password. Any provider that speaks OpenID Connect works: Google, Microsoft Entra ID, Okta, Keycloak and others. Register Lode there as a web application with the redirect address <code>https://lode.example.com/api/v1/auth/sso/callback</code> (your server's address), then add to <code>loded.toml</code> and restart the server:</p>

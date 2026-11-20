@@ -56,18 +56,19 @@ fn get_opt_id(r: &Row<'_>, i: usize) -> rusqlite::Result<Option<ObjectId>> {
     .transpose()
 }
 
-const DEPOT_COLS: &str = "id, name, next_rev, created_at";
+const DEPOT_COLS: &str = "id, name, next_rev, created_at, deleted_at";
 fn depot_row(r: &Row<'_>) -> rusqlite::Result<DepotRow> {
     Ok(DepotRow {
         id: DepotId(r.get(0)?),
         name: r.get(1)?,
         next_rev: get_u64(r, 2)?,
         created_at: r.get(3)?,
+        deleted_at: r.get(4)?,
     })
 }
 
 const PRINCIPAL_COLS: &str =
-    "id, kind, name, display_name, owner_id, password_hash, disabled, created_at, sso_id";
+    "id, kind, name, display_name, owner_id, password_hash, disabled, created_at, sso_id, deleted_at";
 fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
     let kind: String = r.get(1)?;
     Ok(PrincipalRow {
@@ -84,6 +85,7 @@ fn principal_row(r: &Row<'_>) -> rusqlite::Result<PrincipalRow> {
         disabled: r.get::<_, i64>(6)? != 0,
         created_at: r.get(7)?,
         sso_id: r.get(8)?,
+        deleted_at: r.get(9)?,
     })
 }
 
@@ -223,19 +225,34 @@ pub trait Reads {
     /// The connection the queries run on.
     fn db(&self) -> &Connection;
 
-    /// A depot by name.
+    /// A live depot by name; depots in the trash are left out.
     fn depot_by_name(&self, name: &str) -> Result<Option<DepotRow>> {
         Ok(self
             .db()
             .query_row(
-                &format!("SELECT {DEPOT_COLS} FROM depot WHERE name = ?1"),
+                &format!("SELECT {DEPOT_COLS} FROM depot WHERE name = ?1 AND deleted_at IS NULL"),
                 [name],
                 depot_row,
             )
             .optional()?)
     }
 
-    /// A depot by id.
+    /// A depot in the trash, by name. Purged depots have lost their name and are not found.
+    fn trashed_depot(&self, name: &str) -> Result<Option<DepotRow>> {
+        Ok(self
+            .db()
+            .query_row(
+                &format!(
+                    "SELECT {DEPOT_COLS} FROM depot \
+                     WHERE name = ?1 AND deleted_at IS NOT NULL AND purged_at IS NULL"
+                ),
+                [name],
+                depot_row,
+            )
+            .optional()?)
+    }
+
+    /// A depot by id, live, in the trash or purged.
     fn depot(&self, id: DepotId) -> Result<Option<DepotRow>> {
         Ok(self
             .db()
@@ -247,11 +264,21 @@ pub trait Reads {
             .optional()?)
     }
 
-    /// Every depot, by name.
+    /// Every live depot, by name.
     fn depots(&self) -> Result<Vec<DepotRow>> {
-        let mut st = self
-            .db()
-            .prepare(&format!("SELECT {DEPOT_COLS} FROM depot ORDER BY name"))?;
+        let mut st = self.db().prepare(&format!(
+            "SELECT {DEPOT_COLS} FROM depot WHERE deleted_at IS NULL ORDER BY name"
+        ))?;
+        let rows = st.query_map([], depot_row)?;
+        collect(rows)
+    }
+
+    /// Depots in the trash and not yet purged, oldest deletion first.
+    fn trashed_depots(&self) -> Result<Vec<DepotRow>> {
+        let mut st = self.db().prepare(&format!(
+            "SELECT {DEPOT_COLS} FROM depot WHERE deleted_at IS NOT NULL AND purged_at IS NULL \
+             ORDER BY deleted_at, name"
+        ))?;
         let rows = st.query_map([], depot_row)?;
         collect(rows)
     }
@@ -268,12 +295,30 @@ pub trait Reads {
             .optional()?)
     }
 
-    /// A principal by name.
+    /// A principal by name; deleted principals are left out.
     fn principal_by_name(&self, name: &str) -> Result<Option<PrincipalRow>> {
         Ok(self
             .db()
             .query_row(
-                &format!("SELECT {PRINCIPAL_COLS} FROM principal WHERE name = ?1"),
+                &format!(
+                    "SELECT {PRINCIPAL_COLS} FROM principal WHERE name = ?1 AND deleted_at IS NULL"
+                ),
+                [name],
+                principal_row,
+            )
+            .optional()?)
+    }
+
+    /// A deleted principal by name. Its name stays taken, so it can be told apart from a
+    /// free name.
+    fn deleted_principal(&self, name: &str) -> Result<Option<PrincipalRow>> {
+        Ok(self
+            .db()
+            .query_row(
+                &format!(
+                    "SELECT {PRINCIPAL_COLS} FROM principal \
+                     WHERE name = ?1 AND deleted_at IS NOT NULL"
+                ),
                 [name],
                 principal_row,
             )
@@ -285,17 +330,20 @@ pub trait Reads {
         Ok(self
             .db()
             .query_row(
-                &format!("SELECT {PRINCIPAL_COLS} FROM principal WHERE sso_id = ?1"),
+                &format!(
+                    "SELECT {PRINCIPAL_COLS} FROM principal \
+                     WHERE sso_id = ?1 AND deleted_at IS NULL"
+                ),
                 [sso_id.to_lowercase()],
                 principal_row,
             )
             .optional()?)
     }
 
-    /// Every principal, by name.
+    /// Every principal that is not deleted, by name.
     fn principals(&self) -> Result<Vec<PrincipalRow>> {
         let mut st = self.db().prepare(&format!(
-            "SELECT {PRINCIPAL_COLS} FROM principal ORDER BY name"
+            "SELECT {PRINCIPAL_COLS} FROM principal WHERE deleted_at IS NULL ORDER BY name"
         ))?;
         let rows = st.query_map([], principal_row)?;
         collect(rows)
@@ -925,6 +973,81 @@ impl WriteTx<'_> {
             )
             .map_err(unique("single sign-on identity"))?;
         self.expect_one(n, "principal")
+    }
+
+    /// Deletes a principal: marks it deleted and disabled, drops its password, single
+    /// sign-on link, tokens, group memberships and the access rules that name it. The row
+    /// stays, because revisions refer to it. Raises the access epoch.
+    pub fn delete_principal(&self, id: PrincipalId, now: Millis) -> Result<()> {
+        self.expect_one(
+            self.conn().execute(
+                "UPDATE principal SET deleted_at = ?2, disabled = 1, password_hash = NULL, \
+                 sso_id = NULL WHERE id = ?1 AND deleted_at IS NULL",
+                params![id.0, now],
+            )?,
+            "principal",
+        )?;
+        self.conn()
+            .execute("DELETE FROM token WHERE principal_id = ?1", [id.0])?;
+        self.conn()
+            .execute("DELETE FROM grp_member WHERE principal_id = ?1", [id.0])?;
+        self.conn().execute(
+            "DELETE FROM acl WHERE subject_kind = 'user' AND subject_id = ?1",
+            [id.0],
+        )?;
+        self.bump_access_epoch()
+    }
+
+    /// Moves a live depot to the trash. Its name stays taken until it is purged.
+    pub fn trash_depot(&self, id: DepotId, now: Millis) -> Result<()> {
+        self.expect_one(
+            self.conn().execute(
+                "UPDATE depot SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                params![id.0, now],
+            )?,
+            "depot",
+        )
+    }
+
+    /// Takes a depot out of the trash.
+    pub fn restore_depot(&self, id: DepotId) -> Result<()> {
+        self.expect_one(
+            self.conn().execute(
+                "UPDATE depot SET deleted_at = NULL WHERE id = ?1 AND purged_at IS NULL",
+                [id.0],
+            )?,
+            "depot",
+        )
+    }
+
+    /// Erases a depot's history and records from the core tables, keeping only its row as a
+    /// tombstone, renamed to `#<id>` (not a valid depot name) so the name is free again and
+    /// the id is never reused. Module tables are the modules' job, in the same transaction
+    /// and before this. Raises the access epoch, since rules for the depot go too.
+    pub fn purge_depot_rows(&self, id: DepotId, now: Millis) -> Result<()> {
+        let c = self.conn();
+        for table in [
+            "rev_meta",
+            "rev_merge",
+            "rev_change",
+            "revision",
+            "branch",
+            "acl",
+            "obliterated",
+            "maintenance_run",
+            "outbox",
+        ] {
+            c.execute(&format!("DELETE FROM {table} WHERE depot_id = ?1"), [id.0])?;
+        }
+        self.expect_one(
+            c.execute(
+                "UPDATE depot SET name = '#' || id, purged_at = ?2, \
+                 deleted_at = coalesce(deleted_at, ?2) WHERE id = ?1 AND purged_at IS NULL",
+                params![id.0, now],
+            )?,
+            "depot",
+        )?;
+        self.bump_access_epoch()
     }
 
     /// Enables or disables a principal.

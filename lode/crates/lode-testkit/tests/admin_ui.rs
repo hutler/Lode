@@ -1411,3 +1411,139 @@ async fn the_settings_page_shows_the_configuration_without_secrets() {
     assert!(!page.body.contains("very-secret-value"));
     assert!(text.contains("[modules]"), "{text}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_user_is_deleted_after_typing_their_name() {
+    let s = server().await;
+    add_user(&s, "ana").await;
+    s.create_agent("ana-bot", "ana", &["read"]).await;
+    let mut b = signed_in(&s).await;
+    let page = b.get("/admin/people/ana").await;
+    assert!(
+        page.doc()
+            .text()
+            .contains("Their agents are deleted with them: ana-bot."),
+        "{}",
+        page.body
+    );
+
+    let wrong = b
+        .submit(
+            &page,
+            "/admin/people/ana/delete",
+            &[("confirm_name", "bob")],
+        )
+        .await;
+    assert_eq!(wrong.status, 200);
+    assert!(
+        error_text(&wrong).contains("exactly"),
+        "{}",
+        error_text(&wrong)
+    );
+    assert!(!principal(&s, "ana").await.disabled);
+
+    let r = b
+        .submit(
+            &page,
+            "/admin/people/ana/delete",
+            &[("confirm_name", "ana")],
+        )
+        .await;
+    assert_eq!(r.status, 303, "{}", r.body);
+    assert_eq!(r.location(), Some("/admin/people"));
+    let people = b.get("/admin/people").await;
+    assert_eq!(note(&people), "ana deleted, with agents ana-bot.");
+    assert!(people
+        .doc()
+        .find(&|n| n.name == "a" && n.attr("href") == Some("/admin/people/ana"))
+        .is_empty());
+    assert_eq!(b.get("/admin/people/ana").await.status, 404);
+
+    // The built-in administrator has no delete form.
+    let admin = b.get("/admin/people/admin").await;
+    assert!(admin
+        .doc()
+        .find(&|n| n.attr("action") == Some("/admin/people/admin/delete"))
+        .is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_depot_goes_to_the_trash_and_comes_back_or_is_erased() {
+    let s = server().await;
+    s.create_depot("game").await;
+    s.create_depot("art").await;
+    let mut b = signed_in(&s).await;
+    let page = b.get("/admin/depots/game").await;
+
+    let wrong = b
+        .submit(
+            &page,
+            "/admin/depots/game/delete",
+            &[("confirm_name", "gam")],
+        )
+        .await;
+    assert_eq!(wrong.status, 200);
+    assert!(
+        error_text(&wrong).contains("exactly"),
+        "{}",
+        error_text(&wrong)
+    );
+
+    let r = b
+        .submit(
+            &page,
+            "/admin/depots/game/delete",
+            &[("confirm_name", "game")],
+        )
+        .await;
+    assert_eq!(r.status, 303, "{}", r.body);
+    let list = b.get("/admin/depots").await;
+    assert!(
+        note(&list).starts_with("Depot game moved to the trash"),
+        "{}",
+        note(&list)
+    );
+    let trash = list.doc();
+    let trash = trash.by_id("trash").expect("a trash section");
+    assert!(trash.text().contains("Trash"));
+    assert_eq!(b.get("/admin/depots/game").await.status, 404);
+
+    // Restore brings it back.
+    let r = b.submit(&list, "/admin/trash/game/restore", &[]).await;
+    assert_eq!(r.location(), Some("/admin/depots/game"), "{}", r.body);
+    assert_eq!(b.get("/admin/depots/game").await.status, 200);
+    assert!(s.admin().trash().await.unwrap().depots.is_empty());
+
+    // Into the trash again, then erased from it.
+    let page = b.get("/admin/depots/game").await;
+    b.submit(
+        &page,
+        "/admin/depots/game/delete",
+        &[("confirm_name", "game")],
+    )
+    .await;
+    let list = b.get("/admin/depots").await;
+    let r = b
+        .submit(
+            &list,
+            "/admin/trash/game/erase",
+            &[("confirm_name", "game")],
+        )
+        .await;
+    assert_eq!(r.status, 303, "{}", r.body);
+    assert_eq!(note(&b.get("/admin/depots").await), "Depot game erased.");
+    assert!(s.admin().trash().await.unwrap().depots.is_empty());
+
+    // Erase now, straight from the depot page.
+    let page = b.get("/admin/depots/art").await;
+    let r = b
+        .submit(
+            &page,
+            "/admin/depots/art/delete",
+            &[("confirm_name", "art"), ("force", "1")],
+        )
+        .await;
+    assert_eq!(r.status, 303, "{}", r.body);
+    assert!(s.admin().trash().await.unwrap().depots.is_empty());
+    assert!(s.admin().depots().await.unwrap().depots.is_empty());
+}

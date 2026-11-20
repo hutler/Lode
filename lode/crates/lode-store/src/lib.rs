@@ -101,4 +101,23 @@ pub trait BlobStore: Send + Sync {
     /// Every object of the depot with its modification time. Files that are not objects
     /// are skipped.
     fn list(&self, depot: DepotId) -> BoxStream<'_, Result<(ObjectId, SystemTime)>>;
+
+    /// Removes every object of the depot, for a depot purged for good. Running it again
+    /// after an interruption finishes the job. The default deletes object by object.
+    async fn delete_depot(&self, depot: DepotId) -> Result<()> {
+        use futures::StreamExt;
+        let mut ids = Vec::new();
+        let mut objects = self.list(depot);
+        while let Some(item) = objects.next().await {
+            ids.push(item?.0);
+        }
+        drop(objects);
+        for id in ids {
+            match self.delete(depot, &id).await {
+                Ok(()) | Err(StoreError::NotFound(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
 }

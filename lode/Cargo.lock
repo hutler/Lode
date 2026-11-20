@@ -1724,6 +1724,7 @@ dependencies = [
  "futures",
  "lode-client",
  "lode-core",
+ "lode-meta",
  "lode-mod-checks",
  "lode-mod-locks",
  "lode-mod-mcp",

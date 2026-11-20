@@ -135,6 +135,14 @@ impl Api<'_> {
         self.send(Method::DELETE, path, None).await.map(|_| ())
     }
 
+    /// `DELETE path` without a body, answering JSON.
+    pub(crate) async fn delete_json<T: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<T, ErrorBody> {
+        self.json(Method::DELETE, path, None).await
+    }
+
     /// `DELETE path` with a JSON body, answering JSON.
     pub(crate) async fn delete_with<B: Serialize, T: DeserializeOwned>(
         &self,
