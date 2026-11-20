@@ -379,6 +379,7 @@ impl Worker {
                     keep_locks: i.keep_locks,
                     changelist: None,
                     force_flow: false,
+                    override_reason: None,
                 };
                 cmd::commit::commit(&ctx, args).await
             }

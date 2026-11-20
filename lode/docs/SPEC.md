@@ -162,6 +162,14 @@ json = ["**/*.json", "**/*.uproject", "**/*.uplugin"]  # the default: merged key
 A tool name only names a tool: the command it runs is set by each person in their own
 `settings.toml` (`[merge_tools.unreal]`), so a depot can never make Lode start a program.
 
+**Shelf-only branches (0.5).** `[branches] shelf_only = ["main", "release/*"]` makes the
+matching branches take changes through shelf submits only. Any other commit to them, a merge
+result included, is refused with `shelf_required`: shelve it and submit the shelf. A depot
+admin (a user, not an agent) can still commit directly with `lode commit --override
+"REASON"`; the revision records who and why (`provenance.shelf_only_override`, shown by
+`lode log`), so a broken check can never lock a branch. With the shelves module off, only
+such overrides can commit to a shelf-only branch.
+
 A commit that would leave `.lodeconfig` unparseable is refused. Rules are always taken from
 the branch head, never from the change being committed.
 
@@ -337,8 +345,10 @@ from the shelves module); the MCP module hosts them and adds the tools that read
   named principal, before a shelf can be submitted to matching branches. A submit that does
   not meet them is refused (`checks_required`). Because checks belong to a shelf version,
   changing the shelf means it must pass again.
-- Direct commits are not gated. Lode stores and enforces results; it does not run builds and
-  has no review workflow.
+- Direct commits are not gated by checks. To make every change on a branch go through a
+  gated shelf, list it in `[branches].shelf_only` (§5.6, 0.5). Lode stores and enforces
+  results; it does not run builds (except the validation scripts of §6.8) and has no review
+  workflow.
 
 ### 6.7 Event feed (0.4, on by default)
 

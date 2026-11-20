@@ -257,7 +257,13 @@ them); `--all` reverts everything and forgets the merge as well.
 
 ### `lode commit`
 
-`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool, "forced_flow": bool }`
+`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool, "forced_flow": bool, "shelf_only_override": bool }`
+
+A branch listed in `[branches].shelf_only` refuses the commit with exit 1, code
+`shelf_required` and `details: { "branch" }` (0.5). The workspace's `.lodeconfig` is checked
+before anything is uploaded; the server checks again against the branch head.
+`--override "REASON"` commits anyway for a depot admin and sets `shelf_only_override`; anyone
+else gets `permission_denied`.
 
 `forced_flow` (0.4) is true when the commit asked the server to skip the stream rules
 (`--force-flow`, or a `lode merge --force-flow` before it). The server refuses that with

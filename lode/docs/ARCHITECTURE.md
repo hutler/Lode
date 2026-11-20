@@ -935,8 +935,15 @@ mod_checks_check (depot_id, target_kind TEXT /*revision|shelf*/, target_id INT, 
   shelf being submitted, so a shelf cannot remove the rule it must satisfy.
 - Binding each name to a reporter is what makes the gate meaningful: holding the `checks`
   scope is not enough to pass someone else's required check.
-- Direct commits are not gated. Making a branch accept shelf submits only is a separate
-  feature, not in this version.
+- Direct commits are not gated by checks. `[branches].shelf_only` (0.5) closes that gap in
+  the commit engine itself, not in this module: after reading the head configuration and
+  before writing anything, a commit to a matching branch whose origin is not
+  `Module { "shelves", … }` is refused `shelf_required` (`details: {branch}`), unless the
+  request carries the extension `override_shelf_only` with a reason (1 to 500 bytes) and the
+  caller is a user with the `admin` scope and admin on the depot (otherwise
+  `permission_denied`). The engine then sets `provenance.shelf_only_override = {by, reason}`
+  (stripped from anything a client sends) and `revision.created` carries
+  `shelf_only_override: true`.
 
 ### 9.6 Feed (`lode-mod-feed`)
 
