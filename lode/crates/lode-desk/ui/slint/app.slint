@@ -5,15 +5,17 @@ import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, Hor
 import { Links, LinkChoice, LinkState, RefusedLinkDialog, ChooseWorkspaceDialog, NoWorkspaceDialog } from "links.slint";
 import { Updates, UpdateOffer, UpdateSettings, UpdateBanner, UpdateSettingsPanel } from "updates.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
+import { Icon, Icons } from "icons.slint";
+import { Logo } from "brand.slint";
 import { SignInDialog, SignInState } from "sign_in.slint";
-import { ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget, NewChangelistDialog, RenameChangelistDialog, CommitChangelistDialog, ConfirmDialog, MoveDialog, MessagesDialog } from "changes.slint";
+import { Changes, ChangesView, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget, NewChangelistDialog, RenameChangelistDialog, CommitChangelistDialog, ConfirmDialog, MoveDialog, MessagesDialog } from "changes.slint";
 import { CheckoutDialog, CheckoutState } from "checkout.slint";
 import { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, LocksView, ShelvesView, LockDialog, TeamConfirmDialog, ShelveDialog, SubmitShelfDialog, UnshelvedDialog } from "team.slint";
 import { CheckBadgeInfo, CheckRow } from "checks.slint";
 import { Branching, BranchRow, BranchesState, NewBranchState, MergeState, OutcomeRow, OutcomeState, SideLine, RegionRow, ConflictState, FolderRow, ViewState, BranchesDialog, NewBranchDialog, MergeDialog, OutcomeDialog, ConflictView, ViewEditor } from "branches.slint";
 import { Reading, Pane, RevRow, RevDetail, RevFile, HistoryState, BlameLine, BlameState, Span, DiffCell, DiffRow, DiffNote, DiffState, ImageState, HistoryView, BlameView, DiffView } from "history.slint";
 
-export { ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
+export { Changes, ErrorInfo, SignInState, CheckoutState, ChangesState, ChangeRow, FileDetails, ListDialogState, MoveTarget }
 export { Team, LockRow, LocksState, LockDialogState, ShelfRow, ShelfFileRow, ShelfDetail, ShelvesState, ShelveDialogState, SubmitState, UnshelvedState, ConfirmState, CheckBadgeInfo, CheckRow }
 export { Branching, BranchRow, BranchesState, NewBranchState, MergeState, OutcomeRow, OutcomeState, SideLine, RegionRow, ConflictState, FolderRow, ViewState }
 export { Links, LinkChoice, LinkState, Updates, UpdateOffer, UpdateSettings }
@@ -25,6 +27,17 @@ export struct Recent {
     depot: string,
     branch: string,
     host: string,
+    /// The depot's first letter, for its badge.
+    initial: string,
+}
+
+/// A server this app has signed in to or opened a workspace from.
+export struct ServerRowData {
+    url: string,
+    host: string,
+    signed-in: bool,
+    /// "alice", "Not signed in" and the like.
+    status: string,
 }
 
 /// An open workspace, for its tab and sidebar.
@@ -41,69 +54,155 @@ export struct WorkspaceTab {
 
 export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
 
+/// A tab of the window's title strip: Workspaces, then one per open workspace.
 component Tab inherits Rectangle {
     in property <string> text;
     in property <bool> selected;
     in property <bool> closable;
+    in property <bool> dot;
     callback clicked();
     callback close();
-    height: 36px;
-    min-width: 110px;
-    background: root.selected ? Palette.background : transparent;
-    border-radius: 6px;
+    height: 34px;
+    min-width: 96px;
+    background: root.selected ? Palette.background : touch.has-hover ? Palette.background.transparentize(0.5) : transparent;
+    border-radius: 7px;
     accessible-role: tab;
     accessible-label: root.text;
     accessible-item-selected: root.selected;
     accessible-action-default => { root.clicked(); }
-    TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    // Squares the bottom corners so the tab joins the window below it.
+    if root.selected: Rectangle { y: parent.height - 8px; height: 8px; background: Palette.background; }
     HorizontalLayout {
         padding-left: 12px;
         padding-right: root.closable ? 4px : 12px;
-        spacing: 4px;
+        spacing: 7px;
+        if root.dot: Rectangle {
+            width: 7px;
+            height: 7px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3.5px;
+            background: #2f6fe4;
+        }
         Text {
             text: root.text;
             vertical-alignment: center;
             font-weight: root.selected ? 600 : 400;
-            color: Palette.foreground;
+            color: root.selected ? Palette.foreground : Palette.foreground.transparentize(0.3);
             overflow: elide;
         }
         if root.closable: Rectangle {
-            width: 24px;
+            width: 22px;
             accessible-role: button;
             accessible-label: "Close " + root.text;
             accessible-action-default => { root.close(); }
             close-touch := TouchArea { clicked => { root.close(); } }
             background: close-touch.has-hover ? Palette.alternate-background : transparent;
             border-radius: 4px;
-            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground; }
+            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground.transparentize(0.4); }
         }
     }
 }
 
+/// A big button of the toolbar: an icon over its name, and a count of what waits for it.
+component ToolButton inherits Rectangle {
+    in property <string> text;
+    in property <string> label: root.text;
+    in property <string> icon;
+    in property <int> count;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: max(60px, name.preferred-width + 14px);
+    height: 50px;
+    border-radius: 7px;
+    background: touch.has-hover && root.enabled ? Palette.alternate-background : transparent;
+    opacity: root.enabled ? 1 : 0.4;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    VerticalLayout {
+        padding-top: 5px;
+        padding-bottom: 4px;
+        spacing: 3px;
+        HorizontalLayout {
+            alignment: center;
+            Icon { name: root.icon; size: 22px; }
+        }
+        name := Text {
+            text: root.text;
+            font-size: 11.5px;
+            horizontal-alignment: center;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+    }
+    if root.count > 0: Rectangle {
+        x: parent.width / 2 + 4px;
+        y: 2px;
+        height: 15px;
+        width: max(15px, n.preferred-width + 8px);
+        border-radius: 7.5px;
+        background: Palette.accent-background;
+        n := Text {
+            text: root.count;
+            font-size: 10px;
+            font-weight: 700;
+            color: Palette.accent-foreground;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+}
+
+component ToolSep inherits Rectangle {
+    width: 13px;
+    Rectangle { x: 6px; width: 1px; y: 8px; height: parent.height - 16px; background: Palette.border; }
+}
+
 component RecentRow inherits Rectangle {
     in property <Recent> item;
+    in property <int> index;
     callback open();
     callback forget();
-    height: 64px;
+    height: 60px;
     background: touch.has-hover ? Palette.alternate-background : transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     accessible-role: button;
     accessible-label: "Open " + root.item.depot + " at " + root.item.path;
     accessible-action-default => { root.open(); }
     touch := TouchArea { clicked => { root.open(); } }
     HorizontalLayout {
         padding: 10px;
-        spacing: 8px;
+        spacing: 12px;
+        Rectangle {
+            width: 38px;
+            height: 38px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 9px;
+            background: Math.mod(root.index, 4) == 0 ? #3f6df2 : Math.mod(root.index, 4) == 1 ? #7a5af5 : Math.mod(root.index, 4) == 2 ? #0f9f8f : #c2410c;
+            Text {
+                text: root.item.initial;
+                font-size: 17px;
+                font-weight: 700;
+                color: white;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+        }
         VerticalLayout {
             spacing: 2px;
+            alignment: center;
             HorizontalLayout {
                 spacing: 8px;
-                Text { text: root.item.depot; font-weight: 600; color: Palette.foreground; }
+                Text { text: root.item.depot; font-weight: 600; font-size: 14px; color: Palette.foreground; }
                 Badge { text: root.item.branch; }
                 Rectangle {}
             }
-            Muted { text: root.item.path; overflow: elide; }
-            Muted { text: root.item.host; font-size: 11px; }
+            Muted { text: root.item.path + "  ·  " + root.item.host; overflow: elide; font-size: 12px; }
         }
         Rectangle {
             width: 28px;
@@ -115,28 +214,72 @@ component RecentRow inherits Rectangle {
             forget-touch := TouchArea { clicked => { root.forget(); } }
             background: forget-touch.has-hover ? Palette.background : transparent;
             border-radius: 4px;
-            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground; }
+            Text { text: "×"; horizontal-alignment: center; vertical-alignment: center; color: Palette.foreground.transparentize(0.4); }
         }
     }
 }
 
+/// A server this app knows, on the Workspaces tab.
+component ServerRow inherits Rectangle {
+    in property <ServerRowData> item;
+    callback sign-in();
+    callback sign-out();
+    height: 46px;
+    Rectangle { y: 0; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: root.item.host; color: Palette.foreground; overflow: elide; accessible-role: none; }
+            Text {
+                text: root.item.status;
+                font-size: 11.5px;
+                overflow: elide;
+                color: root.item.signed-in ? Palette.foreground.transparentize(0.4) : #dc2626;
+                accessible-role: text;
+                accessible-label: root.item.host;
+                accessible-value: self.text;
+            }
+        }
+        if root.item.signed-in: Button {
+            text: "Sign out";
+            accessible-label: "Sign out of " + root.item.host;
+            y: (parent.height - self.preferred-height) / 2;
+            height: self.preferred-height;
+            clicked => { root.sign-out(); }
+        }
+        if !root.item.signed-in: Button {
+            text: "Sign in";
+            accessible-label: "Sign in to " + root.item.host;
+            primary: true;
+            y: (parent.height - self.preferred-height) / 2;
+            height: self.preferred-height;
+            clicked => { root.sign-in(); }
+        }
+    }
+}
+
+/// The Workspaces tab: every workspace opened before, how to get a new one, and the servers.
 component Home inherits Rectangle {
     in property <[Recent]> recent;
+    in property <[ServerRowData]> servers;
     in property <string> version;
     in property <ErrorInfo> error;
     callback open(string);
     callback forget(string);
     callback open-folder();
     callback check-out();
-    callback sign-in();
+    callback sign-in(string);
+    callback sign-out(string);
     callback about();
     callback dismiss-error();
     HorizontalLayout {
-        padding: 24px;
-        spacing: 24px;
         VerticalLayout {
-            spacing: 12px;
-            Title { text: "Recent workspaces"; }
+            padding: 22px;
+            spacing: 10px;
+            horizontal-stretch: 1;
+            Title { text: "Workspaces"; }
             if root.error.shown: ErrorBanner {
                 error: root.error;
                 dismissable: true;
@@ -147,78 +290,374 @@ component Home inherits Rectangle {
                 wrap: word-wrap;
             }
             ListView {
-                for r in root.recent: RecentRow {
+                for r[i] in root.recent: RecentRow {
                     item: r;
+                    index: i;
                     open => { root.open(r.path); }
                     forget => { root.forget(r.path); }
                 }
             }
         }
-        VerticalLayout {
-          alignment: start;
-          Card {
-            width: 300px;
-            VerticalLayout {
-                padding: 20px;
-                spacing: 10px;
-                alignment: start;
-                HorizontalLayout {
+        Rectangle {
+            width: 310px;
+            background: Palette.alternate-background;
+            Rectangle { x: 0; width: 1px; background: Palette.border; }
+            ScrollView {
+                VerticalLayout {
+                    padding: 20px;
                     spacing: 10px;
-                    Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 8px;
-                        background: @linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Logo { size: 36px; }
+                        VerticalLayout {
+                            Text { text: "Lode Desk"; font-size: 18px; font-weight: 700; color: Palette.foreground; }
+                            Muted { text: "Version " + root.version; font-size: 11px; }
+                        }
                     }
-                    VerticalLayout {
-                        Text { text: "Lode Desk"; font-size: 18px; font-weight: 700; color: Palette.foreground; }
-                        Muted { text: "Version " + root.version; font-size: 11px; }
+                    Rectangle { height: 6px; }
+                    Button { text: "Check out a depot…"; primary: true; clicked => { root.check-out(); } }
+                    Button { text: "Open a workspace folder…"; clicked => { root.open-folder(); } }
+                    Button { text: "Sign in to a server…"; clicked => { root.sign-in(""); } }
+                    Rectangle { height: 10px; }
+                    Text { text: "Servers"; font-weight: 700; font-size: 14px; color: Palette.foreground; }
+                    if root.servers.length == 0: Muted { text: "None yet. Sign in to one to check out its depots."; wrap: word-wrap; font-size: 12px; }
+                    for sv in root.servers: ServerRow {
+                        item: sv;
+                        sign-in => { root.sign-in(sv.url); }
+                        sign-out => { root.sign-out(sv.url); }
                     }
+                    Rectangle { height: 10px; }
+                    UpdateSettingsPanel {}
+                    Rectangle { height: 6px; }
+                    Button { text: "About Lode Desk"; clicked => { root.about(); } }
                 }
-                Rectangle { height: 8px; }
-                Button { text: "Check out a depot…"; primary: true; clicked => { root.check-out(); } }
-                Button { text: "Open a workspace folder…"; clicked => { root.open-folder(); } }
-                Button { text: "Sign in to a server…"; clicked => { root.sign-in(); } }
-                Rectangle { height: 8px; }
-                UpdateSettingsPanel {}
-                Rectangle { height: 8px; }
-                Button { text: "About Lode Desk"; clicked => { root.about(); } }
             }
-          }
         }
     }
 }
 
-component Field inherits HorizontalLayout {
-    in property <string> label;
-    in property <string> value;
-    spacing: 8px;
-    Muted { text: root.label; width: 70px; accessible-role: none; }
-    Text { text: root.value; color: Palette.foreground; overflow: elide; accessible-role: text; accessible-label: root.label; accessible-value: root.value; }
+/// A heading of the sidebar.
+component SideHeader inherits Text {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    color: Palette.foreground.transparentize(0.5);
+    accessible-role: none;
 }
 
-/// A section of the workspace's sidebar.
-component NavButton inherits Rectangle {
+/// An entry of the sidebar.
+component SideItem inherits Rectangle {
     in property <string> text;
+    in property <string> label: root.text;
+    in property <string> icon;
     in property <bool> active;
+    in property <bool> strong;
+    in property <string> count;
+    in property <bool> current;
     callback clicked();
-    height: 30px;
-    border-radius: 4px;
-    background: root.active ? Palette.accent-background.transparentize(0.8)
-        : touch.has-hover ? Palette.background.transparentize(0.5) : transparent;
+    height: 28px;
+    border-radius: 6px;
+    background: root.active ? Palette.accent-background.transparentize(0.82)
+        : touch.has-hover ? Palette.foreground.transparentize(0.93) : transparent;
     accessible-role: tab;
-    accessible-label: root.text;
+    accessible-label: root.label;
     accessible-item-selected: root.active;
     accessible-action-default => { root.clicked(); }
     touch := TouchArea { clicked => { root.clicked(); } }
-    Text {
-        x: 10px;
-        text: root.text;
-        vertical-alignment: center;
-        height: parent.height;
-        font-weight: root.active ? 600 : 400;
-        color: Palette.foreground;
-        accessible-role: none;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        Icon { name: root.icon; size: 15px; y: (parent.height - self.height) / 2; tint: Palette.foreground.transparentize(0.25); }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            font-weight: root.active || root.strong ? 600 : 400;
+            color: Palette.foreground;
+            accessible-role: none;
+        }
+        if root.current: Rectangle {
+            width: 7px;
+            height: 7px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3.5px;
+            background: #16a34a;
+        }
+        if root.count != "": Text {
+            text: root.count;
+            font-size: 11px;
+            vertical-alignment: center;
+            color: Palette.foreground.transparentize(0.45);
+            accessible-role: none;
+        }
+    }
+}
+
+component SideSection inherits VerticalLayout {
+    in property <string> title;
+    spacing: 1px;
+    padding-bottom: 10px;
+    SideHeader { text: root.title; height: 20px; x: 8px; }
+    @children
+}
+
+/// The workspace's tree: its views, branches, changelists, shelves and locks.
+component Sidebar inherits Rectangle {
+    in property <WorkspaceTab> ws;
+    in property <ChangesState> changes;
+    in property <[ChangeRow]> lists;
+    width: 232px;
+    background: Palette.alternate-background;
+    Rectangle { x: parent.width - 1px; width: 1px; background: Palette.border; }
+    ScrollView {
+        VerticalLayout {
+            padding: 8px;
+            padding-top: 10px;
+            alignment: start;
+            SideSection {
+                title: "WORKSPACE";
+                SideItem {
+                    accessible-role: tab;
+                    text: "Changes";
+                    icon: Icons.changes;
+                    count: root.changes.total > 0 ? root.changes.total : "";
+                    active: Reading.pane == Pane.changes || Reading.pane == Pane.conflict;
+                    clicked => { Reading.show-pane(Pane.changes); }
+                }
+                SideItem {
+                    accessible-role: tab;
+                    text: "History";
+                    icon: Icons.history;
+                    active: Reading.pane == Pane.history || Reading.pane == Pane.blame || Reading.pane == Pane.diff;
+                    clicked => { Reading.show-pane(Pane.history); }
+                }
+                SideItem {
+                    accessible-role: tab;
+                    text: "Workspace view";
+                    icon: Icons.eye;
+                    active: Reading.pane == Pane.view;
+                    clicked => { Reading.show-pane(Pane.view); }
+                }
+            }
+            SideSection {
+                title: "BRANCHES";
+                for b in Branching.side-rows: SideItem {
+                    text: b.name;
+                    label: b.current ? "Branch " + root.ws.branch + " at r" + root.ws.rev + ": change branch" : "Show branch " + b.name;
+                    accessible-role: button;
+                    icon: Icons.branch;
+                    strong: b.current;
+                    current: b.current;
+                    clicked => { Branching.open-branch(b.name); }
+                }
+                if Branching.side-rows.length == 0: SideItem {
+                    text: root.ws.branch;
+                    label: "Branch " + root.ws.branch + " at r" + root.ws.rev + ": change branch";
+                    accessible-role: button;
+                    icon: Icons.branch;
+                    strong: true;
+                    current: true;
+                    clicked => { Branching.open-branches(); }
+                }
+            }
+            if root.lists.length > 0: SideSection {
+                title: "CHANGELISTS";
+                for l in root.lists: SideItem {
+                    text: l.key;
+                    label: "Changelist " + l.key;
+                    accessible-role: button;
+                    icon: Icons.list;
+                    count: l.count;
+                    clicked => { Reading.show-pane(Pane.changes); }
+                }
+            }
+            SideSection {
+                title: "SHELVES";
+                SideItem {
+                    accessible-role: tab;
+                    text: "Everyone's";
+                    label: "Shelves";
+                    icon: Icons.shelve;
+                    active: Reading.pane == Pane.shelves && Team.shelves.whose != "mine";
+                    clicked => { Team.set-whose("all"); Reading.show-pane(Pane.shelves); }
+                }
+                SideItem {
+                    accessible-role: tab;
+                    text: "Mine";
+                    label: "My shelves";
+                    icon: Icons.shelve;
+                    active: Reading.pane == Pane.shelves && Team.shelves.whose == "mine";
+                    clicked => { Team.set-whose("mine"); Reading.show-pane(Pane.shelves); }
+                }
+            }
+            SideSection {
+                title: "LOCKS";
+                SideItem {
+                    text: "All on " + root.ws.branch;
+                    label: "Locks";
+                    icon: Icons.lock;
+                    count: Team.locks.loaded ? Team.locks.held : "";
+                    active: Reading.pane == Pane.locks && !Team.mine-only;
+                    clicked => { Team.mine-only = false; Reading.show-pane(Pane.locks); Team.filter-locks(); }
+                }
+                SideItem {
+                    accessible-role: tab;
+                    text: "Held by me";
+                    label: "My locks";
+                    icon: Icons.lock;
+                    count: Team.locks.loaded ? Team.locks.mine : "";
+                    active: Reading.pane == Pane.locks && Team.mine-only;
+                    clicked => { Team.mine-only = true; Reading.show-pane(Pane.locks); Team.filter-locks(); }
+                }
+            }
+        }
+    }
+}
+
+/// The row of actions over a workspace.
+component Toolbar inherits Rectangle {
+    in property <ChangesState> changes;
+    callback commit();
+    callback revert();
+    callback refresh();
+    callback show-folder();
+    property <bool> file-tracked: root.changes.details.shown && root.changes.details.status != "untracked";
+    height: 62px;
+    background: Palette.background;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        padding: 6px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 2px;
+        ToolButton {
+            text: "Commit";
+            label: "Go to commit";
+            icon: Icons.commit;
+            count: root.changes.picked;
+            clicked => { root.commit(); }
+        }
+        ToolButton {
+            text: "Update";
+            label: "Update workspace";
+            icon: Icons.update;
+            count: Branching.behind;
+            enabled: root.changes.busy == "";
+            clicked => { Branching.update(); }
+        }
+        ToolButton {
+            text: "Shelve";
+            label: "Shelve picked files";
+            icon: Icons.shelve;
+            enabled: root.changes.busy == "" && root.changes.picked > 0;
+            clicked => { Team.shelve-picked(); }
+        }
+        ToolButton {
+            text: "Unshelve";
+            label: "Open shelves";
+            icon: Icons.unshelve;
+            clicked => { Reading.show-pane(Pane.shelves); }
+        }
+        ToolSep {}
+        ToolButton {
+            text: "Lock";
+            label: "Lock selected file";
+            icon: Icons.lock;
+            enabled: root.file-tracked && root.changes.details.status != "added" && !root.changes.details.locked;
+            clicked => { Team.lock-selected(); }
+        }
+        ToolButton {
+            text: "Branch";
+            label: "Branches";
+            icon: Icons.branch;
+            clicked => { Branching.open-branches(); }
+        }
+        ToolButton {
+            text: "Merge";
+            label: "Merge into this branch";
+            icon: Icons.merge;
+            enabled: root.changes.busy == "" && Branching.side-rows.length > 1;
+            clicked => { Branching.ask-merge(); }
+        }
+        ToolSep {}
+        ToolButton {
+            text: "Revert";
+            label: "Revert selected";
+            icon: Icons.revert;
+            enabled: root.changes.busy == "" && root.file-tracked;
+            clicked => { root.revert(); }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        ToolButton {
+            text: "Refresh";
+            label: "Refresh workspace";
+            icon: Icons.refresh;
+            clicked => { root.refresh(); }
+        }
+        ToolButton {
+            text: "Show folder";
+            label: "Show the workspace folder";
+            icon: Icons.folder;
+            clicked => { root.show-folder(); }
+        }
+    }
+}
+
+/// The line under the window: where the workspace is and how it stands.
+component StatusBar inherits Rectangle {
+    in property <WorkspaceTab> ws;
+    height: 24px;
+    background: Palette.alternate-background;
+    Rectangle { y: 0; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 16px;
+        HorizontalLayout {
+            spacing: 6px;
+            Rectangle { width: 7px; height: 7px; y: (parent.height - self.height) / 2; border-radius: 3.5px; background: #16a34a; }
+            Muted {
+                text: root.ws.server;
+                font-size: 11.5px;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "Server";
+                accessible-value: root.ws.server;
+            }
+        }
+        HorizontalLayout {
+            spacing: 0;
+            Muted {
+                text: root.ws.branch;
+                font-size: 11.5px;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "Branch";
+                accessible-value: root.ws.branch;
+            }
+            Muted {
+                text: " · r" + root.ws.rev;
+                font-size: 11.5px;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-label: "Revision";
+                accessible-value: root.ws.rev;
+            }
+        }
+        if Branching.behind > 0: Text {
+            text: Branching.behind == 1 ? "1 revision behind. Update to get it." : Branching.behind + " revisions behind. Update to get them.";
+            font-size: 11.5px;
+            vertical-alignment: center;
+            color: #c2410c;
+            accessible-role: text;
+            accessible-label: "Behind";
+            accessible-value: self.text;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Muted { text: root.ws.root; font-size: 11.5px; vertical-alignment: center; overflow: elide; }
     }
 }
 
@@ -226,7 +665,9 @@ component WorkspacePage inherits Rectangle {
     in property <WorkspaceTab> ws;
     in property <ErrorInfo> error;
     in property <ChangesState> changes;
-    in property <[ChangeRow]> rows;
+    in property <[ChangeRow]> picked-rows;
+    in property <[ChangeRow]> pending-rows;
+    in property <[ChangeRow]> lists;
     in-out property <string> message;
     callback dismiss-error();
     callback toggle-file(string);
@@ -244,114 +685,83 @@ component WorkspacePage inherits Rectangle {
     callback revert-selected();
     callback move-selected();
     callback dismiss-changes-error();
-    HorizontalLayout {
-        Rectangle {
-            width: 220px;
-            background: Palette.alternate-background;
+    callback show-folder();
+    VerticalLayout {
+        Toolbar {
+            changes: root.changes;
+            commit => { Reading.show-pane(Pane.changes); }
+            revert => { root.revert-selected(); }
+            refresh => { root.refresh(); }
+            show-folder => { root.show-folder(); }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            Sidebar { ws: root.ws; changes: root.changes; lists: root.lists; }
             VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
-                alignment: start;
-                Text { text: root.ws.depot; font-size: 18px; font-weight: 700; color: Palette.foreground; }
-                Field { label: "Branch"; value: root.ws.branch; }
-                Field { label: "Revision"; value: root.ws.rev; }
-                Field { label: "Server"; value: root.ws.server; }
-                Muted { text: root.ws.root; wrap: word-wrap; font-size: 11px; }
-                Button {
-                    text: "Branches…";
-                    accessible-label: "Branch " + root.ws.branch + " at r" + root.ws.rev + ": change branch";
-                    clicked => { Branching.open-branches(); }
-                }
-                Rectangle { height: 8px; }
-                NavButton {
-                    text: "Changes";
-                    active: Reading.pane == Pane.changes;
-                    clicked => { Reading.show-pane(Pane.changes); }
-                }
-                NavButton {
-                    text: "History";
-                    active: Reading.pane == Pane.history || Reading.pane == Pane.blame || Reading.pane == Pane.diff;
-                    clicked => { Reading.show-pane(Pane.history); }
-                }
-                NavButton {
-                    text: "Locks";
-                    active: Reading.pane == Pane.locks;
-                    clicked => { Reading.show-pane(Pane.locks); }
-                }
-                NavButton {
-                    text: "Shelves";
-                    active: Reading.pane == Pane.shelves;
-                    clicked => { Reading.show-pane(Pane.shelves); }
-                }
-                NavButton {
-                    text: "View";
-                    accessible-label: "Workspace view";
-                    active: Reading.pane == Pane.view;
-                    clicked => { Reading.show-pane(Pane.view); }
-                }
-            }
-        }
-        VerticalLayout {
-            if Links.notice != "": Rectangle {
-                height: notice.preferred-height + 16px;
-                notice := HorizontalLayout {
-                    x: 16px;
-                    y: 8px;
-                    width: parent.width - 32px;
-                    spacing: 8px;
-                    Text {
-                        text: Links.notice;
-                        wrap: word-wrap;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                        color: Palette.foreground;
-                        accessible-role: text;
-                        accessible-label: "Note";
-                        accessible-value: self.text;
+                horizontal-stretch: 1;
+                if Links.notice != "": Rectangle {
+                    height: notice.preferred-height + 16px;
+                    notice := HorizontalLayout {
+                        x: 16px;
+                        y: 8px;
+                        width: parent.width - 32px;
+                        spacing: 8px;
+                        Text {
+                            text: Links.notice;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                            color: Palette.foreground;
+                            accessible-role: text;
+                            accessible-label: "Note";
+                            accessible-value: self.text;
+                        }
+                        Button { text: "Dismiss"; clicked => { Links.notice = ""; } }
                     }
-                    Button { text: "Dismiss"; clicked => { Links.notice = ""; } }
                 }
-            }
-            if root.error.shown: Rectangle {
-                height: banner.preferred-height + 16px;
-                banner := ErrorBanner {
-                    x: 16px;
-                    y: 8px;
-                    width: parent.width - 32px;
-                    error: root.error;
-                    dismissable: true;
-                    dismissed => { root.dismiss-error(); }
+                if root.error.shown: Rectangle {
+                    height: banner.preferred-height + 16px;
+                    banner := ErrorBanner {
+                        x: 16px;
+                        y: 8px;
+                        width: parent.width - 32px;
+                        error: root.error;
+                        dismissable: true;
+                        dismissed => { root.dismiss-error(); }
+                    }
                 }
-            }
-            if Reading.pane == Pane.history: HistoryView { vertical-stretch: 1; }
-            if Reading.pane == Pane.blame: BlameView { vertical-stretch: 1; }
-            if Reading.pane == Pane.diff: DiffView { vertical-stretch: 1; }
-            if Reading.pane == Pane.locks: LocksView { vertical-stretch: 1; branch: root.ws.branch; }
-            if Reading.pane == Pane.shelves: ShelvesView { vertical-stretch: 1; }
-            if Reading.pane == Pane.conflict: ConflictView { vertical-stretch: 1; }
-            if Reading.pane == Pane.view: ViewEditor { vertical-stretch: 1; }
-            if Reading.pane == Pane.changes: ChangesView {
-                vertical-stretch: 1;
-                state: root.changes;
-                rows: root.rows;
-                message <=> root.message;
-                toggle-file(p) => { root.toggle-file(p); }
-                toggle-group(k) => { root.toggle-group(k); }
-                toggle-all => { root.toggle-all(); }
-                select-file(p) => { root.select-file(p); }
-                refresh => { root.refresh(); }
-                new-changelist => { root.new-changelist(); }
-                commit-changelist(n) => { root.commit-changelist(n); }
-                rename-changelist(n) => { root.rename-changelist(n); }
-                delete-changelist(n) => { root.delete-changelist(n); }
-                commit => { root.commit(); }
-                recent-messages => { root.recent-messages(); }
-                add-selected => { root.add-selected(); }
-                revert-selected => { root.revert-selected(); }
-                move-selected => { root.move-selected(); }
-                dismiss-error => { root.dismiss-changes-error(); }
+                if Reading.pane == Pane.history: HistoryView { vertical-stretch: 1; }
+                if Reading.pane == Pane.blame: BlameView { vertical-stretch: 1; }
+                if Reading.pane == Pane.diff: DiffView { vertical-stretch: 1; }
+                if Reading.pane == Pane.locks: LocksView { vertical-stretch: 1; branch: root.ws.branch; }
+                if Reading.pane == Pane.shelves: ShelvesView { vertical-stretch: 1; }
+                if Reading.pane == Pane.conflict: ConflictView { vertical-stretch: 1; }
+                if Reading.pane == Pane.view: ViewEditor { vertical-stretch: 1; }
+                if Reading.pane == Pane.changes: ChangesView {
+                    vertical-stretch: 1;
+                    state: root.changes;
+                    picked-rows: root.picked-rows;
+                    pending-rows: root.pending-rows;
+                    message <=> root.message;
+                    toggle-file(p) => { root.toggle-file(p); }
+                    toggle-group(k) => { root.toggle-group(k); }
+                    toggle-all => { root.toggle-all(); }
+                    select-file(p) => { root.select-file(p); }
+                    refresh => { root.refresh(); }
+                    new-changelist => { root.new-changelist(); }
+                    commit-changelist(n) => { root.commit-changelist(n); }
+                    rename-changelist(n) => { root.rename-changelist(n); }
+                    delete-changelist(n) => { root.delete-changelist(n); }
+                    commit => { root.commit(); }
+                    recent-messages => { root.recent-messages(); }
+                    add-selected => { root.add-selected(); }
+                    revert-selected => { root.revert-selected(); }
+                    move-selected => { root.move-selected(); }
+                    dismiss-error => { root.dismiss-changes-error(); }
+                }
             }
         }
+        StatusBar { ws: root.ws; }
     }
 }
 
@@ -396,6 +806,12 @@ export component AppWindow inherits Window {
     // The open workspace's pending changes (T131).
     in-out property <ChangesState> changes;
     in property <[ChangeRow]> change-rows;
+    /// The picked files, for "To commit", and the rest with their groups, for "Pending".
+    in property <[ChangeRow]> picked-rows;
+    in property <[ChangeRow]> pending-rows;
+    /// The named changelists, for the sidebar.
+    in property <[ChangeRow]> list-rows;
+    in property <[ServerRowData]> servers;
     in-out property <string> commit-message;
     in-out property <ListDialogState> list-dialog;
     in property <[MoveTarget]> move-targets;
@@ -429,6 +845,8 @@ export component AppWindow inherits Window {
     callback move-to(string);
     callback use-message(string);
     callback add-selected();
+    callback sign-out(string);
+    callback show-folder();
 
     changed current-tab => { root.tab-shown(self.current-tab); }
 
@@ -466,16 +884,20 @@ export component AppWindow inherits Window {
             reject
         }
         VerticalLayout {
-            // The tab bar.
+            // The title strip: the app's mark, then the tabs.
             Rectangle {
-                height: 44px;
+                height: 42px;
                 background: Palette.alternate-background;
+                Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
                 HorizontalLayout {
-                    padding: 4px;
-                    spacing: 4px;
+                    padding-left: 10px;
+                    padding-top: 8px;
+                    spacing: 2px;
                     alignment: start;
+                    Logo { size: 20px; y: (parent.height - self.height) / 2 - 2px; }
+                    Rectangle { width: 8px; }
                     Tab {
-                        text: "Home";
+                        text: "Workspaces";
                         selected: root.current-tab == 0;
                         clicked => { root.current-tab = 0; }
                     }
@@ -491,13 +913,15 @@ export component AppWindow inherits Window {
             if Updates.offer.shown: UpdateBanner {}
             if root.current-tab == 0: Home {
                 recent: root.recent;
+                servers: root.servers;
                 version: root.version;
                 error: root.home-error;
                 open(path) => { root.open-recent(path); }
                 forget(path) => { root.forget-recent(path); }
                 open-folder => { root.open-folder(); }
                 check-out => { root.show-check-out(); }
-                sign-in => { root.show-sign-in(""); }
+                sign-in(url) => { root.show-sign-in(url); }
+                sign-out(url) => { root.sign-out(url); }
                 about => { root.dialog = Dialog.about; }
                 dismiss-error => { root.home-error.shown = false; }
             }
@@ -505,8 +929,11 @@ export component AppWindow inherits Window {
                 ws: root.workspaces[root.current-tab - 1];
                 error: root.workspace-error;
                 changes: root.changes;
-                rows: root.change-rows;
+                picked-rows: root.picked-rows;
+                pending-rows: root.pending-rows;
+                lists: root.list-rows;
                 message <=> root.commit-message;
+                show-folder => { root.show-folder(); }
                 dismiss-error => { root.workspace-error.shown = false; }
                 toggle-file(p) => { root.toggle-file(p); }
                 toggle-group(k) => { root.toggle-group(k); }

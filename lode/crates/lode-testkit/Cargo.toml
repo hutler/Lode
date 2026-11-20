@@ -33,6 +33,7 @@ tempfile.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+lode-build.workspace = true
 lode-store = { workspace = true, features = ["test-util"] }
 lode-meta.workspace = true
 futures.workspace = true

@@ -18,7 +18,7 @@ use lode_server::{BoundServer, ServerConfig, SystemClock};
 
 /// Lode version control server.
 #[derive(Parser, Debug)]
-#[command(name = "loded", version, about)]
+#[command(name = "loded", version = lode_build::VERSION, about)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

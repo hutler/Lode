@@ -259,6 +259,12 @@ impl Desk {
         }
     }
 
+    /// Signs out of `server`: revokes the token there when it can, and forgets it here.
+    pub async fn sign_out(&self, server: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(&self.home, Some(server))?;
+        run_op(move || async move { login::logout(&ctx).await }).await
+    }
+
     /// Who the workspace's server knows this app as (`lode whoami` in the workspace).
     pub async fn whoami(&self, workspace: String) -> Result<Value, ErrorView> {
         let ctx = self.ctx(Path::new(&workspace), None)?;
@@ -292,6 +298,13 @@ impl Desk {
     pub async fn sso_offer(&self, server: String) -> Result<Value, ErrorView> {
         let ctx = self.ctx(&self.home, None)?;
         run_op(move || async move { login::sso_offer(&ctx, &server).await }).await
+    }
+
+    /// What answers at `server`: `{server, version, sso}` for a Lode server, else a
+    /// `not_a_lode_server` error naming the right address when there is one.
+    pub async fn server_info(&self, server: String) -> Result<Value, ErrorView> {
+        let ctx = self.ctx(&self.home, None)?;
+        run_op(move || async move { login::server_info(&ctx, &server).await }).await
     }
 
     /// Signs in through the company's sign-in page in the browser and stores the token
@@ -1162,6 +1175,35 @@ pub fn is_web_link(url: &str) -> bool {
         && !url
             .chars()
             .any(|c| c.is_whitespace() || c.is_control() || c == '"')
+}
+
+/// Shows a workspace folder in the system's file manager.
+pub fn show_folder(path: &str) -> Result<(), ErrorView> {
+    if !std::path::Path::new(path).is_dir() {
+        return Err(ErrorView {
+            code: "not_found".into(),
+            message: format!("the folder {path} is not there any more"),
+            details: Value::Null,
+        });
+    }
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(path);
+    cmd.spawn()
+        .map(|mut child| {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        })
+        .map_err(|e| ErrorView {
+            code: "failed".into(),
+            message: format!("could not open the folder: {e}"),
+            details: Value::Null,
+        })
 }
 
 /// Opens a web link (a check's details) in the system browser.

@@ -2,11 +2,16 @@
 // box with recent messages, and the changelist dialogs. The Rust side (src/changes.rs and
 // src/app.rs) builds the rows and runs the operations.
 
-import { Reading } from "history.slint";
+import { Reading, DiffPanel } from "history.slint";
 import { Team } from "team.slint";
 import { Branching } from "branches.slint";
 import { Button, LineEdit, TextEdit, ListView, ProgressIndicator, Palette, ScrollView } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check, DialogButtons } from "parts.slint";
+
+/// What the changes view asks of the window beyond its own callbacks.
+export global Changes {
+    callback unpick-all();
+}
 
 /// One row of the list: a group's header or a file.
 export struct ChangeRow {
@@ -142,6 +147,41 @@ component StatusLetter inherits Rectangle {
     }
 }
 
+/// A small button for the bars.
+component BarButton inherits Rectangle {
+    in property <string> text;
+    in property <string> label: root.text;
+    in property <bool> enabled: true;
+    in property <bool> primary;
+    callback clicked();
+    min-height: 26px;
+    width: t.preferred-width + 14px;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 24px;
+        border-radius: 5px;
+        border-width: root.primary ? 0 : 1px;
+        border-color: Palette.border;
+        background: root.primary ? Palette.accent-background
+            : touch.has-hover && root.enabled ? Palette.alternate-background : Palette.background;
+        opacity: root.enabled ? 1 : 0.45;
+        touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+        t := Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: root.primary ? 600 : 400;
+            color: root.primary ? Palette.accent-foreground : Palette.foreground;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+}
+
 component GroupHeader inherits Rectangle {
     in property <ChangeRow> item;
     in property <bool> busy;
@@ -150,12 +190,11 @@ component GroupHeader inherits Rectangle {
     callback commit();
     callback rename();
     callback delete();
-    height: 36px;
-    background: Palette.alternate-background;
-    border-radius: 4px;
+    height: 32px;
+    background: transparent;
     accessible-role: none;
     HorizontalLayout {
-        padding-left: 8px;
+        padding-left: 10px;
         padding-right: 8px;
         spacing: 8px;
         Check {
@@ -175,25 +214,25 @@ component GroupHeader inherits Rectangle {
         }
         if root.item.named: HorizontalLayout {
             spacing: 4px;
-            Button {
+            BarButton {
                 text: "Shelve…";
                 accessible-label: "Shelve changelist " + root.item.key;
                 enabled: !root.busy && root.item.count > 0;
                 clicked => { Team.shelve-changelist(root.item.key); }
             }
-            Button {
+            BarButton {
                 text: "Commit…";
                 accessible-label: "Commit changelist " + root.item.key;
                 enabled: !root.busy && root.item.count > 0 && root.can-commit;
                 clicked => { root.commit(); }
             }
-            Button {
+            BarButton {
                 text: "Rename…";
                 accessible-label: "Rename changelist " + root.item.key;
                 enabled: !root.busy;
                 clicked => { root.rename(); }
             }
-            Button {
+            BarButton {
                 text: "Delete…";
                 accessible-label: "Delete changelist " + root.item.key;
                 enabled: !root.busy;
@@ -207,10 +246,9 @@ component FileRow inherits Rectangle {
     in property <ChangeRow> item;
     callback toggle();
     callback select();
-    height: 30px;
+    height: 28px;
     background: root.item.selected ? Palette.accent-background.transparentize(0.75)
         : touch.has-hover ? Palette.alternate-background : transparent;
-    border-radius: 4px;
     accessible-role: list-item;
     accessible-label: root.item.key;
     accessible-item-selectable: true;
@@ -218,7 +256,7 @@ component FileRow inherits Rectangle {
     accessible-action-default => { root.select(); }
     touch := TouchArea { clicked => { root.select(); } }
     HorizontalLayout {
-        padding-left: 24px;
+        padding-left: 10px;
         padding-right: 8px;
         spacing: 8px;
         Check {
@@ -253,22 +291,41 @@ component FileRow inherits Rectangle {
 component DetailLine inherits HorizontalLayout {
     in property <string> label;
     in property <string> value;
-    spacing: 8px;
-    Muted { text: root.label; width: 80px; accessible-role: none; }
+    spacing: 4px;
+    Muted { text: root.label + ":"; font-size: 12px; accessible-role: none; }
     Text {
         text: root.value;
+        font-size: 12px;
         color: Palette.foreground;
-        wrap: word-wrap;
-        horizontal-stretch: 1;
         accessible-role: text;
         accessible-label: root.label;
         accessible-value: root.value;
     }
 }
 
+/// The grey bar over a list, with its name, a count and its actions.
+component PaneHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> count;
+    height: 32px;
+    background: Palette.alternate-background;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 6px;
+        spacing: 6px;
+        Text { text: root.title; font-weight: 600; font-size: 12px; vertical-alignment: center; color: Palette.foreground.transparentize(0.2); accessible-role: none; }
+        Muted { text: root.count; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; accessible-role: none; }
+        @children
+    }
+}
+
+/// The pending changes, laid out like a file status screen: the files to commit over the rest,
+/// the selected file's diff beside them, and the commit box along the bottom.
 export component ChangesView inherits Rectangle {
     in property <ChangesState> state;
-    in property <[ChangeRow]> rows;
+    in property <[ChangeRow]> picked-rows;
+    in property <[ChangeRow]> pending-rows;
     in-out property <string> message;
     callback toggle-file(string);
     callback toggle-group(string);
@@ -285,88 +342,234 @@ export component ChangesView inherits Rectangle {
     callback revert-selected();
     callback move-selected();
     callback dismiss-error();
+    property <bool> idle: root.state.busy == "";
+    property <FileDetails> d: root.state.details;
 
-    HorizontalLayout {
-        VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
-            horizontal-stretch: 1;
-            HorizontalLayout {
+    VerticalLayout {
+        if root.state.merging != "": Rectangle {
+            background: Palette.accent-background.transparentize(0.85);
+            height: merge-line.preferred-height;
+            merge-line := HorizontalLayout {
+                padding: 8px;
+                padding-left: 12px;
                 spacing: 8px;
-                Check {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.state.total > 0 && root.state.picked == root.state.total;
-                    enabled: root.state.total > 0;
-                    accessible-label: "Pick all files";
-                    toggled => { root.toggle-all(); }
-                }
-                Title { text: "Changes"; }
-                Muted {
-                    text: root.state.total == 0 ? "" : root.state.picked + " of " + root.state.total + " picked";
-                    vertical-alignment: center;
+                Text {
                     horizontal-stretch: 1;
-                }
-                Button { text: "New changelist…"; enabled: root.state.busy == ""; clicked => { root.new-changelist(); } }
-                Button { text: "Refresh"; enabled: root.state.busy == ""; clicked => { root.refresh(); } }
-            }
-            if root.state.merging != "": Rectangle {
-                background: Palette.accent-background.transparentize(0.85);
-                border-radius: 6px;
-                HorizontalLayout {
-                    padding: 8px;
-                    spacing: 8px;
-                    Text {
-                        horizontal-stretch: 1;
-                        text: root.state.merging + ". The next commit records the merge and takes every change.";
-                        wrap: word-wrap;
-                        vertical-alignment: center;
-                        color: Palette.foreground;
-                        accessible-role: text;
-                        accessible-label: "Pending merge";
-                        accessible-value: self.text;
-                    }
-                    Button {
-                        text: "Abandon merge";
-                        enabled: root.state.busy == "";
-                        clicked => { Branching.abandon-merge(); }
-                    }
-                }
-            }
-            if root.state.loaded && root.rows.length == 0: Muted {
-                text: "No changes. Edit files in the workspace folder and they show up here.";
-                wrap: word-wrap;
-            }
-            ListView {
-                vertical-stretch: 1;
-                for row in root.rows: VerticalLayout {
-                    padding-bottom: 2px;
-                    if row.is-group: GroupHeader {
-                        item: row;
-                        busy: root.state.busy != "";
-                        can-commit: root.state.merging == "" && root.state.conflicted == 0;
-                        toggle => { root.toggle-group(row.key); }
-                        commit => { root.commit-changelist(row.key); }
-                        rename => { root.rename-changelist(row.key); }
-                        delete => { root.delete-changelist(row.key); }
-                    }
-                    if !row.is-group: FileRow {
-                        item: row;
-                        toggle => { root.toggle-file(row.key); }
-                        select => { root.select-file(row.key); }
-                    }
-                }
-            }
-            // The commit box.
-            VerticalLayout {
-                spacing: 6px;
-                TextEdit {
-                    accessible-label: "Commit message";
-                    placeholder-text: "Describe what changed";
-                    text <=> root.message;
-                    enabled: root.state.busy != "Committing";
-                    min-height: 72px;
-                    vertical-stretch: 0;
+                    text: root.state.merging + ". The next commit records the merge and takes every change.";
                     wrap: word-wrap;
+                    vertical-alignment: center;
+                    color: Palette.foreground;
+                    accessible-role: text;
+                    accessible-label: "Pending merge";
+                    accessible-value: self.text;
+                }
+                Button {
+                    text: "Abandon merge";
+                    enabled: root.idle;
+                    clicked => { Branching.abandon-merge(); }
+                }
+            }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            // The two lists.
+            Rectangle {
+                horizontal-stretch: 1;
+                min-width: 480px;
+                Rectangle { x: parent.width - 1px; width: 1px; background: Palette.border; }
+                VerticalLayout {
+                    PaneHeader {
+                        title: "To commit";
+                        count: root.state.picked > 0 ? "· " + root.state.picked : "";
+                        BarButton {
+                            text: "Unpick all";
+                            enabled: root.state.picked > 0;
+                            clicked => { Changes.unpick-all(); }
+                        }
+                    }
+                    if root.picked-rows.length == 0: HorizontalLayout {
+                        padding-left: 12px;
+                        Muted {
+                            text: root.state.total == 0 ? "" : "Tick files below to commit them.";
+                            height: 36px;
+                            vertical-alignment: center;
+                            font-size: 12px;
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for row in root.picked-rows: FileRow {
+                            item: row;
+                            toggle => { root.toggle-file(row.key); }
+                            select => { root.select-file(row.key); }
+                        }
+                    }
+                    PaneHeader {
+                        title: "Pending";
+                        count: root.state.total == 0 ? "" : "· " + (root.state.total - root.state.picked);
+                        Check {
+                            y: (parent.height - self.height) / 2;
+                            width: 16px;
+                            height: 16px;
+                            checked: root.state.total > 0 && root.state.picked == root.state.total;
+                            enabled: root.state.total > 0;
+                            accessible-label: "Pick all files";
+                            toggled => { root.toggle-all(); }
+                        }
+                        Muted { text: "Pick all"; font-size: 12px; vertical-alignment: center; accessible-role: none; }
+                        BarButton { text: "New changelist…"; enabled: root.idle; clicked => { root.new-changelist(); } }
+                        BarButton { text: "Refresh"; enabled: root.idle; clicked => { root.refresh(); } }
+                    }
+                    if root.state.loaded && root.state.total == 0: HorizontalLayout {
+                        padding: 12px;
+                        Muted {
+                            text: "No changes. Edit files in the workspace folder and they show up here.";
+                            wrap: word-wrap;
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1.4;
+                        for row in root.pending-rows: VerticalLayout {
+                            if row.is-group: GroupHeader {
+                                item: row;
+                                busy: !root.idle;
+                                can-commit: root.state.merging == "" && root.state.conflicted == 0;
+                                toggle => { root.toggle-group(row.key); }
+                                commit => { root.commit-changelist(row.key); }
+                                rename => { root.rename-changelist(row.key); }
+                                delete => { root.delete-changelist(row.key); }
+                            }
+                            if !row.is-group: FileRow {
+                                item: row;
+                                toggle => { root.toggle-file(row.key); }
+                                select => { root.select-file(row.key); }
+                            }
+                        }
+                    }
+                }
+            }
+            // The selected file: what it is, what can be done with it, and its diff.
+            VerticalLayout {
+                horizontal-stretch: 1;
+                if root.d.shown: Rectangle {
+                    height: file-bar.preferred-height;
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+                    file-bar := VerticalLayout {
+                        padding: 8px;
+                        padding-left: 12px;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 14px;
+                            DetailLine { label: "Status"; value: root.d.status-text; }
+                            if root.d.copy != "": DetailLine { label: "From"; value: root.d.copy; }
+                            DetailLine { label: "Changelist"; value: root.d.changelist; }
+                            DetailLine { label: "Lock"; value: root.d.lock; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            if root.d.status == "untracked": BarButton { text: "Add"; enabled: root.idle; clicked => { root.add-selected(); } }
+                            if root.d.status == "conflicted": BarButton {
+                                text: "Resolve…";
+                                primary: true;
+                                label: "Resolve " + root.d.path;
+                                clicked => { Branching.resolve(root.d.path); }
+                            }
+                            if root.d.status != "untracked": BarButton { text: "Revert…"; enabled: root.idle; clicked => { root.revert-selected(); } }
+                            if root.d.status != "untracked": BarButton {
+                                text: "Move to…";
+                                label: "Move to changelist";
+                                enabled: root.idle;
+                                clicked => { root.move-selected(); }
+                            }
+                            if root.d.status != "untracked" && root.d.status != "added" && root.d.locked: BarButton {
+                                text: "Unlock";
+                                label: "Unlock " + root.d.path;
+                                enabled: root.idle;
+                                clicked => { Team.unlock-selected(); }
+                            }
+                            if root.d.status != "untracked" && root.d.status != "added" && !root.d.locked: BarButton {
+                                text: "Lock…";
+                                label: "Lock " + root.d.path;
+                                enabled: root.idle;
+                                clicked => { Team.lock-selected(); }
+                            }
+                            if root.d.status != "untracked" && root.d.status != "added": BarButton {
+                                text: "History";
+                                label: "History of " + root.d.path;
+                                clicked => { Reading.file-history(root.d.path); }
+                            }
+                            if root.d.status != "untracked" && root.d.status != "added": BarButton {
+                                text: "Blame";
+                                label: "Blame " + root.d.path;
+                                clicked => { Reading.blame-file(root.d.path, -1); }
+                            }
+                            if root.d.status != "untracked": BarButton {
+                                text: "Open diff";
+                                label: "Diff of " + root.d.path;
+                                clicked => { Reading.diff-file(root.d.path, -1); }
+                            }
+                        }
+                    }
+                }
+                if root.d.shown && root.d.status == "untracked": HorizontalLayout {
+                    padding: 12px;
+                    vertical-stretch: 1;
+                    Muted {
+                        text: "Not added yet. Add it to commit it, or leave it out of the depot.";
+                        wrap: word-wrap;
+                        vertical-alignment: top;
+                    }
+                }
+                if !(root.d.shown && root.d.status == "untracked"): DiffPanel {
+                    vertical-stretch: 1;
+                    shown: root.d.shown && Reading.diff.path == root.d.path;
+                    empty: root.state.total == 0 ? "" : "Select a file to see its diff, add it, revert it or move it to a changelist.";
+                }
+            }
+        }
+        // The commit box.
+        Rectangle {
+            height: box.preferred-height;
+            Rectangle { y: 0; height: 1px; background: Palette.border; }
+            box := VerticalLayout {
+                padding: 10px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    TextEdit {
+                        accessible-label: "Commit message";
+                        placeholder-text: "Describe what changed";
+                        text <=> root.message;
+                        enabled: root.state.busy != "Committing";
+                        min-height: 64px;
+                        vertical-stretch: 0;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        alignment: end;
+                        Button {
+                            text: "Recent messages…";
+                            enabled: root.idle;
+                            clicked => { root.recent-messages(); }
+                        }
+                        Button {
+                            text: root.state.busy == "Committing" ? "Committing…"
+                                : root.state.merging != "" ? "Commit merge"
+                                : "Commit " + root.state.picked + (root.state.picked == 1 ? " file" : " files");
+                            primary: true;
+                            enabled: root.idle
+                                && (root.state.merging != "" || root.state.picked > 0)
+                                && root.message != ""
+                                && root.state.conflicted == 0;
+                            clicked => { root.commit(); }
+                        }
+                    }
                 }
                 if root.state.busy == "Committing": VerticalLayout {
                     spacing: 4px;
@@ -384,151 +587,29 @@ export component ChangesView inherits Rectangle {
                 }
                 if root.state.refused != "": Text {
                     text: root.state.refused;
-                    font-family: "monospace";
+                    font-family: Reading.mono;
                     color: Palette.foreground;
                     wrap: word-wrap;
                     accessible-role: text;
                     accessible-label: "Files the server refused";
                     accessible-value: self.text;
                 }
-                HorizontalLayout {
-                    spacing: 8px;
-                    if root.state.conflicted > 0: Text {
-                        text: root.state.conflicted == 1
-                            ? "Resolve the conflicted file before you commit."
-                            : "Resolve " + root.state.conflicted + " conflicted files before you commit.";
-                        color: #dc2626;
-                        vertical-alignment: center;
-                        wrap: word-wrap;
-                        accessible-role: text;
-                        accessible-label: "Why commit is off";
-                        accessible-value: self.text;
-                    }
-                    if root.state.done != "": Text {
-                        text: root.state.done;
-                        color: #16a34a;
-                        vertical-alignment: center;
-                        accessible-role: text;
-                        accessible-label: "Done";
-                        accessible-value: self.text;
-                    }
-                    Rectangle { horizontal-stretch: 1; }
-                    Button {
-                        text: "Shelve…";
-                        accessible-label: "Shelve picked files";
-                        enabled: root.state.busy == "" && root.state.picked > 0;
-                        clicked => { Team.shelve-picked(); }
-                    }
-                    Button {
-                        text: "Recent messages…";
-                        enabled: root.state.busy == "";
-                        clicked => { root.recent-messages(); }
-                    }
-                    Button {
-                        text: root.state.busy == "Committing" ? "Committing…"
-                            : root.state.merging != "" ? "Commit merge"
-                            : "Commit " + root.state.picked + (root.state.picked == 1 ? " file" : " files");
-                        primary: true;
-                        enabled: root.state.busy == ""
-                            && (root.state.merging != "" || root.state.picked > 0)
-                            && root.message != ""
-                            && root.state.conflicted == 0;
-                        clicked => { root.commit(); }
-                    }
-                }
-            }
-        }
-        // Details of the selected file, or of the workspace.
-        Rectangle {
-            width: 300px;
-            background: Palette.alternate-background;
-            VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
-                alignment: start;
-                if root.state.details.shown: VerticalLayout {
-                    spacing: 8px;
-                    Text {
-                        text: root.state.details.name;
-                        font-size: 16px;
-                        font-weight: 700;
-                        color: Palette.foreground;
-                        wrap: word-wrap;
-                    }
-                    DetailLine { label: "Path"; value: root.state.details.path; }
-                    DetailLine { label: "Status"; value: root.state.details.status-text; }
-                    if root.state.details.copy != "": DetailLine { label: "From"; value: root.state.details.copy; }
-                    DetailLine { label: "Changelist"; value: root.state.details.changelist; }
-                    DetailLine { label: "Lock"; value: root.state.details.lock; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        alignment: start;
-                        if root.state.details.status == "untracked": Button {
-                            text: "Add";
-                            enabled: root.state.busy == "";
-                            clicked => { root.add-selected(); }
-                        }
-                        if root.state.details.status != "untracked": Button {
-                            text: "Revert…";
-                            enabled: root.state.busy == "";
-                            clicked => { root.revert-selected(); }
-                        }
-                        if root.state.details.status != "untracked": Button {
-                            text: "Diff";
-                            accessible-label: "Diff of " + root.state.details.path;
-                            clicked => { Reading.diff-file(root.state.details.path, -1); }
-                        }
-                        if root.state.details.status != "untracked": Button {
-                            text: "Move to…";
-                            accessible-label: "Move to changelist";
-                            enabled: root.state.busy == "";
-                            clicked => { root.move-selected(); }
-                        }
-                    }
-                    if root.state.details.status == "conflicted": HorizontalLayout {
-                        alignment: start;
-                        Button {
-                            text: "Resolve…";
-                            primary: true;
-                            accessible-label: "Resolve " + root.state.details.path;
-                            clicked => { Branching.resolve(root.state.details.path); }
-                        }
-                    }
-                    if root.state.details.status != "untracked" && root.state.details.status != "added": HorizontalLayout {
-                        spacing: 6px;
-                        alignment: start;
-                        if root.state.details.locked: Button {
-                            text: "Unlock";
-                            accessible-label: "Unlock " + root.state.details.path;
-                            enabled: root.state.busy == "";
-                            clicked => { Team.unlock-selected(); }
-                        }
-                        if !root.state.details.locked: Button {
-                            text: "Lock…";
-                            accessible-label: "Lock " + root.state.details.path;
-                            enabled: root.state.busy == "";
-                            clicked => { Team.lock-selected(); }
-                        }
-                        Button {
-                            text: "History";
-                            accessible-label: "History of " + root.state.details.path;
-                            clicked => { Reading.file-history(root.state.details.path); }
-                        }
-                        Button {
-                            text: "Blame";
-                            accessible-label: "Blame " + root.state.details.path;
-                            clicked => { Reading.blame-file(root.state.details.path, -1); }
-                        }
-                    }
-                    Muted {
-                        text: "Revert and Move act on every picked file when the selected one is picked.";
-                        wrap: word-wrap;
-                        font-size: 11px;
-                    }
-                }
-                if !root.state.details.shown: Muted {
-                    text: "Select a file to see more about it, add it, revert it or move it to a changelist.";
+                if root.state.conflicted > 0: Text {
+                    text: root.state.conflicted == 1
+                        ? "Resolve the conflicted file before you commit."
+                        : "Resolve " + root.state.conflicted + " conflicted files before you commit.";
+                    color: #dc2626;
                     wrap: word-wrap;
+                    accessible-role: text;
+                    accessible-label: "Why commit is off";
+                    accessible-value: self.text;
+                }
+                if root.state.done != "": Text {
+                    text: root.state.done;
+                    color: #16a34a;
+                    accessible-role: text;
+                    accessible-label: "Done";
+                    accessible-value: self.text;
                 }
             }
         }

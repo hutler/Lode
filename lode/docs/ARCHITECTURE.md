@@ -37,6 +37,7 @@ One Cargo workspace. Library crates never depend on binaries; arrows point downw
 
 | Crate | Kind | Contents |
 | --- | --- | --- |
+| `lode-build` | lib | The build version (`0.2.0`, or `0.2.0+5.g4a33c89` after a release), worked out from Git by its `build.rs`; what `lode --version`, `loded --version`, `/info`, the admin pages and Lode Desk show |
 | `lode-core` | lib, no I/O | `ObjectId`, `DepotPath` + validation, tree encoding, object header, change types, error codes, glob matching, `.lodeconfig` parsing |
 | `lode-proto` | lib | Request/response types of the HTTP API (serde). Shared by server and client |
 | `lode-store` | lib | `BlobStore` trait and filesystem implementation |

@@ -173,11 +173,17 @@ export global Branching {
     in property <[FolderRow]> folders;
     in-out property <string> include-text;
     in-out property <string> exclude-text;
+    /// The active branches, unfiltered, for the sidebar.
+    in property <[BranchRow]> side-rows;
+    /// Revisions on the current branch that the workspace does not have yet.
+    in property <int> behind;
     /// Progress of a switch, update, merge or view change.
     in-out property <float> progress: -1;
     in-out property <string> progress-text;
 
     callback open-branches();
+    /// The branch list with this branch selected.
+    callback open-branch(string);
     callback filter-changed();
     callback archived-toggled();
     callback select-branch(string);

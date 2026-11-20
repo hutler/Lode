@@ -6,10 +6,10 @@ use std::path::Path;
 use std::rc::Rc;
 
 use serde_json::Value;
-use slint::{Model, SharedString};
+use slint::{ComponentHandle, Model, SharedString};
 
 use super::{error_info, spawn, usage, App, AppWindow, ChangesState, Dialog, ErrorInfo};
-use super::{ListDialogState, MoveTarget};
+use super::{Changes, ListDialogState, MoveTarget};
 use crate::changes::{self, Pending, NEW_FILES};
 use crate::desk::ErrorView;
 
@@ -60,6 +60,10 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
     });
     let a = Rc::clone(app);
     window.on_add_selected(move || a.add_selected());
+    let a = Rc::clone(app);
+    window
+        .global::<Changes>()
+        .on_unpick_all(move || a.unpick_all());
 }
 
 /// Reads the remembered commit messages; none when the file is missing or damaged.
@@ -133,6 +137,7 @@ impl App {
             self.work.borrow_mut().entry(r.clone()).or_default();
             self.restore_view(&r);
             self.refresh(r);
+            self.refresh_side_branches();
         }
     }
 
@@ -214,6 +219,9 @@ impl App {
                 tab.rev = rev;
                 tab.branch = p.branch.as_str().into();
                 self.workspaces.set_row_data(i, tab);
+                if self.shown_root.borrow().as_deref() == Some(root) {
+                    self.refresh_side_branches();
+                }
             }
         }
     }
@@ -227,6 +235,10 @@ impl App {
         match st {
             Some(st) => {
                 let rows = changes::rows(&st.pending, &st.picked, st.selected.as_deref());
+                let (picked, pending, lists) = changes::split_rows(&rows);
+                self.picked_rows.set_vec(picked);
+                self.pending_rows.set_vec(pending);
+                self.list_rows.set_vec(lists);
                 self.change_rows.set_vec(rows);
                 let total = st.pending.paths().len();
                 changes.loaded = st.loaded;
@@ -247,6 +259,9 @@ impl App {
             }
             None => {
                 self.change_rows.set_vec(Vec::new());
+                self.picked_rows.set_vec(Vec::new());
+                self.pending_rows.set_vec(Vec::new());
+                self.list_rows.set_vec(Vec::new());
                 changes = ChangesState::default();
             }
         }
@@ -308,6 +323,33 @@ impl App {
 
     fn select_file(&self, path: &str) {
         self.with_shown(|st| st.selected = Some(path.to_owned()));
+        self.peek_selected();
+    }
+
+    /// Shows the selected file's diff beside the lists (files not added yet have none).
+    pub(super) fn peek_selected(&self) {
+        let selected = {
+            let Some(root) = self.shown_root.borrow().clone() else {
+                return;
+            };
+            let work = self.work.borrow();
+            work.get(&root).and_then(|st| {
+                let path = st.selected.clone()?;
+                let untracked = st
+                    .pending
+                    .file(&path)
+                    .is_some_and(|f| f.status == "untracked");
+                (!untracked).then_some(path)
+            })
+        };
+        match selected {
+            Some(path) => self.peek_file(path, None),
+            None => self.clear_peek(),
+        }
+    }
+
+    fn unpick_all(&self) {
+        self.with_shown(|st| st.picked.clear());
     }
 
     /// The selected file, or every picked file when the selected one is picked; files not

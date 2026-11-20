@@ -4,7 +4,8 @@
 import { Button, LineEdit, TextEdit, ListView, ComboBox, Palette } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, FormLabel, Check, DialogButtons } from "parts.slint";
 import { CheckBadgeInfo, CheckRow, CheckBadge, ChecksList } from "checks.slint";
-import { DiffRow, DiffRowView, Reading } from "history.slint";
+import { DiffRow, DiffRowView, Reading, StatusChip, SmallFact, CheckChip } from "history.slint";
+import { Icon, Icons } from "icons.slint";
 import { Links, CopyLinkButton } from "links.slint";
 
 export struct LockRow {
@@ -167,66 +168,155 @@ export global Team {
     callback dismiss-error();
 }
 
+/// The bar over a team view: a title, a muted note, then the view's own controls.
+component ViewBar inherits Rectangle {
+    in property <string> title;
+    in property <string> note;
+    height: 44px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+        spacing: 8px;
+        Text {
+            text: root.title;
+            font-weight: 700;
+            font-size: 14px;
+            vertical-alignment: center;
+            color: Palette.foreground;
+            overflow: elide;
+        }
+        Muted { text: root.note; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        @children
+    }
+}
+
+/// A column header strip.
+component ColumnBar inherits Rectangle {
+    height: 26px;
+    background: Palette.alternate-background;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+}
+
+component ColumnName inherits Text {
+    font-size: 11.5px;
+    vertical-alignment: center;
+    color: Palette.foreground.transparentize(0.4);
+    overflow: elide;
+    accessible-role: none;
+}
+
+/// A note inside a view, padded from its edges.
+component ViewNote inherits HorizontalLayout {
+    in property <string> text;
+    padding: 12px;
+    Muted { text: root.text; wrap: word-wrap; horizontal-stretch: 1; }
+}
+
+/// A compact on/off chip; a row of them works as a segmented filter.
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
+    callback clicked();
+    height: 26px;
+    width: t.preferred-width + 20px;
+    border-radius: 13px;
+    border-width: 1px;
+    border-color: root.on ? Palette.accent-background : Palette.border;
+    background: root.on ? Palette.accent-background.transparentize(0.85)
+        : touch.has-hover ? Palette.alternate-background : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.on;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    t := Text {
+        text: root.text;
+        font-size: 12px;
+        font-weight: root.on ? 600 : 400;
+        color: root.on ? Palette.accent-background : Palette.foreground;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
 component LockRowView inherits Rectangle {
     in property <LockRow> item;
     in property <bool> busy;
-    height: 44px;
-    background: root.item.mine ? Palette.accent-background.transparentize(0.9) : transparent;
-    border-radius: 4px;
+    in property <bool> odd;
+    height: 36px;
+    background: root.item.mine ? Palette.accent-background.transparentize(0.9)
+        : root.odd ? Palette.alternate-background.transparentize(0.5) : transparent;
     accessible-role: list-item;
     accessible-label: root.item.path;
     HorizontalLayout {
-        padding-left: 8px;
+        padding-left: 12px;
         padding-right: 8px;
-        spacing: 12px;
+        spacing: 10px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            name: Icons.lock;
+            size: 16px;
+            tint: root.item.mine ? Palette.accent-background : Palette.foreground.transparentize(0.45);
+        }
         Text {
             text: root.item.path;
             horizontal-stretch: 3;
             preferred-width: 0px;
             min-width: 0px;
             font-family: Reading.mono;
+            font-size: 12.5px;
             vertical-alignment: center;
             overflow: elide;
             color: Palette.foreground;
             accessible-role: none;
         }
         VerticalLayout {
-            width: 160px;
+            width: 150px;
             alignment: center;
             Text {
                 text: (root.item.mine ? "you" : root.item.owner) + (root.item.agent ? " (agent)" : "");
                 font-weight: root.item.mine ? 700 : 400;
                 color: Palette.foreground;
+                overflow: elide;
                 accessible-role: text;
                 accessible-label: "Held by";
                 accessible-value: self.text;
             }
             if root.item.workspace != "": Muted { text: root.item.workspace; font-size: 10px; overflow: elide; font-family: Reading.mono; accessible-role: none; }
         }
-        Muted { text: root.item.since; width: 150px; vertical-alignment: center; accessible-role: none; }
-        Text {
+        Muted { text: root.item.since; width: 150px; vertical-alignment: center; overflow: elide; accessible-role: none; }
+        Muted {
             text: root.item.comment;
             horizontal-stretch: 2;
             preferred-width: 0px;
             min-width: 0px;
             vertical-alignment: center;
             overflow: elide;
-            color: Palette.foreground;
             accessible-role: none;
         }
-        if root.item.mine: Button {
+        Rectangle {
             width: 96px;
-            text: "Unlock";
-            accessible-label: "Unlock " + root.item.path;
-            enabled: !root.busy;
-            clicked => { Team.unlock(root.item.path); }
-        }
-        if !root.item.mine: Button {
-            width: 96px;
-            text: "Break…";
-            accessible-label: "Break lock on " + root.item.path;
-            enabled: !root.busy;
-            clicked => { Team.ask-break(root.item.path); }
+            if root.item.mine: Button {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                text: "Unlock";
+                accessible-label: "Unlock " + root.item.path;
+                enabled: !root.busy;
+                clicked => { Team.unlock(root.item.path); }
+            }
+            if !root.item.mine: Button {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                text: "Break…";
+                accessible-label: "Break lock on " + root.item.path;
+                enabled: !root.busy;
+                clicked => { Team.ask-break(root.item.path); }
+            }
         }
     }
 }
@@ -235,33 +325,29 @@ component LockRowView inherits Rectangle {
 export component LocksView inherits Rectangle {
     in property <string> branch;
     VerticalLayout {
-        padding: 16px;
-        spacing: 8px;
-        HorizontalLayout {
-            spacing: 8px;
-            Title { text: "Locks on " + root.branch; }
-            Muted {
-                text: Team.locks.loaded ? Team.locks.held + " held, " + Team.locks.mine + " by you" : "";
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-            }
+        ViewBar {
+            title: "Locks on " + root.branch;
+            note: Team.locks.loaded && !Team.locks.unavailable ? Team.locks.held + " held, " + Team.locks.mine + " by you" : "";
             LineEdit {
-                width: 200px;
+                width: 220px;
                 placeholder-text: "Filter by path";
                 accessible-label: "Filter by path";
                 text <=> Team.lock-filter;
                 edited => { Team.filter-locks(); }
             }
-            Check {
-                y: (parent.height - self.height) / 2;
-                checked: Team.mine-only;
-                accessible-label: "Only mine";
-                toggled => {
-                    Team.mine-only = !Team.mine-only;
-                    Team.filter-locks();
+            HorizontalLayout {
+                spacing: 6px;
+                Check {
+                    y: (parent.height - self.height) / 2;
+                    checked: Team.mine-only;
+                    accessible-label: "Only mine";
+                    toggled => {
+                        Team.mine-only = !Team.mine-only;
+                        Team.filter-locks();
+                    }
                 }
+                Text { text: "Only mine"; vertical-alignment: center; color: Palette.foreground; accessible-role: none; }
             }
-            Text { text: "Only mine"; vertical-alignment: center; color: Palette.foreground; accessible-role: none; }
             if Team.locks.mine > 1: Button {
                 text: "Unlock all mine";
                 enabled: !Team.locks.busy;
@@ -269,32 +355,44 @@ export component LocksView inherits Rectangle {
             }
             Button { text: "Refresh"; enabled: !Team.locks.busy; clicked => { Team.refresh-locks(); } }
         }
-        if Team.locks.error.shown: ErrorBanner {
-            error: Team.locks.error;
-            dismissable: true;
-            dismissed => { Team.dismiss-error(); }
+        if Team.locks.error.shown: HorizontalLayout {
+            padding: 12px;
+            padding-bottom: 0;
+            ErrorBanner {
+                error: Team.locks.error;
+                dismissable: true;
+                dismissed => { Team.dismiss-error(); }
+            }
         }
-        if Team.locks.unavailable: Muted {
+        if Team.locks.unavailable: ViewNote {
             text: "This server does not have the locks module, so files cannot be locked here.";
-            wrap: word-wrap;
         }
-        if Team.locks.loaded && !Team.locks.unavailable && Team.lock-rows.length == 0: Muted {
-            text: Team.locks.held == 0 ? "Nobody holds a lock on this branch." : "No lock matches.";
+        if !Team.locks.unavailable: ColumnBar {
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 10px;
+                Rectangle { width: 16px; }
+                ColumnName { text: "Path"; horizontal-stretch: 3; preferred-width: 0px; min-width: 0px; }
+                ColumnName { text: "Held by"; width: 150px; }
+                ColumnName { text: "Since"; width: 150px; }
+                ColumnName { text: "Comment"; horizontal-stretch: 2; preferred-width: 0px; min-width: 0px; }
+                Rectangle { width: 96px; }
+            }
+        }
+        if Team.locks.loaded && !Team.locks.unavailable && Team.lock-rows.length == 0: ViewNote {
+            text: Team.locks.held == 0 ? "Nobody holds a lock on this branch. Lock a file from Changes before you edit it, so nobody else commits it meanwhile." : "No lock matches.";
         }
         ListView {
             vertical-stretch: 1;
-            for l in Team.lock-rows: VerticalLayout {
-                padding-bottom: 2px;
-                LockRowView { item: l; busy: Team.locks.busy; }
-            }
+            for l[i] in Team.lock-rows: LockRowView { item: l; busy: Team.locks.busy; odd: Math.mod(i, 2) == 1; }
         }
     }
 }
 
 component ShelfRowView inherits Rectangle {
     in property <ShelfRow> item;
-    height: 52px;
-    border-radius: 4px;
+    height: 32px;
     background: root.item.selected ? Palette.accent-background.transparentize(0.75)
         : touch.has-hover ? Palette.alternate-background : transparent;
     accessible-role: list-item;
@@ -303,47 +401,85 @@ component ShelfRowView inherits Rectangle {
     accessible-item-selected: root.item.selected;
     accessible-action-default => { Team.select-shelf(root.item.id); }
     touch := TouchArea { clicked => { Team.select-shelf(root.item.id); } }
-    VerticalLayout {
-        padding: 6px;
-        spacing: 2px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            name: Icons.shelve;
+            size: 16px;
+            tint: root.item.you ? Palette.accent-background : Palette.foreground.transparentize(0.45);
+        }
+        Text {
+            text: root.item.label;
+            width: 44px;
+            font-family: Reading.mono;
+            font-size: 12px;
+            vertical-alignment: center;
+            color: Palette.foreground.transparentize(0.25);
+            accessible-role: none;
+        }
         HorizontalLayout {
+            horizontal-stretch: 1;
             spacing: 6px;
-            Muted { text: root.item.label; font-family: Reading.mono; accessible-role: none; }
-            Text { text: root.item.title; overflow: elide; horizontal-stretch: 1; color: Palette.foreground; accessible-role: none; }
+            if root.item.agent: Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 18px;
+                width: at.preferred-width + 12px;
+                border-radius: 9px;
+                background: #8b5cf6.transparentize(0.8);
+                at := Text { text: "agent"; font-size: 10px; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; accessible-role: none; }
+            }
+            Text {
+                text: root.item.title;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                color: Palette.foreground;
+                accessible-role: none;
+            }
         }
-        HorizontalLayout {
-            spacing: 8px;
-            Muted { text: root.item.owner; font-size: 11px; font-weight: root.item.you ? 700 : 400; accessible-role: none; }
-            Muted { text: root.item.version; font-size: 11px; accessible-role: none; }
-            Muted { text: root.item.updated; font-size: 11px; horizontal-stretch: 1; overflow: elide; accessible-role: none; }
-            CheckBadge { info: root.item.checks; }
+        Rectangle {
+            width: 64px;
+            CheckBadge { x: 0; y: (parent.height - self.height) / 2; info: root.item.checks; }
+        }
+        Text {
+            text: root.item.you ? "you" : root.item.owner;
+            width: 140px;
+            overflow: elide;
+            vertical-alignment: center;
+            font-weight: root.item.you ? 700 : 400;
+            color: Palette.foreground.transparentize(0.25);
+            accessible-role: none;
+        }
+        Muted { text: root.item.version; width: 40px; vertical-alignment: center; accessible-role: none; }
+        Muted { text: root.item.updated; width: 140px; overflow: elide; vertical-alignment: center; accessible-role: none; }
+    }
+}
+
+component ShelfFileView inherits Rectangle {
+    in property <ShelfFileRow> file;
+    height: 28px;
+    accessible-role: list-item;
+    accessible-label: root.file.path;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        StatusChip { letter: root.file.letter; status: root.file.status; y: (parent.height - self.height) / 2; }
+        Text {
+            text: root.file.path;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+            color: Palette.foreground;
+            accessible-role: none;
         }
     }
 }
 
-component Segment inherits Button {
-    in property <bool> on;
-    checkable: true;
-    checked: root.on;
-}
-
-component Fact2 inherits HorizontalLayout {
-    in property <string> label;
-    in property <string> value;
-    spacing: 8px;
-    Muted { text: root.label; width: 80px; accessible-role: none; }
-    Text {
-        text: root.value;
-        color: Palette.foreground;
-        wrap: word-wrap;
-        horizontal-stretch: 1;
-        accessible-role: text;
-        accessible-label: root.label;
-        accessible-value: root.value;
-    }
-}
-
-/// The depot's shelves, and one shelf's details, checks and diff.
+/// The depot's shelves on top; below, the selected shelf with its checks and files, and its diff.
 export component ShelvesView inherits Rectangle {
     probe := Text {
         x: 0;
@@ -356,121 +492,196 @@ export component ShelvesView inherits Rectangle {
     }
     property <length> char-width: probe.preferred-width / 10;
     VerticalLayout {
-        padding: 16px;
-        spacing: 8px;
-        HorizontalLayout {
-            spacing: 6px;
-            Title { text: "Shelves"; }
-            Rectangle { width: 8px; }
-            Segment { text: "Everyone's"; on: Team.shelves.whose == "all"; clicked => { Team.set-whose("all"); } }
-            Segment { text: "Mine"; on: Team.shelves.whose == "mine"; clicked => { Team.set-whose("mine"); } }
-            Rectangle { width: 8px; }
-            Segment { text: "Open"; on: Team.shelves.state == "open"; clicked => { Team.set-state("open"); } }
-            Segment { text: "Submitted"; on: Team.shelves.state == "submitted"; clicked => { Team.set-state("submitted"); } }
-            Segment { text: "Deleted"; on: Team.shelves.state == "deleted"; clicked => { Team.set-state("deleted"); } }
-            Rectangle { horizontal-stretch: 1; }
+        ViewBar {
+            title: "Shelves";
+            note: Team.shelves.loaded && !Team.shelves.unavailable
+                ? Team.shelf-rows.length + (Team.shelves.state == "open" ? " open" : Team.shelves.state == "submitted" ? " submitted" : " deleted")
+                : "";
+            HorizontalLayout {
+                spacing: 4px;
+                Chip { y: (parent.height - self.height) / 2; text: "Everyone's"; on: Team.shelves.whose == "all"; clicked => { Team.set-whose("all"); } }
+                Chip { y: (parent.height - self.height) / 2; text: "Mine"; on: Team.shelves.whose == "mine"; clicked => { Team.set-whose("mine"); } }
+            }
+            Rectangle { width: 1px; background: Palette.border; }
+            HorizontalLayout {
+                spacing: 4px;
+                Chip { y: (parent.height - self.height) / 2; text: "Open"; on: Team.shelves.state == "open"; clicked => { Team.set-state("open"); } }
+                Chip { y: (parent.height - self.height) / 2; text: "Submitted"; on: Team.shelves.state == "submitted"; clicked => { Team.set-state("submitted"); } }
+                Chip { y: (parent.height - self.height) / 2; text: "Deleted"; on: Team.shelves.state == "deleted"; clicked => { Team.set-state("deleted"); } }
+            }
             Button { text: "Refresh"; clicked => { Team.refresh-shelves(); } }
         }
-        if Team.shelves.error.shown: ErrorBanner {
-            error: Team.shelves.error;
-            dismissable: true;
-            dismissed => { Team.dismiss-error(); }
+        if Team.shelves.error.shown: HorizontalLayout {
+            padding: 12px;
+            padding-bottom: 0;
+            ErrorBanner {
+                error: Team.shelves.error;
+                dismissable: true;
+                dismissed => { Team.dismiss-error(); }
+            }
         }
-        if Team.shelves.notice != "": Text {
-            text: Team.shelves.notice;
-            color: #16a34a;
-            wrap: word-wrap;
-            accessible-role: text;
-            accessible-label: "Done";
-            accessible-value: self.text;
+        if Team.shelves.notice != "": HorizontalLayout {
+            padding: 12px;
+            padding-bottom: 4px;
+            Text {
+                text: Team.shelves.notice;
+                color: #16a34a;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                accessible-role: text;
+                accessible-label: "Done";
+                accessible-value: self.text;
+            }
         }
-        if Team.shelves.unavailable: Muted {
+        if Team.shelves.unavailable: ViewNote {
             text: "This server does not have the shelves module, so changes cannot be shelved here.";
-            wrap: word-wrap;
         }
+        // The shelves.
+        if !Team.shelves.unavailable: VerticalLayout {
+            vertical-stretch: 35;
+            ColumnBar {
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
+                    Rectangle { width: 16px; }
+                    ColumnName { text: "Shelf"; width: 44px; }
+                    ColumnName { text: "Title"; horizontal-stretch: 1; }
+                    ColumnName { text: "Checks"; width: 64px; }
+                    ColumnName { text: "Owner"; width: 140px; }
+                    ColumnName { text: "Ver."; width: 40px; }
+                    ColumnName { text: "Updated"; width: 140px; }
+                }
+            }
+            if Team.shelves.loaded && Team.shelf-rows.length == 0: ViewNote {
+                text: (Team.shelves.state == "open" ? "No open shelves." : Team.shelves.state == "submitted" ? "No submitted shelves." : "No deleted shelves.")
+                    + " Pick files in Changes and press Shelve to share them without committing.";
+            }
+            ListView {
+                vertical-stretch: 1;
+                for s in Team.shelf-rows: ShelfRowView { item: s; }
+            }
+        }
+        if !Team.shelves.unavailable: Rectangle { height: 1px; background: Palette.border; }
+        // The selected shelf.
         if !Team.shelves.unavailable: HorizontalLayout {
-            spacing: 12px;
-            vertical-stretch: 1;
-            VerticalLayout {
-                width: 300px;
-                spacing: 4px;
-                if Team.shelves.loaded && Team.shelf-rows.length == 0: Muted {
-                    text: (Team.shelves.state == "open" ? "No open shelves." : Team.shelves.state == "submitted" ? "No submitted shelves." : "No deleted shelves.")
-                        + " Shelve changes from the Changes view.";
+            vertical-stretch: 65;
+            Rectangle {
+                horizontal-stretch: 2;
+                min-width: 340px;
+                Rectangle { x: parent.width - 1px; width: 1px; background: Palette.border; }
+                if !Team.shelf.shown: Muted {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    text: "Select a shelf to review it.";
                     wrap: word-wrap;
                 }
-                ListView {
-                    vertical-stretch: 1;
-                    for s in Team.shelf-rows: VerticalLayout {
-                        padding-bottom: 2px;
-                        ShelfRowView { item: s; }
-                    }
-                }
-            }
-            if !Team.shelf.shown: Muted {
-                horizontal-stretch: 1;
-                text: "Select a shelf to review it.";
-            }
-            if Team.shelf.shown: VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 6px;
+                if Team.shelf.shown: VerticalLayout {
                     VerticalLayout {
-                        horizontal-stretch: 1;
-                        Text {
-                            text: Team.shelf.title;
-                            font-size: 16px;
-                            font-weight: 700;
-                            color: Palette.foreground;
-                            wrap: word-wrap;
-                            accessible-role: text;
-                            accessible-label: "Shelf";
-                            accessible-value: self.text;
+                        padding: 12px;
+                        spacing: 6px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: Team.shelf.title;
+                                font-size: 14px;
+                                font-weight: 700;
+                                color: Palette.foreground;
+                                wrap: word-wrap;
+                                horizontal-stretch: 1;
+                                accessible-role: text;
+                                accessible-label: "Shelf";
+                                accessible-value: self.text;
+                            }
+                            CopyLinkButton {
+                                y: 2px;
+                                target: "shelf " + Team.shelf.id;
+                                clicked => { Links.copy-shelf(Team.shelf.id); }
+                            }
                         }
-                        Muted { text: Team.shelf.subtitle; }
+                        Muted { text: Team.shelf.subtitle; font-size: 12px; }
+                        if Team.shelf.body != "": Text { text: Team.shelf.body; wrap: word-wrap; color: Palette.foreground; }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            SmallFact { label: "Owner"; value: Team.shelf.owner; }
+                            SmallFact { label: "On"; value: Team.shelf.branch; }
+                            SmallFact { label: "Updated"; value: Team.shelf.updated; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if Team.shelf.submitted != "" || Team.shelf.merges != "": HorizontalLayout {
+                            spacing: 12px;
+                            if Team.shelf.submitted != "": SmallFact { label: "Submitted"; value: Team.shelf.submitted; }
+                            if Team.shelf.merges != "": SmallFact { label: "Merges"; value: Team.shelf.merges; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if Team.shelf-checks.length > 0: HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            for c in Team.shelf-checks: CheckChip { check: c; }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            if Team.shelf.open: Button {
+                                text: "Submit…";
+                                primary: true;
+                                enabled: Team.shelf.busy == "";
+                                clicked => { Team.ask-submit(); }
+                            }
+                            if !Team.shelf.deleted: Button {
+                                text: Team.shelf.busy == "Unshelving" ? "Unshelving…" : "Unshelve";
+                                enabled: Team.shelf.busy == "";
+                                clicked => { Team.unshelve(); }
+                            }
+                            if Team.shelf.open && Team.shelf.mine: Button {
+                                text: "Delete…";
+                                accessible-label: "Delete shelf";
+                                enabled: Team.shelf.busy == "";
+                                clicked => { Team.ask-delete-shelf(); }
+                            }
+                        }
                     }
-                    CopyLinkButton {
-                        y: (parent.height - self.height) / 2;
-                        target: "shelf " + Team.shelf.id;
-                        clicked => { Links.copy-shelf(Team.shelf.id); }
+                    Rectangle {
+                        height: 28px;
+                        background: Palette.alternate-background;
+                        Rectangle { y: 0; height: 1px; background: Palette.border; }
+                        Text {
+                            x: 10px;
+                            text: "Changed files  " + Team.shelf-files.length;
+                            font-weight: 600;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            color: Palette.foreground.transparentize(0.25);
+                        }
                     }
-                    if !Team.shelf.deleted: Button {
-                        text: Team.shelf.busy == "Unshelving" ? "Unshelving…" : "Unshelve";
-                        enabled: Team.shelf.busy == "";
-                        clicked => { Team.unshelve(); }
-                    }
-                    if Team.shelf.open: Button {
-                        text: "Submit…";
-                        primary: true;
-                        enabled: Team.shelf.busy == "";
-                        clicked => { Team.ask-submit(); }
-                    }
-                    if Team.shelf.open && Team.shelf.mine: Button {
-                        text: "Delete…";
-                        accessible-label: "Delete shelf";
-                        enabled: Team.shelf.busy == "";
-                        clicked => { Team.ask-delete-shelf(); }
+                    ListView {
+                        vertical-stretch: 1;
+                        for f in Team.shelf-files: ShelfFileView { file: f; }
                     }
                 }
-                if Team.shelf.body != "": Muted { text: Team.shelf.body; wrap: word-wrap; }
-                Fact2 { label: "Owner"; value: Team.shelf.owner; }
-                Fact2 { label: "Branch"; value: Team.shelf.branch; }
-                Fact2 { label: "Updated"; value: Team.shelf.updated; }
-                if Team.shelf.submitted != "": Fact2 { label: "Submitted"; value: Team.shelf.submitted; }
-                if Team.shelf.merges != "": Fact2 { label: "Merges"; value: Team.shelf.merges; }
-                ChecksList { checks: Team.shelf-checks; open(url) => { Reading.open-link(url); } }
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "Changed files  " + Team.shelf-files.length;
-                        font-weight: 600;
-                        color: Palette.foreground;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
+            }
+            VerticalLayout {
+                horizontal-stretch: 3;
+                Rectangle {
+                    height: 40px;
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        spacing: 4px;
+                        Text {
+                            text: Team.shelf.shown ? "Changes on the shelf" : "";
+                            font-weight: 600;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            color: Palette.foreground;
+                        }
+                        Chip { y: (parent.height - self.height) / 2; text: "Unified"; on: Team.shelves.layout != "split"; clicked => { Team.set-layout("unified"); } }
+                        Chip { y: (parent.height - self.height) / 2; text: "Side by side"; on: Team.shelves.layout == "split"; clicked => { Team.set-layout("split"); } }
                     }
-                    Segment { text: "Unified"; on: Team.shelves.layout != "split"; clicked => { Team.set-layout("unified"); } }
-                    Segment { text: "Side by side"; on: Team.shelves.layout == "split"; clicked => { Team.set-layout("split"); } }
                 }
                 ListView {
                     vertical-stretch: 1;

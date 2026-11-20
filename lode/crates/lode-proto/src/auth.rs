@@ -7,7 +7,8 @@ use crate::{rfc3339, PrincipalKind, Timestamp};
 /// `GET /info`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Info {
-    /// Server version, such as `0.1.0`.
+    /// Server build version, such as `0.2.0` on a release or `0.2.0+5.g4a33c89` on a commit
+    /// after it. For people and logs; compare `api_version`, not this.
     pub server_version: String,
     /// API version; see [`crate::consts::API_VERSION`].
     pub api_version: String,
