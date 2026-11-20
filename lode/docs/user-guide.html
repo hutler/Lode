@@ -58,7 +58,7 @@
   <p class="meta">
     Version 0.4 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes Lode 0.4: streams and smarter merges (renames, JSON files, merge tools), on top of chunked large files, metadata in Postgres and a caching proxy (0.3), the integration release (webhooks, checks) and the admin web UI.
+    Describes Lode 0.4 and the 0.5 additions (validation scripts, shelf-only branches): streams and smarter merges (renames, JSON files, merge tools), on top of chunked large files, metadata in Postgres and a caching proxy (0.3), the integration release (webhooks, checks) and the admin web UI.
   </p>
 </section>
 
@@ -380,6 +380,53 @@ Created shelf 37 (version 1): 3 files, reverted in the workspace.</code></pre>
 <p>Every time a shelf's contents change, its version number goes up; <code>shelf show</code> and <code>shelf diff</code> display it. A submit always commits one specific version. If the owner changed the shelf after you looked at it, the submit is refused and you are told the new version, so you never commit something you did not review.</p>
 <p><code>shelf submit</code> records the shelf's owner as author and you as submitter. This is how a person approves work proposed by an AI agent. If the branch has changed under the shelf, the submit is refused; unshelve it, update, and commit normally.</p>
 
+<h2 id="validation-scripts">Validation scripts</h2>
+<p>A depot can carry its own content checks: small Python scripts kept in the depot and listed in <code>.lodeconfig</code>. Everyone gets them, and every change to them, with <code>lode update</code>, so there is nothing to install per machine beyond Python 3. <code>lode shelve</code> and <code>lode commit</code> run the scripts that match your changes first and stop if one finds a problem:</p>
+<pre><code>lode shelve -m "New sword"
+error: validation failed:
+json failed:
+  Data/items.json
+    line 3: Expecting property name enclosed in double quotes
+asset-names failed:
+  Content/Textures/sword.png
+    files in Content/Textures start with T_
+
+nothing was shelved; fix these and shelve again, or pass --no-verify (the server checks shelves again)</code></pre>
+<table>
+  <tr><th style="width:42%">Command</th><th>Effect</th></tr>
+  <tr><td><code>lode validate</code></td><td>Run the scripts on all your changes without shelving. Also takes paths, <code>-c NAME</code> for a changelist and <code>--script NAME</code>.</td></tr>
+  <tr><td><code>lode validate --trust</code></td><td>Trust this depot's current scripts on this machine, then run them.</td></tr>
+  <tr><td><code>lode shelve --no-verify</code>, <code>lode commit --no-verify</code></td><td>Skip the scripts this once.</td></tr>
+</table>
+<p><b>Trust.</b> A script is a program, so Lode runs one on your machine only after you have accepted that exact content once. In a terminal it asks; in scripts and with <code>--json</code> it refuses with <code>validation_untrusted</code> until you run <code>lode validate --trust</code>. When someone changes a script, you are asked again. To trust every script of a depot you control, add it to <code>settings.toml</code>:</p>
+<pre><code>[validate]
+trust = ["https://lode.example.com/game"]</code></pre>
+<p><b>Python.</b> Lode looks for <code>LODE_PYTHON</code>, then <code>[validate] python</code> in <code>settings.toml</code>, then <code>py -3</code>, <code>python</code> and <code>python3</code> on Windows, or <code>python3</code> and <code>python</code> elsewhere. Without one (or with one older than the depot asks for), shelve and commit warn and go on, since the server checks shelves again; set <code>missing_python = "refuse"</code> under <code>[validate]</code> to stop instead.</p>
+<h3>Writing a script</h3>
+<p>List each script in <code>.lodeconfig</code> with the files it checks:</p>
+<pre><code>[validate]
+python  = "3.8"                    # oldest Python the scripts need
+support = ["tools/validate/**"]    # files the scripts import or read
+
+[[validate.script]]
+name    = "json"
+run     = "tools/validate/json_valid.py"
+paths   = ["Data/**/*.json"]
+timeout = "60s"                    # default 60 s, at most 10 min
+server  = true                     # the server runs it too (default)</code></pre>
+<ul>
+  <li>The script runs from the workspace root. Standard input is one JSON object: <code>{"version": 1, "phase": "shelve", "depot": "game", "branch": "main", "files": [{"path": "Data/items.json", "action": "edit"}]}</code>. <code>action</code> is <code>add</code>, <code>edit</code>, <code>delete</code> or <code>move</code> (with <code>from</code>); a deleted file is no longer on disk.</li>
+  <li>Print one JSON line per problem: <code>{"path": "Data/items.json", "line": 3, "level": "error", "message": "..."}</code>. <code>level</code> is <code>error</code> or <code>warning</code>; other printed lines are shown as they are.</li>
+  <li>Exit 0 when everything is fine and 1 when you found problems. Any other exit code, a timeout or an uncaught exception means the check itself broke, which is reported differently from bad content.</li>
+  <li>Commit the scripts with the <code>.lodeconfig</code> that names them: the server refuses a <code>.lodeconfig</code> naming a script that is not there.</li>
+</ul>
+<p>Working examples (valid JSON, asset naming rules, size limits) are in <code>examples/validate/</code> of the Lode sources. Copy them to the root of a depot and adjust.</p>
+<h2 id="shelf-only">Branches that take shelves only</h2>
+<p>A team can require every change on a branch to go through a shelf, so it is reviewed and checked before it lands:</p>
+<pre><code>[branches]
+shelf_only = ["main", "release/*"]</code></pre>
+<p><code>lode commit</code> to such a branch is refused with <code>shelf_required</code> before anything is uploaded; shelve and submit instead. A depot administrator can still commit in an emergency with <code>lode commit --override "build server down, hotfix"</code>; the reason is recorded on the revision and shown by <code>lode log</code>. Changing the rule itself takes a shelf too.</p>
+
 <h1>11. Changelists</h1>
 <p>Changelists let you keep several unrelated sets of changes in one workspace and commit them separately. They exist only in your workspace.</p>
 <pre><code>lode changelist new ui-fix -m "Fix button alignment"
@@ -523,6 +570,9 @@ lode proxy clear              # download from the server again</code></pre>
   <tr><td><code>locked</code></td><td>Someone else holds a lock on the file. <code>lode locks</code> shows who.</td></tr>
   <tr><td><code>lock_required</code></td><td>This file type needs a lock before it can be changed. Run <code>lode lock</code> on it, then commit.</td></tr>
   <tr><td><code>checks_required</code></td><td>The branch requires passing checks before a shelf is submitted. Wait for the checks to pass, or ask your administrator which are required.</td></tr>
+  <tr><td><code>shelf_required</code></td><td>The branch takes changes through shelves only. Run <code>lode shelve</code>, then <code>lode shelf submit</code>.</td></tr>
+  <tr><td><code>validation_failed</code></td><td>The depot's validation scripts found problems in your changes; they are listed under the message. Fix them, or pass <code>--no-verify</code> if you are sure (the server may check again).</td></tr>
+  <tr><td><code>validation_untrusted</code></td><td>This machine has not accepted the depot's current validation scripts. Read them, then run <code>lode validate --trust</code>.</td></tr>
   <tr><td><code>permission_denied</code></td><td>Your account or token may not do this here. Ask your administrator.</td></tr>
   <tr><td><code>unauthenticated</code></td><td>You are not signed in or the token expired. Run <code>lode login</code>.</td></tr>
   <tr><td><code>invalid_path</code></td><td>The file name is not allowed (see below), or differs from an existing name only by letter case.</td></tr>
@@ -654,6 +704,8 @@ shelves = true
 mcp = true
 webhooks = false
 checks = false
+feed = true
+validate = false                   # run depot validation scripts on shelves (chapter 11)
 
 [gc]
 grace_seconds = 86400              # unused data younger than this is kept</code></pre>
@@ -949,6 +1001,25 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
   <li>Direct commits are not affected. Keep the reporting token on the build server only, never on machines that run untrusted code.</li>
 </ul>
 
+<h2>Validation scripts on the server</h2>
+<p>With the <code>validate</code> module on, the server runs a depot's validation scripts (chapter 10 of Part I) on every new shelf version and reports each as the check <code>validate/&lt;name&gt;</code>, so a team member who skipped them, or has no Python, is still caught. It needs the <code>checks</code> and <code>shelves</code> modules and Python 3 on the server:</p>
+<pre><code>[modules]
+checks = true
+validate = true
+
+[validate]
+python = "/usr/bin/python3"        # or ["py", "-3"] on Windows; required
+workers = 2                        # scripts running at once
+max_input_mib = 512                # most content written out for one run
+# work_dir = "/var/lib/lode/validate"   # default: validate/ in the data directory</code></pre>
+<ul>
+  <li>The scripts and their support files always come from the target branch, never from the shelf, so a shelf cannot change what it is checked with.</li>
+  <li>On branches listed in <code>[checks] branches</code>, a shelf is submitted only when every script with <code>server = true</code> passed on that shelf version. Together with <code>[branches] shelf_only</code>, nothing lands on the branch unchecked.</li>
+  <li>Results show in <code>lode checks 37</code>, reported by the service account <code>lode-validate</code>, which cannot sign in. The full list of problems is at <code>GET /api/v1/depots/game/validate/37/2</code>.</li>
+  <li>A run cut short by a restart starts over. A shelf that existed before the module was turned on, or before the scripts were added, has no results; update the shelf to run them.</li>
+  <li><b>This runs code from the depot on the server</b> as the user <code>loded</code> runs as, with a cleared environment and a timeout but no sandbox. Run <code>loded</code> as its own user (the packages do), and keep the branches that hold the scripts on shelves and required checks.</li>
+</ul>
+
 <h1>12. The MCP endpoint</h1>
 <p>With the <code>mcp</code> module on, the server offers a Model Context Protocol endpoint at <code>https://&lt;server&gt;/mcp</code>. An AI tool connects to it with an agent token and needs no workspace.</p>
 <pre><code>{ "mcpServers": {
@@ -961,7 +1032,7 @@ required = [{ name = "ci/build", reporter = "ci" }]</code></pre>
   <tr><td>See team activity</td><td><code>list_locks</code>, <code>list_shelves</code>, <code>get_shelf</code></td></tr>
   <tr><td>Propose changes</td><td><code>create_shelf</code>, <code>update_shelf</code></td></tr>
   <tr><td>Commit (only with scope <code>write</code>)</td><td><code>submit_shelf</code></td></tr>
-  <tr><td>See build results (with the checks module)</td><td><code>list_checks</code></td></tr>
+  <tr><td>See build and validation results (with the checks module)</td><td><code>list_checks</code></td></tr>
 </table>
 <p>The same scopes and permissions apply as everywhere else: an agent sees only what its account may read, and tools it may not use are not offered to it. Large files and diffs are cut off at a size limit and marked as truncated.</p>
 

@@ -610,6 +610,8 @@ shelves = true
 mcp = true
 webhooks = false
 checks = false
+feed = true
+validate = false
 ```
 
 ```rust
@@ -966,6 +968,38 @@ mod_feed_depot (depot_id PRIMARY KEY, pruned_through INT)
   depot. `pruned_through` per depot lets an answer say `truncated` when `after` is older.
 - `mcp_tools`: `wait_for_events` (scope `read`, wait at most 50 s). `purge_depot` deletes the
   depot's rows.
+
+### 9.7 Validate (`lode-mod-validate`, 0.5)
+
+Runs the depot's validation scripts (SPEC §6.8) on shelves. Needs `checks` and `shelves`;
+`loded` refuses to start with `[modules] validate = true` without them or without
+`[validate] python`.
+
+```sql
+mod_validate_run (depot_id, shelf_id, shelf_version /*PK*/, state /*queued|running|done|superseded*/,
+                  results TEXT /*JSON ScriptResult[]*/, created_at, updated_at)
+```
+
+- `on_event` for `shelf.created` and `shelf.updated` inserts a `queued` row, marks older
+  queued or running rows of the shelf `superseded` and aborts their tasks.
+- The worker, at start: creates the service user `lode-validate` (disabled, so it cannot
+  sign in), puts `running` rows back to `queued` (a run cut short by a restart starts over),
+  probes the configured Python and creates `work_dir`. It then starts queued runs, at most
+  `[validate] workers` at a time.
+- A run reads the shelf (`lode_mod_shelves::shelf_for_module`) and the target branch head's
+  `.lodeconfig`. Scripts whose `paths` match no changed file are recorded `skipped`. For the
+  rest it reports `validate/<name>` `pending`, writes a fresh directory under `work_dir`
+  with the shelf's added and edited files, then the head's `support` files and scripts on top
+  (so a shelf cannot replace them; at most `max_input_mib`), runs each script through
+  `lode-validate` with `phase: "server"`, stores the results (`done`) and reports `success`
+  or `failure` with a 1 KiB summary (`lode_mod_checks::report_check_as`, which skips token
+  checks for module reporters). A run that cannot finish is stored `done` without results.
+- `pre_commit`: a shelf submit to a branch in `[checks].branches` needs a `done` row for that
+  shelf version where every `server = true` script passed or was skipped; otherwise
+  `checks_required` with `missing` entries in the checks module's format (`reporter:
+  "lode-validate"`). Other commits are not gated here.
+- Route `GET /api/v1/depots/{d}/validate/{shelf}/{version}`: `{ shelf, version, state,
+  results }`. `purge_depot` deletes the depot's rows.
 
 ## 10. Client
 

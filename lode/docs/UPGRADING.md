@@ -168,3 +168,23 @@ module's tables, on the same first start.
 - Access rules take the subject `agents` (T194). A bare `agents` on the command line now means
   this subject; a user named `agents` is written `user:agents`. A 0.3 client cannot list
   rules once one exists.
+
+### 0.5.0: content validation and shelf-only branches (M19)
+
+Nothing has to be done to upgrade: replace the programs and restart. No core schema change;
+the new `validate` module adds its own table when it is turned on.
+
+- `[branches] shelf_only` in `.lodeconfig` (T200) makes a branch take changes through shelf
+  submits only. A refused commit answers `shelf_required` (409); an older client shows it as
+  an ordinary error. A depot admin can commit anyway with `lode commit --override "REASON"`,
+  recorded on the revision.
+- `[validate]` and `[[validate.script]]` in `.lodeconfig` (T201) list Python validation
+  scripts kept in the depot. `lode shelve` and `lode commit` run them first (T202,
+  `--no-verify` skips them), `lode validate` runs them on demand, and `lode mcp` has a
+  `validate` tool (T203). Each machine trusts a script's content once before it runs.
+  An older client ignores the section; a 0.4 server accepts it without checking it.
+- New module `validate`, off by default (T205). It needs `checks`, `shelves` and
+  `[validate] python` in `loded.toml`, runs the scripts on every shelf version and reports
+  `validate/<name>` checks that gate submits on `[checks].branches`. The server must have
+  Python 3; the container image does not include it yet. Read the HARDENING note before
+  turning it on: the scripts run as the `loded` user.

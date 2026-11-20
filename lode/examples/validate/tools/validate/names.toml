@@ -1,0 +1,7 @@
+# Naming rules for asset_names.py: the first prefix whose folder matches the file's folder
+# must start the file name. Names may use letters, digits and underscores only.
+
+[prefixes]
+"Content/Textures" = "T_"
+"Content/Materials" = "M_"
+"Content/Sounds" = "S_"
