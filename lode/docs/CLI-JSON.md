@@ -275,8 +275,12 @@ neither `-m` nor `-F` is given.
 
 ### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
 
-`{ "shelf": id, "version": n, "files": n, "uploaded": n, "kept": bool, "updated": bool,
-"merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
+`{ "shelf": id, "link": "lode://…/shelf/ID" | null, "version": n, "files": n, "uploaded": n,
+"kept": bool, "updated": bool, "merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
+
+`link` (T176) is the shelf's `lode://` link, to paste for a reviewer; `null` when the server
+address has a path, which links cannot carry. The local MCP server's `shelve` tool returns
+the same document.
 
 A pending merge goes into the shelf's `merged_from` (and leaves the workspace unless `--keep`);
 it must then be shelved whole, like a commit.
@@ -308,6 +312,16 @@ A submit refused by the checks gate exits 1 with code `checks_required`; `detail
 `{ "shelf_id", "shelf_version", "missing": [ { "name", "reporter", "reason", "state"?,
 "reported_by"? } ] }` (`reason`: `absent`, `not_success`, `wrong_reporter`), and the human
 message lists each unmet check on its own line.
+
+### `lode link PATH[@REV] [-b BRANCH] | -r REV | --shelf ID [--depot D]`
+
+Prints the `lode://` link Lode Desk would copy (T176), using the workspace's server and depot
+(`--server`/`--depot` outside one). A file without `@REV` or `--branch` links the revision the
+workspace is at (outside a workspace: the head of `main`); with `--branch`, the head of that
+branch. Plain-HTTP servers get `?http=1`. Nothing is asked of the server.
+
+`{ "kind": "file"|"revision"|"shelf", "server", "depot", "path"?, "rev"?, "branch"?, "id"?,
+"link" }`. A server under a path is `bad_link` (exit 1).
 
 ### `lode checks <rN | ID[@VERSION]> [--depot D]`
 

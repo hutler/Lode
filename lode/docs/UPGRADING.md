@@ -122,3 +122,4 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   `loded reset-admin --generate-password` prints a new first password instead of a token.
 - `GET /admin/acl` takes optional `depot` and `subject` filters (`lode admin acl list --depot
   D --subject S`); the admin Access page has the same filter.
+- `lode link` prints `lode://` links; `lode shelve --json` gains `link`.

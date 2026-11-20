@@ -15,6 +15,7 @@ pub mod history;
 pub mod import;
 pub mod info;
 pub mod init;
+pub mod link;
 pub mod locks;
 pub mod login;
 pub mod merge;

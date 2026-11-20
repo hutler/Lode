@@ -1,8 +1,8 @@
-//! T113: `lode://` links are read and written strictly, checked against the cases in
+//! T113, T176: `lode://` links are read and written strictly, checked against the cases in
 //! `tests/link_cases.json` (the cases the earlier Tauri window's reader was tested against too).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use lode_desk::links::{self, Link, MAX_LINK};
+use lode_ops::links::{self, Link, MAX_LINK};
 use serde_json::Value;
 
 const CASES: &str = include_str!("link_cases.json");

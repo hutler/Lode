@@ -126,6 +126,8 @@ enum Command {
     Blame(cmd::history::BlameArgs),
     /// List a directory as of a revision.
     Ls(cmd::history::LsArgs),
+    /// Print the lode:// link of a file, a revision or a shelf.
+    Link(cmd::link::LinkArgs),
     /// List the checks reported on a revision or a shelf version.
     Checks(cmd::checks::ChecksArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
@@ -197,6 +199,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Blame(a)) => cmd::history::blame(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
         Some(Command::Checks(a)) => cmd::checks::checks(&ctx, a).await,
+        Some(Command::Link(a)) => cmd::link::link(&ctx, a).await,
         Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {
             // The child owns stdout; `lode` adds nothing to it and passes its exit code on.
