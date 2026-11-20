@@ -48,7 +48,7 @@ async fn info_reports_version_and_no_modules() {
     let state = state_in(dir.path(), |_| {}).await;
     let (status, headers, body) = call(lode_server::router(state), get_req("/api/v1/info")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["server_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(body["server_version"], lode_build::VERSION);
     assert_eq!(body["api_version"], "1");
     assert_eq!(body["modules"], serde_json::json!([]));
     let id = headers.get("x-request-id").expect("request id header");

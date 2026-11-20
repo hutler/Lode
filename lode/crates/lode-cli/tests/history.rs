@@ -140,6 +140,7 @@ fn json(ws: &TestWorkspace, args: &[&str]) -> String {
     let v: Value = ws.json(args);
     serde_json::to_string_pretty(&v)
         .unwrap()
+        .replace(lode_build::VERSION, "[version]")
         .replace(env!("CARGO_PKG_VERSION"), "[version]")
 }
 

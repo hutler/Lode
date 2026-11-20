@@ -60,8 +60,11 @@ command refuses the option with `usage`.
 
 ### `lode --version`
 
-`{ "version": "0.1.0", "api": "1" }`. `api` is the server API version this client speaks
-(`/api/v1`).
+`{ "version": "0.2.0", "build": "0.2.0+5.g4a33c89", "api": "1" }`. `version` is the release
+version, for version checks. `build` names the exact build: the same as `version` on a
+release, and on any later commit the commits since the newest `lode-v*` tag and the commit
+(see [release.md](release.md#build-versions)). The text output prints `build`. `api` is the
+server API version this client speaks (`/api/v1`).
 
 ### `lode login <url>`
 

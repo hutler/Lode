@@ -76,6 +76,7 @@ slint-build = "1.18"
 embed-resource = "3"
 
 [dependencies]
+lode-build = { path = "../lode-build" }
 lode-client = { path = "../lode-client" }
 lode-ops = { path = "../lode-ops" }
 lode-core = { path = "../lode-core" }

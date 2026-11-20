@@ -98,6 +98,7 @@ fn version_json_names_the_api() {
     assert_eq!(code, 0);
     assert_eq!(v["ok"], true);
     assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(v["build"], lode_build::VERSION);
     assert_eq!(v["api"], lode_proto::consts::API_VERSION);
 }
 

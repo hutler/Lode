@@ -389,7 +389,7 @@ async fn the_overview_shows_how_the_server_is_doing() {
     let doc = home.doc();
     let text = doc.text();
     for expected in [
-        env!("CARGO_PKG_VERSION"),
+        lode_build::VERSION,
         "Running for",
         "Off: plain HTTP",
         "Files in",

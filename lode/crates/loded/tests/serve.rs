@@ -93,7 +93,7 @@ fn init_then_serve_answers_info() {
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     let body = response.split("\r\n\r\n").nth(1).unwrap();
     let info: serde_json::Value = serde_json::from_str(body).unwrap();
-    assert_eq!(info["server_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(info["server_version"], lode_build::VERSION);
     // Modules on by default that this build has.
     assert_eq!(
         info["modules"],

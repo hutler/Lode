@@ -16,6 +16,7 @@ name = "loded"
 path = "src/main.rs"
 
 [dependencies]
+lode-build.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 lode-meta.workspace = true

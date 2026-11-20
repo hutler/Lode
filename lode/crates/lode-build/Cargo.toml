@@ -1,0 +1,12 @@
+[package]
+name = "lode-build"
+description = "The build version every Lode program reports: the release version plus the commit it was built from"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
