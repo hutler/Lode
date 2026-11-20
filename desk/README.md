@@ -4,7 +4,7 @@ The Lode desktop client for Windows, macOS and Linux. It runs the same `lode-ops
 the `lode` command, and keeps its sign-ins in the same place, so signing in with either one
 signs in both.
 
-How to use it: [the Lode Desk guide](../../docs/desk-guide.md).
+How to use it: [the Lode Desk guide](docs/guide.md).
 
 The window is native Rust, made with [Slint](https://slint.dev) (milestone M13, which replaced
 the earlier Tauri and React window): Home with recent workspaces, sign-in (password and single
@@ -13,8 +13,41 @@ changelists (T131), history, blame and diffs (T132), locks, shelves and check re
 branches, merges, conflicts and the workspace view (T134), and `lode://` links, installers and
 updates (T135). Nothing in it needs Node.js or a web view.
 
-This folder is its own Cargo workspace, so building the CLI and server never needs the GUI
-libraries. It needs Rust 1.92 or newer (Slint's minimum; the rest of Lode needs 1.88).
+This folder is its own Cargo workspace beside the Lode core (`../lode`), so building the CLI and
+server never needs the GUI libraries. It needs Rust 1.92 or newer (Slint's minimum; the rest of
+Lode needs 1.88).
+
+## The core version
+
+Desk does not build against the core on `main`. It takes `lode-ops`, `lode-client` and
+`lode-core` (and, for its tests, `lode-proto`, `lode-server` and `lode-testkit`) from this
+repository at one pinned commit or tag, set in `Cargo.toml`. So the core can change and
+settle without fixing Desk in the same change, and Desk follows when it is ready:
+
+1. Set the new `rev` (or `tag = "lode-v<version>"`) on all six lines in `Cargo.toml`.
+2. `cargo update -p lode-ops` (it moves the other five with it), then fix what the new core
+   changed and run the checks below.
+3. Commit that as its own change, `desk: move to core <version>`.
+
+The boundary: Desk uses only the public operations of `lode-ops` (`cmd::*`, `context`,
+`output`, `error`) and the JSON documents they return (the same as `lode --json`, described in
+`lode/docs/CLI-JSON.md`), plus `lode_client::ServerUrl` and `lode_core::PathGlobSet`. Every call
+into `lode-ops` goes through `src/desk.rs`. Core tests and benches are not Desk's business, and
+the core never depends on Desk.
+
+To try Desk against the core in this checkout before moving the pin, without touching
+`Cargo.toml` or `Cargo.lock`:
+
+```
+scripts/with-local-core.sh cargo test
+scripts/with-local-core.sh cargo run
+```
+
+The `desk` workflow also does this weekly (job `core-main`) to show early what the next move
+will need.
+
+Desk has its own version (`version` in `Cargo.toml`) and release tags, `desk-v<version>`; About
+shows the build version worked out from them (`build.rs`).
 
 ## Build and run
 
@@ -72,9 +105,9 @@ starts or brings forward Lode Desk without opening its target.
   links handed to the app and the update banner. Controls are found by their accessible labels.
 - `cargo run --example screenshots -- DIR`: renders the screens in light and dark into PNG
   files with the software renderer (default `target/screenshots`). The guide's pictures in
-  `docs/desk-guide/` are the light ones.
+  `docs/guide/` are the light ones.
 - `cargo test --test acceptance`: the guide followed end to end by two people against a real
-  server; [docs/desk-acceptance.md](../../docs/desk-acceptance.md) is the checklist for what
+  server; [docs/acceptance.md](docs/acceptance.md) is the checklist for what
   needs a person (installers, an update, links from other apps).
 
 ## Installers and updates
@@ -94,7 +127,7 @@ The MSI installs for all users into `Program Files\Lode Desk`, the setup program
 user into `%LOCALAPPDATA%\Lode Desk`: the names, identifier and folders of the Tauri installers
 before them (none was released). On Windows the program carries its icon and manifest
 (`packaging/windows/`, embedded by `build.rs`). The release workflow builds every installer; see
-[docs/release.md](../../docs/release.md).
+[lode/docs/release.md](../lode/docs/release.md).
 
 The app looks for a new version a moment after start and once a day, in `latest.json` of the
 release `lode-desk-feed` on GitHub, and offers it with its release notes, "Install and restart"

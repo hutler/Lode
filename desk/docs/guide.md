@@ -5,7 +5,7 @@ branches and view, and runs the same operations as the `lode` command, so the tw
 side by side on the same workspace. This guide follows a working day from installing the app
 to merging a branch. Each part says what to click and what you should see.
 
-The pictures are the light screens of `cargo run --example screenshots` in `crates/lode-desk`,
+The pictures are the light screens of `cargo run --example screenshots` in `desk/`,
 with sample data (a depot called `game` on `lode.example.com`).
 
 Contents: [Install](#install) · [Sign in](#sign-in) · [Check out](#check-out-a-depot) ·
@@ -32,7 +32,7 @@ Every installer registers `lode://` links, so a link to a revision, file or shel
 app (see [Links](#links)). Lode Desk keeps its sign-ins in the same place as the `lode`
 command: signing in with either one signs in both.
 
-![Home: recent workspaces and ways to start](desk-guide/welcome-light.png)
+![Home: recent workspaces and ways to start](guide/welcome-light.png)
 
 Home lists the workspaces you opened recently. The × beside one forgets it (the folder stays).
 
@@ -47,7 +47,7 @@ says as whom you are signed in. If the browser does not open, the dialog shows t
 open on this computer. Password sign-in may be for server administrators only; the dialog
 says so.
 
-![Signing in](desk-guide/sign-in-light.png)
+![Signing in](guide/sign-in-light.png)
 
 ## Check out a depot
 
@@ -55,12 +55,12 @@ Home, **Check out a depot…**. The depot is the server address followed by the 
 as `https://lode.example.com/skyfall`. Pick a branch (usually `main`) and an empty folder. The
 progress shows the files arriving; then the workspace opens in a tab of its own.
 
-![Checking out](desk-guide/check-out-light.png)
+![Checking out](guide/check-out-light.png)
 
 A workspace you already have opens from Home's list or with **Open a workspace folder…**. Each
 open workspace has a tab; the sidebar shows its depot, server, branch and revision.
 
-![A workspace](desk-guide/workspace-light.png)
+![A workspace](guide/workspace-light.png)
 
 ## The daily loop
 
@@ -68,7 +68,7 @@ open workspace has a tab; the sidebar shows its depot, server, branch and revisi
 (D), files not added yet (?), and files in conflict (C). The list follows the disk: save a
 file in your editor and it shows up within a moment.
 
-![Picking files to commit](desk-guide/changes-light.png)
+![Picking files to commit](guide/changes-light.png)
 
 - **Pick** files with their check boxes (or a whole group with the group's box), write a
   message and **Commit**. Only the picked files go in; the rest stay as they are. Files not
@@ -79,7 +79,7 @@ file in your editor and it shows up within a moment.
   (the branch button, then **Update to r…**; see [Branches](#branches-and-merges)) and commit
   again.
 
-![A refused commit names the files](desk-guide/changes-refused-light.png)
+![A refused commit names the files](guide/changes-refused-light.png)
 
 ### Locks
 
@@ -88,7 +88,7 @@ you change it: **Lock…** on the file, with a comment others will see. **Locks*
 lists every lock on the branch, yours first, with Unlock for yours. A commit releases the locks of the files it
 commits.
 
-![Locks](desk-guide/locks-light.png)
+![Locks](guide/locks-light.png)
 
 When someone else holds the lock, the lock is refused and says who. Only a depot admin can
 break another person's lock.
@@ -100,7 +100,7 @@ ready to send. Right-click files and choose a changelist under **Move to**. A ch
 its own **Commit…**, which uses its description as the message, plus **Shelve…** and
 **Delete…** (deleting a changelist sends its files back to Changes; no change is lost).
 
-![Changelists](desk-guide/changelist-new-light.png)
+![Changelists](guide/changelist-new-light.png)
 
 ## History, blame and diffs
 
@@ -111,23 +111,23 @@ ones; they load as you go. Click a revision for its message, author, checks and 
 **Copy link** copies a link to the revision, and **Link** beside a file copies a link to that
 file at that revision.
 
-![History](desk-guide/history-light.png)
+![History](guide/history-light.png)
 
 **History** on a file shows only the revisions that changed it, following renames.
 
 **Blame** shows, for each line, the revision that last changed it. Click a revision number to
 open that revision.
 
-![Blame](desk-guide/blame-light.png)
+![Blame](guide/blame-light.png)
 
 **Show diff** compares your file with the revision you have, or a file in a revision with the
 one before. Switch between unified and side by side; the choice is remembered.
 
-![A diff](desk-guide/diff-split-light.png)
+![A diff](guide/diff-split-light.png)
 
 Images are shown side by side, as a swipe or as an onion skin.
 
-![Comparing two versions of an image](desk-guide/image-swipe-light.png)
+![Comparing two versions of an image](guide/image-swipe-light.png)
 
 ## Shelves and review
 
@@ -139,7 +139,7 @@ workspace** to keep them.
 **Shelves** lists open, submitted and deleted shelves, yours or everyone's. A shelf shows its
 description, files, diff and checks.
 
-![Shelves](desk-guide/shelves-light.png)
+![Shelves](guide/shelves-light.png)
 
 - **Unshelve** brings a shelf's changes into your workspace, to try them or to continue them.
 - **Submit…** commits the shelf as it is. If the owner updated it after you looked, the submit
@@ -148,7 +148,7 @@ description, files, diff and checks.
   the refusal lists the checks still missing.
 - **Delete…** removes your own shelf. **Copy link** copies a link to it, for a review request.
 
-![A shelf with its checks](desk-guide/shelf-submit-blocked-light.png)
+![A shelf with its checks](guide/shelf-submit-blocked-light.png)
 
 ## Branches and merges
 
@@ -165,7 +165,7 @@ where it started. From there:
 - **Merge…** merges the selected branch into yours.
 - **Archive…** hides a finished branch (depot admins only); **Show archived** lists them.
 
-![Branches](desk-guide/branches-light.png)
+![Branches](guide/branches-light.png)
 
 After a switch or update, a summary says what came and what stayed. If it stopped half way,
 for example because the connection dropped, an error offers **Finish the update**.
@@ -174,7 +174,7 @@ A merge applies the other branch's changes to your files and tells you what happ
 applied, merged, conflicted or unchanged. Changes then shows the merge in progress. **Commit
 merge** commits everything together; **Abandon merge…** forgets the merge and keeps the files.
 
-![The result of a merge](desk-guide/merge-result-light.png)
+![The result of a merge](guide/merge-result-light.png)
 
 When the depot uses streams, Branches lists them as a tree, each stream under its parent with
 its type (mainline, development, release), and ordinary branches after them. **New branch**
@@ -189,7 +189,7 @@ theirs above, and the result below. Each conflict has **Use mine**, **Use theirs
 both**, and the result can also be edited by hand; **Take mine** and **Take theirs** settle the
 whole file at once. **Save and mark resolved** saves the result once no conflict is left.
 
-![The three-way conflict view](desk-guide/conflict-light.png)
+![The three-way conflict view](guide/conflict-light.png)
 
 For a file that is not text, such as an image, choose **Keep mine** or **Take theirs**. Theirs
 is also saved beside the file (`name.theirs-r<rev>`) so you can open it in its own tool first.
@@ -211,7 +211,7 @@ can also edit as text (`*` stays within a folder, `**` goes into subfolders; exc
 leave the view stops the change; commit, shelve or revert it, or drop the changes with a
 second confirmation.
 
-![Choosing what comes to disk](desk-guide/view-editor-light.png)
+![Choosing what comes to disk](guide/view-editor-light.png)
 
 ## Links
 
@@ -231,14 +231,14 @@ the same server and depot from your open tabs and Home's list. When several fit,
 one; when none does, it offers to check the depot out and then shows the link. A link that
 arrives while a dialog is open waits until you close it.
 
-![Choosing a workspace for a link](desk-guide/link-choose-light.png)
+![Choosing a workspace for a link](guide/link-choose-light.png)
 
-![No workspace for a link yet](desk-guide/link-none-light.png)
+![No workspace for a link yet](guide/link-none-light.png)
 
 A link that is not exactly one of these forms is refused with the reason, and nothing is
 opened. Links never carry user names or passwords.
 
-![A refused link](desk-guide/link-refused-light.png)
+![A refused link](guide/link-refused-light.png)
 
 ## Updates
 
@@ -249,7 +249,7 @@ restart runs the MSI or setup program (Windows asks for permission for the MSI),
 AppImage or the app in Applications, or installs the `.deb` after asking for your password, and
 then starts the new version.
 
-![A new version](desk-guide/update-light.png)
+![A new version](guide/update-light.png)
 
 Home has **Check for updates automatically** and **Check for updates now**. On machines whose
 software is managed, setting the environment variable `LODE_DESK_NO_UPDATE` (to anything)
@@ -286,10 +286,10 @@ Errors show the message, a next step where one helps, and a code. The codes:
 | `update_failed` | The update could not be downloaded or installed. | Try later or install by hand. |
 | `io` | A file could not be read or written. | Check disk space and permissions. |
 
-![An error with its next step](desk-guide/open-error-light.png)
+![An error with its next step](guide/open-error-light.png)
 
 ---
 
-How this guide is checked: `crates/lode-desk/tests/acceptance.rs` follows it section by section
-against a real server with two people, and [desk-acceptance.md](desk-acceptance.md) is the
+How this guide is checked: `desk/tests/acceptance.rs` follows it section by section
+against a real server with two people, and [acceptance.md](acceptance.md) is the
 checklist for what needs a person.
