@@ -815,7 +815,7 @@ fn sample_history() -> Vec<serde_json::Value> {
         ),
         rev(1477, "main", "dan", "user", "Fix the dock collision"),
         rev(1476, "main", "bob", "user", "Audio: waves loop"),
-        rev(1475, "main", "carol", "user", "Imported from Perforce"),
+        rev(1475, "main", "carol", "user", "Imported from Subversion"),
         rev(
             1474,
             "main",
@@ -835,7 +835,7 @@ fn sample_history() -> Vec<serde_json::Value> {
         {"path": "Docs/old-tide.md", "action": "delete"},
     ]);
     v[4]["provenance"] = json!({"client": "lode-desk 0.2.0"});
-    v[7]["provenance"] = json!({"imported": {"system": "perforce", "id": "12345"}});
+    v[7]["provenance"] = json!({"imported": {"system": "svn", "id": "12345"}});
     v
 }
 

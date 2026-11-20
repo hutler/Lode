@@ -405,7 +405,7 @@ mod tests {
             r("lode-v0.2.0", false),
             r("lode-v0.10.0", false),
             r("lode-v0.11.0", true),
-            r("umpalumpa-v9.0.0", false),
+            r("other-v9.0.0", false),
         ])
         .unwrap();
         assert_eq!((v, rel.tag_name.as_str()), ((0, 10, 0), "lode-v0.10.0"));
