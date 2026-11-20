@@ -22,6 +22,9 @@ const ZSTD_LEVEL: i32 = 3;
 enum Hasher {
     Blob(blake3::Hasher),
     Tree(blake3::Hasher),
+    /// Chunk lists are stored under the id of the file they assemble to; the caller
+    /// ([`crate::ChunkedStore::put_chunk_list`]) checks that before storing.
+    Unchecked,
 }
 
 impl Hasher {
@@ -31,7 +34,7 @@ impl Hasher {
             ObjectKind::Tree => Ok(Hasher::Tree(blake3::Hasher::new_derive_key(
                 TREE_ID_CONTEXT,
             ))),
-            ObjectKind::ChunkList => Err(StoreError::UnsupportedKind(kind)),
+            ObjectKind::ChunkList => Ok(Hasher::Unchecked),
         }
     }
 
@@ -40,12 +43,14 @@ impl Hasher {
             Hasher::Blob(h) | Hasher::Tree(h) => {
                 h.update(b);
             }
+            Hasher::Unchecked => {}
         }
     }
 
-    fn finish(&self) -> ObjectId {
+    fn finish(&self, expect: &ObjectId) -> ObjectId {
         match self {
             Hasher::Blob(h) | Hasher::Tree(h) => ObjectId::from_bytes(*h.finalize().as_bytes()),
+            Hasher::Unchecked => *expect,
         }
     }
 }
@@ -177,7 +182,7 @@ pub(crate) async fn encode(
             });
         }
     }
-    let actual = hasher.finish();
+    let actual = hasher.finish(expect);
     if actual != *expect {
         return Err(StoreError::HashMismatch {
             expected: *expect,

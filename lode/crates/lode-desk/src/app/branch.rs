@@ -45,6 +45,9 @@ pub(super) struct BranchState {
     saved: RefCell<Spec>,
     /// Bumped each time the branch list, a conflict or the view loads.
     generation: Cell<u64>,
+    /// The sidebar's branches, and the newest request for them.
+    side_rows: Rc<VecModel<BranchRow>>,
+    side_generation: Cell<u64>,
 }
 
 impl BranchState {
@@ -68,8 +71,11 @@ impl BranchState {
             spec: RefCell::new(Spec::default()),
             saved: RefCell::new(Spec::default()),
             generation: Cell::new(0),
+            side_rows: Rc::new(VecModel::default()),
+            side_generation: Cell::new(0),
         };
         let b = window.global::<Branching>();
+        b.set_side_rows(Rc::clone(&st.side_rows).into());
         b.set_rows(Rc::clone(&st.rows).into());
         b.set_bases(Rc::clone(&st.bases).into());
         b.set_sources(Rc::clone(&st.sources).into());
@@ -87,6 +93,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
     let b = window.global::<Branching>();
     let a = Rc::clone(app);
     b.on_open_branches(move || a.open_branches());
+    let a = Rc::clone(app);
+    b.on_open_branch(move |n| a.open_branch(n.to_string()));
     let a = Rc::clone(app);
     b.on_filter_changed(move || a.render_branches());
     let a = Rc::clone(app);
@@ -236,6 +244,73 @@ impl App {
         self.branch.rows.set_vec(Vec::new());
         w.set_dialog(Dialog::Branches);
         self.load_branches(None);
+    }
+
+    /// The branch list with `name` selected, from the sidebar.
+    fn open_branch(&self, name: String) {
+        let Some((w, _)) = self.branching() else {
+            return;
+        };
+        let b = w.global::<Branching>();
+        b.set_filter(SharedString::new());
+        b.set_rev_text(SharedString::new());
+        b.set_branches(BranchesState::default());
+        self.branch.rows.set_vec(Vec::new());
+        w.set_dialog(Dialog::Branches);
+        self.load_branches(Some(name));
+    }
+
+    /// Loads the branches for the sidebar, and how far the workspace is behind its branch.
+    pub(super) fn refresh_side_branches(&self) {
+        let Some((_, root)) = self.branching() else {
+            return;
+        };
+        let generation = self.branch.side_generation.get() + 1;
+        self.branch.side_generation.set(generation);
+        let Some(me) = self.me() else { return };
+        spawn(async move {
+            let got = me.desk.branches(root.clone(), false).await;
+            if me.branch.side_generation.get() != generation
+                || me.shown_root.borrow().as_deref() != Some(root.as_str())
+            {
+                return;
+            }
+            let Some(w) = me.window.upgrade() else { return };
+            let b = w.global::<Branching>();
+            let Ok(v) = got else {
+                // The sidebar keeps the workspace's own branch; the list dialog says why.
+                me.branch.side_rows.set_vec(Vec::new());
+                b.set_behind(0);
+                return;
+            };
+            let list = v["branches"].as_array().cloned().unwrap_or_default();
+            let current = v["current"].as_str().unwrap_or("").to_owned();
+            let rows: Vec<BranchRow> = branches::branch_rows(&list, &current, "", "")
+                .into_iter()
+                .filter(|r| !r.archived)
+                .collect();
+            me.branch.side_rows.set_vec(rows);
+            let head = list
+                .iter()
+                .find(|x| x["name"] == current.as_str())
+                .and_then(|x| x["head_rev"].as_u64());
+            let have = me
+                .workspaces_row(&root)
+                .and_then(|t| t.rev.parse::<u64>().ok());
+            let behind = match (head, have) {
+                (Some(h), Some(r)) if h > r => i32::try_from(h - r).unwrap_or(i32::MAX),
+                _ => 0,
+            };
+            b.set_behind(behind);
+            if w.get_dialog() != Dialog::Branches && !b.get_show_archived() {
+                *me.branch.list.borrow_mut() = list;
+                let mut s = b.get_branches();
+                if s.current.is_empty() {
+                    s.current = current.into();
+                    b.set_branches(s);
+                }
+            }
+        });
     }
 
     /// Loads the branch list, selecting `select` (or keeping the selection, or the current).

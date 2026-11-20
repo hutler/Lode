@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use lode_core::{DepotId, LodeConfig, ObjectId};
 
 use lode_meta::MetaStore;
-use lode_store::BlobStore;
+use lode_store::{BlobStore, ChunkedStore};
 
 use crate::auth::{LoginLimiter, ScopeRegistry, Sso};
 use crate::clock::SharedClock;
@@ -26,6 +26,7 @@ pub struct AppState {
 struct Inner {
     meta: MetaStore,
     blobs: Arc<dyn BlobStore>,
+    chunked: ChunkedStore,
     config: ServerConfig,
     clock: SharedClock,
     modules: Modules,
@@ -83,12 +84,16 @@ impl AppState {
         }
         let module_names = modules.iter().map(|m| m.name().to_owned()).collect();
         let started_at = crate::clock::Clock::now_ms(&*clock);
+        // Every reader sees a chunked file as its whole content (ARCHITECTURE §3.5).
+        let chunked = ChunkedStore::new(blobs, config.limits.max_blob_size);
+        let blobs: Arc<dyn BlobStore> = Arc::new(chunked.clone());
         let state = Self {
             inner: Arc::new(Inner {
                 meta,
                 trees: TreeLoader::new(blobs.clone(), TREE_CACHE_ENTRIES),
                 sso: config.oidc.clone().map(Sso::new),
                 blobs,
+                chunked,
                 config,
                 clock,
                 modules,
@@ -128,6 +133,11 @@ impl AppState {
     /// Blob store.
     pub fn blobs(&self) -> &Arc<dyn BlobStore> {
         &self.inner.blobs
+    }
+
+    /// The blob store's chunk list operations (the same store as [`AppState::blobs`]).
+    pub fn chunked(&self) -> &ChunkedStore {
+        &self.inner.chunked
     }
 
     /// Configuration.

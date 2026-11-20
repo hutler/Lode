@@ -550,6 +550,18 @@ async fn sign_in_with_a_password(world: &World) {
     sleep(800).await;
     assert!(!shown(&w, "Sign in with Example Corp"));
     assert!(w.get_sign_in().sso_label.is_empty());
+    until("the server check", || w.get_sign_in().probe == "ok").await;
+    assert!(value(&w, "Server check").contains("Lode server"));
+
+    // An address with a path: the dialog points at the server's own address.
+    type_into(&w, "Server", &format!("{}/admin/", world.url));
+    until("the address is refused", || w.get_sign_in().probe == "bad").await;
+    let check = value(&w, "Server check");
+    assert!(check.contains(&world.url), "{check}");
+    assert_eq!(w.get_sign_in().suggested, world.url.as_str());
+    click(&w, &format!("Use {}", world.url));
+    assert_eq!(value(&w, "Server"), world.url);
+    until("the server check", || w.get_sign_in().probe == "ok").await;
 
     // A wrong password: the banner says so and what to do next.
     type_into(&w, "Name", "alice");
@@ -561,10 +573,10 @@ async fn sign_in_with_a_password(world: &World) {
         "{}",
         value(&w, "Error")
     );
-    assert!(
-        !shown(&w, "Next step"),
-        "no advice to sign in, in the sign-in dialog"
-    );
+    // The advice is about the password, not about signing in somewhere else.
+    let advice = value(&w, "Next step");
+    assert!(advice.contains("password"), "{advice}");
+    assert!(!advice.contains("Sign in to a server"), "{advice}");
     assert_eq!(w.get_sign_in().error.code, "unauthenticated");
     assert!(!w.get_sign_in().busy);
 
@@ -681,7 +693,7 @@ async fn check_out_with_progress_then_reopen(world: &World) {
     assert_eq!(value(&w, "Server"), world.url.trim_start_matches("http://"));
     assert!(folder.join("a.txt").is_file());
 
-    // Closing the tab goes back Home, where the workspace is listed.
+    // Closing the tab goes back to Workspaces, where the workspace is listed.
     click(&w, "Close game");
     assert_eq!(w.get_current_tab(), 0);
     let root = std::fs::canonicalize(&folder).unwrap();
@@ -706,13 +718,13 @@ async fn check_out_with_progress_then_reopen(world: &World) {
     assert_eq!(value(&w, "Revision"), world.head.to_string());
 
     // Opening it again selects its tab instead of adding one.
-    click(&w, "Home");
+    click(&w, "Workspaces");
     click(&w, &label);
     until("its tab is selected", || w.get_current_tab() == 1).await;
     assert_eq!(w.get_workspaces().row_count(), 1);
 
     // Forget takes it off the list, and leaves the folder alone.
-    click(&w, "Home");
+    click(&w, "Workspaces");
     click(&w, &format!("Forget {}", row.path));
     assert_eq!(w.get_recent().row_count(), 0);
     assert!(folder.join("a.txt").is_file());
@@ -749,7 +761,7 @@ async fn check_out_before_signing_in(world: &World) {
     assert_eq!(w.get_current_tab(), 1);
 
     // An incomplete form is refused before anything runs.
-    click(&w, "Home");
+    click(&w, "Workspaces");
     click(&w, "Check out a depot…");
     type_into(&w, "Depot", "game");
     click(&w, "Check out");
@@ -1872,7 +1884,7 @@ async fn links_handed_to_the_app(world: &World) {
     assert_eq!(w.get_workspaces().row_data(0).unwrap().root, roots[1]);
 
     // A link that arrives while a dialog is open waits for it to close.
-    click(&w, "Home");
+    click(&w, "Workspaces");
     click(&w, "About Lode Desk");
     click(&w, "Close");
     click(&w, "Sign in to a server…");

@@ -6,7 +6,7 @@
 <style>
   @page { size: A4; margin: 22mm 18mm 20mm 18mm;
           @bottom-center { content: counter(page); font: 9pt "Segoe UI", Arial, sans-serif; color: #667; }
-          @top-right { content: "Lode User Guide — v0.2"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
+          @top-right { content: "Lode User Guide — v0.3"; font: 8pt "Segoe UI", Arial, sans-serif; color: #99a; } }
   @page :first { @bottom-center { content: none; } @top-right { content: none; } }
   :root { --ink:#1c2530; --muted:#5a6675; --accent:#0b5cad; --rule:#d5dbe3; --code-bg:#f3f5f8; --note-bg:#eef5fc; --warn-bg:#fff6e5; }
   html { font: 10.5pt/1.5 "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: var(--ink); }
@@ -56,9 +56,9 @@
   <p class="title">Lode</p>
   <p class="sub">User Guide for Client and Server</p>
   <p class="meta">
-    Version 0.2 · November 2026<br>
+    Version 0.3 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes Lode 0.2 with the integration release (webhooks, checks) and the admin web UI.
+    Describes Lode 0.3: chunked large files, metadata in Postgres and a caching proxy for remote offices, on top of the integration release (webhooks, checks) and the admin web UI.
   </p>
 </section>
 
@@ -122,7 +122,7 @@
 <pre><code>curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh
 sudo -u lode loded setup            # domain, email, backups, admin password
 sudo systemctl enable --now loded</code></pre>
-<p><strong>Windows.</strong> Run <code>lode-server-0.2.0-x64.msi</code> from the releases page and keep "Set up the Lode server now" ticked on the last page. Answer the questions in the window that opens; it installs and starts the service. Allow port 443 (or the port you chose) through Windows Firewall.</p>
+<p><strong>Windows.</strong> Run <code>lode-server-0.3.0-x64.msi</code> from the releases page and keep "Set up the Lode server now" ticked on the last page. Answer the questions in the window that opens; it installs and starts the service. Allow port 443 (or the port you chose) through Windows Firewall.</p>
 <p><strong>Docker.</strong> Copy <code>packaging/compose.yaml</code> from the release archive, set <code>LODED_DOMAIN</code> and <code>LODED_EMAIL</code> in it, put the admin password in <code>admin-password.txt</code> beside it, and run <code>docker compose up -d</code>.</p>
 <p>Without a domain, choose "this machine only" in the setup: the server then answers plain HTTP on 127.0.0.1:7480, for trying Lode out or for running behind your own proxy. Part II, chapter 2 has every option.</p>
 <h3>2. Your project</h3>
@@ -151,7 +151,7 @@ lode checkout https://lode.example.com/mygame MyGame</code></pre>
 <p>The client is a single executable named <code>lode</code> (<code>lode.exe</code> on Windows). Install it the way your system installs software:</p>
 <table>
   <tr><th style="width:22%">System</th><th>Install</th><th style="width:30%">Update</th></tr>
-  <tr><td>Windows</td><td><code>winget install SimpleDevOps.Lode</code>, or <code>lode-0.2.0-x64.msi</code> from the releases page. Either puts <code>lode</code> on the <code>PATH</code>.</td><td><code>winget upgrade SimpleDevOps.Lode</code>, or the newer MSI</td></tr>
+  <tr><td>Windows</td><td><code>winget install SimpleDevOps.Lode</code>, or <code>lode-0.3.0-x64.msi</code> from the releases page. Either puts <code>lode</code> on the <code>PATH</code>.</td><td><code>winget upgrade SimpleDevOps.Lode</code>, or the newer MSI</td></tr>
   <tr><td>macOS, Linux with Homebrew</td><td><code>brew install hutler/lode/lode</code></td><td><code>brew upgrade lode</code></td></tr>
   <tr><td>Debian, Ubuntu, Fedora, RHEL</td><td><code>curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh -s -- --client</code>, or the <code>lode</code> <code>.deb</code>/<code>.rpm</code> from the releases page</td><td>the same command, or <code>apt</code>/<code>dnf</code></td></tr>
   <tr><td>Anything else</td><td>the archive for your platform, below</td><td><code>lode self-update</code></td></tr>
@@ -159,16 +159,16 @@ lode checkout https://lode.example.com/mygame MyGame</code></pre>
 <p>To use an archive, download the one for your platform from the project's releases page, unpack it, and put the executable somewhere on your <code>PATH</code>.</p>
 <table>
   <tr><th style="width:52%">Archive</th><th>Platform</th></tr>
-  <tr><td><code>lode-0.2.0-x86_64-pc-windows-msvc.zip</code></td><td>Windows, 64-bit</td></tr>
-  <tr><td><code>lode-0.2.0-x86_64-apple-darwin.tar.gz</code></td><td>macOS, Intel</td></tr>
-  <tr><td><code>lode-0.2.0-aarch64-apple-darwin.tar.gz</code></td><td>macOS, Apple silicon</td></tr>
-  <tr><td><code>lode-0.2.0-x86_64-unknown-linux-musl.tar.gz</code></td><td>Linux, 64-bit (any distribution)</td></tr>
-  <tr><td><code>lode-0.2.0-aarch64-unknown-linux-musl.tar.gz</code></td><td>Linux, ARM 64-bit</td></tr>
+  <tr><td><code>lode-0.3.0-x86_64-pc-windows-msvc.zip</code></td><td>Windows, 64-bit</td></tr>
+  <tr><td><code>lode-0.3.0-x86_64-apple-darwin.tar.gz</code></td><td>macOS, Intel</td></tr>
+  <tr><td><code>lode-0.3.0-aarch64-apple-darwin.tar.gz</code></td><td>macOS, Apple silicon</td></tr>
+  <tr><td><code>lode-0.3.0-x86_64-unknown-linux-musl.tar.gz</code></td><td>Linux, 64-bit (any distribution)</td></tr>
+  <tr><td><code>lode-0.3.0-aarch64-unknown-linux-musl.tar.gz</code></td><td>Linux, ARM 64-bit</td></tr>
 </table>
 <p>Each archive holds both programs, <code>lode</code> and <code>loded</code>, and the service files used in Part II. Check the download against <code>SHA256SUMS</code> from the same release:</p>
 <pre><code>sha256sum -c SHA256SUMS --ignore-missing        # Linux
 shasum -a 256 -c SHA256SUMS --ignore-missing    # macOS
-Get-FileHash lode-0.2.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the list
+Get-FileHash lode-0.3.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the list
 lode --version</code></pre>
 <p>There is nothing else to install.</p>
 <p>A <code>lode</code> installed from an archive updates itself: <code>lode self-update</code> downloads the newest release for your platform, checks it against the release's <code>SHA256SUMS</code>, and replaces the executable. <code>lode self-update --check</code> only tells you whether there is a newer one. A <code>lode</code> installed by winget, the MSI, Homebrew or a Linux package is left to that tool, and <code>self-update</code> says which command to run instead.</p>
@@ -453,6 +453,11 @@ lode switch main -r 214       # exactly revision 214 of main</code></pre>
 <pre><code>cache_dir = "D:/lode-cache"
 cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 <p>Files are always copied out of the cache, so a build that edits them cannot damage it. Every entry is checked when read, and a damaged one is downloaded again. When the cache grows past its cap, the files used least recently are removed. Several <code>lode</code> processes can use it at the same time.</p>
+<p>In an office far from the server, an administrator can run a caching proxy there (chapter 3). Point Lode at it once per server and file content comes from the office copy, while everything else, such as history, commits and locks, still goes to the server:</p>
+<pre><code>lode proxy set https://lode-office.example.com
+lode proxy show               # which proxy, and whether it answers
+lode proxy clear              # download from the server again</code></pre>
+<p>The setting is kept per server in <code>settings.toml</code> under <code>[proxies]</code>; the variable <code>LODE_PROXY</code> overrides it for one shell or build agent (empty or <code>none</code> turns it off). If the proxy cannot be reached or fails, Lode warns once and downloads from the server instead. <code>lode status --remote</code> names the proxy in use. Lode Desk uses the same setting.</p>
 <p><code>lode --version --json</code> prints the client version and the server API version it speaks, for scripts that check compatibility.</p>
 <h3>Editors and other tools</h3>
 <p>A few options exist for programs that drive <code>lode</code>, such as editor plugins:</p>
@@ -550,7 +555,7 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
 <table>
   <tr><th style="width:24%">Platform</th><th>Install</th><th style="width:34%">Then</th></tr>
   <tr><td>Linux (Debian, Ubuntu, Fedora, RHEL, Rocky, openSUSE)</td><td><code>curl -fsSL https://raw.githubusercontent.com/hutler/Lode/main/lode/packaging/install.sh | sh</code><br>picks the <code>.deb</code> or <code>.rpm</code> for the machine and checks it against <code>SHA256SUMS</code>. The packages <code>lode-server</code> and <code>lode</code> are also on the releases page.</td><td><code>sudo -u lode loded setup</code><br><code>sudo systemctl enable --now loded</code></td></tr>
-  <tr><td>Windows</td><td><code>lode-server-0.2.0-x64.msi</code> from the releases page. It installs into <code>C:\Program Files\Lode</code> and adds that folder to <code>PATH</code>.</td><td>Leave "Set up the Lode server now" ticked on the last page: it asks the setup questions, then installs and starts the service. Later, "Lode server setup" in the Start menu does the same.</td></tr>
+  <tr><td>Windows</td><td><code>lode-server-0.3.0-x64.msi</code> from the releases page. It installs into <code>C:\Program Files\Lode</code> and adds that folder to <code>PATH</code>.</td><td>Leave "Set up the Lode server now" ticked on the last page: it asks the setup questions, then installs and starts the service. Later, "Lode server setup" in the Start menu does the same.</td></tr>
   <tr><td>Docker</td><td><code>packaging/compose.yaml</code> from the release archive (chapter 5, Container)</td><td><code>docker compose up -d</code></td></tr>
 </table>
 <p>The Linux package runs the server as the account <code>lode</code> with its data in <code>/var/lib/lode</code>, using the systemd unit it installs; removing it (<code>apt remove lode-server</code>, <code>dnf remove lode-server</code>) keeps both. Uninstalling the MSI stops and removes the service and keeps <code>C:\ProgramData\Lode</code>. The packages are not signed in version 0.x: Windows SmartScreen may ask you to confirm ("More info", "Run anyway").</p>
@@ -643,6 +648,41 @@ loded service stop
 loded migrate-storage --config /var/lib/lode/loded.toml --to s3               # copies the rest, sets kind = "s3"
 loded service start</code></pre>
 <p>Each run copies only what the bucket does not have yet, so an interrupted copy just runs again. The second run keeps the old file as <code>loded.toml.before-s3</code>. The local copies under <code>depots/</code> are no longer used afterwards; remove them once the server works from the bucket.</p>
+<h3>Keeping the metadata in Postgres</h3>
+<p>The metadata (history, users, access rules, locks, shelves, webhooks, checks) lives in the SQLite file <code>meta.db</code> in the data directory, which suits most teams. For many concurrent users, or to have a standby server that takes over when the active one stops, it can live in a Postgres database (version 14 or newer) instead. Create an empty database and a user that owns it, put the URL on the first line of a file readable only by the server's account, and move the server:</p>
+<pre><code># database-url.txt
+postgres://lode:SECRET@db.example.com/lode?sslmode=verify-full
+
+loded service stop
+loded migrate-db --config /var/lib/lode/loded.toml --to postgres --url-file /etc/lode/database-url.txt
+loded service start</code></pre>
+<p><code>migrate-db</code> copies every table in one transaction, checks the row counts, and then adds a <code>[database]</code> table to <code>loded.toml</code>, keeping the old file as <code>loded.toml.before-postgres</code>. <code>meta.db</code> stays where it was; remove it once the server runs well. The settings:</p>
+<pre><code>[database]
+kind = "postgres"
+url_file = "/etc/lode/database-url.txt"   # or url = "postgres://..." in this file
+connections = 8                           # read connections; writes use one more</code></pre>
+<p>The connection is encrypted with TLS. <code>sslmode=verify-full</code> (or <code>verify-ca</code>) checks the database's certificate against the system's trusted roots and an optional <code>sslrootcert=/path/ca.pem</code>; <code>require</code> encrypts without checking the certificate, and <code>prefer</code>, the default, encrypts when the database offers it. Use <code>verify-full</code> for a database on another machine, and <code>disable</code> only on a private network.</p>
+<p><strong>One active server.</strong> A server holds a lock in the database while it runs, and a second <code>loded serve</code> on the same database refuses to start and names the active one. Started with <code>loded serve --wait-for-lock</code>, it waits instead and takes over within seconds when the active server stops or its connection to the database ends. Both servers must see the same file content: use S3 storage, or a data directory on a shared filesystem. If the active server loses its connection to the database, it stops, because the standby may already have taken over.</p>
+<p><strong>Backups.</strong> <code>loded backup</code> and scheduled backups copy <code>loded.toml</code> and the file content, but not the database; they write <code>DATABASE-BACKUP.txt</code> as a reminder. Back the database up with <code>pg_dump</code> or your provider's snapshots, and take the dump before the content is copied. <code>fsck</code>, garbage collection, obliterate and the admin pages work as before; the overview shows the Postgres version instead of the database size. <code>packaging/compose.postgres.yaml</code> is a ready example with Postgres in a container.</p>
+<h3>A caching proxy for a remote office</h3>
+<p>People far from the server download the same files over the same long link. A caching proxy in their office keeps a copy of each file the first time anyone there downloads it; after that, checkouts and updates get the content from the office. It runs from the same <code>loded</code> binary, needs no database and keeps no history:</p>
+<pre><code># proxy.toml
+listen = "0.0.0.0:443"
+data_dir = "/var/lib/lode-proxy"          # the Let's Encrypt account and certificate
+
+[tls]
+acme_domain = "lode-office.example.com"   # or cert = ... and key = ..., as in loded.toml
+
+[proxy]
+upstream = "https://lode.example.com"     # the main server
+cache_dir = "/var/cache/lode-proxy"
+cache_max_gib = 100                       # the default
+
+loded proxy --config /etc/lode/proxy.toml</code></pre>
+<p><code>loded proxy --example</code> prints a starting file, and <code>packaging/compose.proxy.yaml</code> runs it in a container. People then run <code>lode proxy set https://lode-office.example.com</code> (chapter 2).</p>
+<p><strong>What it caches.</strong> Only file content: whole files, and large files chunk by chunk, so a new version of a big asset fetches only the chunks that changed. Every object is checked against its hash before it is kept and again when it is served; a damaged copy is dropped and fetched again. When the cache passes its cap, the content used least recently is removed. Concurrent requests for the same file share one download. Everything else (history, commits, uploads, locks, shelves) is refused with a pointer to the main server, and clients send it there themselves.</p>
+<p><strong>Access stays with the server.</strong> The proxy stores no tokens. For each person and depot it asks the main server, with that person's own token, whether they may read the depot, and keeps the answer for a minute. The same request brings the depot's newly obliterated content, which the proxy then refuses and deletes from its cache. So a revoked reader, or an obliterated file, stops being served by the proxy within about a minute of the next request that needs it.</p>
+<p><strong>Watching it.</strong> <code>https://lode-office.example.com/admin/</code> shows the cache size, the hit rate, the bytes that did not cross the long link, and failed requests to the main server (<code>/admin/metrics.json</code> for monitoring). The page shows counts only, no names or paths. The counters start at zero when the proxy starts. To run it as a service, use a systemd unit or Windows service that runs <code>loded proxy --config …</code>; <code>loded service install</code> does not set up proxies yet.</p>
 
 <h1>4. TLS</h1>
 <p>Clients refuse unencrypted connections to remote servers, so one of these is required:</p>
@@ -704,7 +744,7 @@ lode login https://lode.example.com               # name: admin</code></pre>
 </table>
 <p>Without compose:</p>
 <pre><code>docker run -d --name lode --restart unless-stopped \
-    -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.2.0
+    -p 127.0.0.1:7480:7480 -v lode-data:/var/lib/lode ghcr.io/hutler/loded:0.3.0
 docker logs lode                                  # the admin token, on first start only
 docker exec lode loded fsck --config /var/lib/lode/loded.toml</code></pre>
 <p>Either publish the port on the host's loopback address and put a TLS proxy in front, or use the variables above for built-in HTTPS. The image can also be built from the source tree with <code>docker build -t loded .</code> in the <code>lode</code> folder.</p>

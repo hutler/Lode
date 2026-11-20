@@ -542,7 +542,11 @@ async fn upload_blobs(client: &Client, depot: &str, blobs: &[Blob]) -> Result<()
         let source = by_id.get(&id)?.to_path_buf();
         let client = client.clone();
         let depot = depot.to_owned();
-        Some(async move { client.put_blob_file(&depot, &id, &source).await })
+        Some(async move {
+            // Large files go in chunks, sharing them with earlier versions (ARCHITECTURE §10.6).
+            let size = tokio::fs::metadata(&source).await?.len();
+            client.upload_file(&depot, &id, &source, size).await
+        })
     }))
     .buffer_unordered(PARALLEL_UPLOADS);
     futures::pin_mut!(uploads);

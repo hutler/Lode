@@ -17,6 +17,15 @@ const COPY_BUF: usize = 64 * 1024;
 
 type BoxRead = Box<dyn AsyncRead + Send + Unpin>;
 
+/// What [`Client::fetch_content`] got.
+#[derive(Debug, Clone)]
+pub enum FetchedContent {
+    /// The content, written to the destination; its length.
+    Whole(u64),
+    /// The server keeps the file in chunks: its chunk list (nothing was written).
+    Chunked(lode_core::ChunkList),
+}
+
 impl Client {
     /// `PUT /depots/{d}/blobs/{id}` with content read from `reader`, zstd-compressed on the
     /// way unless compression is off. The server checks the content against `id`.
@@ -121,16 +130,36 @@ impl Client {
     where
         W: AsyncWrite + Unpin + ?Sized,
     {
-        let url = self.url(&["depots", depot, "blobs", &id.to_string()])?;
-        let resp = self
-            .send(retry, || {
-                Ok(self
-                    .request(Method::GET, url.clone())
-                    .header(ACCEPT_ENCODING, ENCODING_ZSTD))
+        self.get_blob_via(depot, id, out, retry, max_len).await.0
+    }
+
+    /// [`Client::get_blob_once`] that also tells whether the proxy answered.
+    async fn get_blob_via<W>(
+        &self,
+        depot: &str,
+        id: &ObjectId,
+        out: &mut W,
+        retry: Retry,
+        max_len: u64,
+    ) -> (Result<u64>, bool)
+    where
+        W: AsyncWrite + Unpin + ?Sized,
+    {
+        let id_text = id.to_string();
+        let (resp, via_proxy) = match self
+            .send_content(retry, &["depots", depot, "blobs", &id_text], |b| {
+                b.header(ACCEPT_ENCODING, ENCODING_ZSTD)
             })
-            .await?;
-        let reader = body_reader(resp)?;
-        copy_verified(reader, out, id, max_len).await
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => return (Err(e), false),
+        };
+        let result = match body_reader(resp) {
+            Ok(reader) => copy_verified(reader, out, id, max_len).await,
+            Err(e) => Err(e),
+        };
+        (result, via_proxy)
     }
 
     /// Downloads blob `id` to `dest`: written to a temporary file next to it, verified, then
@@ -158,14 +187,21 @@ impl Client {
         loop {
             attempt += 1;
             match self.download_once(depot, id, &dir, dest, max_len).await {
-                Err(e) if e.is_transient() && attempt < self.retry.max_attempts => {
+                // The proxy broke off or sent bad content: once more from the server.
+                Err((e, true)) if crate::proxy::is_proxy_failure(&e) => {
+                    self.proxy_failed(&e);
+                    attempt -= 1;
+                }
+                Err((e, _)) if e.is_transient() && attempt < self.retry.max_attempts => {
                     tokio::time::sleep(self.retry.delay(attempt, None)).await;
                 }
-                other => return other,
+                Ok(n) => return Ok(n),
+                Err((e, _)) => return Err(e),
             }
         }
     }
 
+    /// One download attempt; the error comes with whether the proxy answered.
     async fn download_once(
         &self,
         depot: &str,
@@ -173,21 +209,89 @@ impl Client {
         dir: &Path,
         dest: &Path,
         max_len: u64,
-    ) -> Result<u64> {
+    ) -> std::result::Result<u64, (Error, bool)> {
         let tmp = tempfile::Builder::new()
             .prefix(".lode-download-")
-            .tempfile_in(dir)?;
-        let len = {
-            let mut file = tokio::fs::File::from_std(tmp.as_file().try_clone()?);
-            let len = self
-                .get_blob_once(depot, id, &mut file, Retry::No, max_len)
-                .await?;
-            file.flush().await?;
-            file.sync_all().await?;
-            len
-        };
-        tmp.persist(dest).map_err(|e| Error::Io(e.error))?;
+            .tempfile_in(dir)
+            .map_err(|e| (Error::Io(e), false))?;
+        let file = tmp
+            .as_file()
+            .try_clone()
+            .map_err(|e| (Error::Io(e), false))?;
+        let mut file = tokio::fs::File::from_std(file);
+        let (len, via_proxy) = self
+            .get_blob_via(depot, id, &mut file, Retry::No, max_len)
+            .await;
+        let len = len.map_err(|e| (e, via_proxy))?;
+        let local = |e: std::io::Error| (Error::Io(e), false);
+        file.flush().await.map_err(local)?;
+        file.sync_all().await.map_err(local)?;
+        tmp.persist(dest).map_err(|e| (Error::Io(e.error), false))?;
         Ok(len)
+    }
+
+    /// Fetches content `id` for a cache (the caching proxy, T154): a file the server keeps
+    /// in chunks comes back as its chunk list, anything else is written to `dest` (checked
+    /// against its id, nothing left behind on failure). Large raw answers are first asked for
+    /// a chunk list, so a chunked file is never fetched whole.
+    pub async fn fetch_content(
+        &self,
+        depot: &str,
+        id: &ObjectId,
+        dest: &Path,
+    ) -> Result<FetchedContent> {
+        let url = self.url(&["depots", depot, "blobs", &id.to_string()])?;
+        let resp = self
+            .send(Retry::Yes, || {
+                Ok(self
+                    .request(Method::GET, url.clone())
+                    .header(ACCEPT_ENCODING, ENCODING_ZSTD))
+            })
+            .await?;
+        let raw_len = resp
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        let encoded = resp.headers().contains_key(CONTENT_ENCODING);
+        if !encoded && raw_len.is_some_and(|n| n >= lode_core::CHUNK_THRESHOLD) {
+            drop(resp);
+            if let Some(list) = self.chunk_list(depot, id).await? {
+                return Ok(FetchedContent::Chunked(list));
+            }
+            let n = self.download_blob(depot, id, dest).await?;
+            return Ok(FetchedContent::Whole(n));
+        }
+        let dir = match dest.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+            _ => std::path::PathBuf::from("."),
+        };
+        let tmp = tempfile::Builder::new()
+            .prefix(".lode-fetch-")
+            .tempfile_in(&dir)?;
+        let mut file = tokio::fs::File::from_std(tmp.as_file().try_clone()?);
+        let n = copy_verified(body_reader(resp)?, &mut file, id, MAX_BLOB_SIZE).await?;
+        file.flush().await?;
+        drop(file);
+        tmp.persist(dest).map_err(|e| Error::Io(e.error))?;
+        Ok(FetchedContent::Whole(n))
+    }
+
+    /// `GET /depots/{d}/obliterated-ids?after=`: ids obliterated from the depot (T154).
+    pub async fn obliterated_ids(
+        &self,
+        depot: &str,
+        after: Option<i64>,
+    ) -> Result<lode_proto::depot::ObliteratedIds> {
+        let mut url = self.url(&["depots", depot, "obliterated-ids"])?;
+        if let Some(a) = after {
+            url.query_pairs_mut()
+                .append_pair("after", &a.max(0).to_string());
+        }
+        let resp = self
+            .send(Retry::Yes, || Ok(self.request(Method::GET, url.clone())))
+            .await?;
+        decode(resp).await
     }
 
     /// `GET /depots/{d}/files?rev=&path=`: a file's content at a revision, with its id, kind

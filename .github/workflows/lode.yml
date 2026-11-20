@@ -68,6 +68,32 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  postgres:
+    name: server suites on Postgres
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lode
+      # Every test server gets a schema of its own in this database (LODE_TEST_POSTGRES); the
+      # suites run many servers at once, hence the connection limit.
+      - name: Start Postgres
+        run: |
+          docker run -d --name pg -p 127.0.0.1:5432:5432 \
+            -e POSTGRES_USER=lode -e POSTGRES_PASSWORD=lode -e POSTGRES_DB=lode_test \
+            postgres:16 -c max_connections=500
+          for i in $(seq 1 30); do
+            docker exec pg pg_isready -U lode -d lode_test && break
+            sleep 1
+          done
+          echo "LODE_TEST_POSTGRES=postgres://lode:lode@127.0.0.1/lode_test?sslmode=disable" >> "$GITHUB_ENV"
+      - run: >-
+          cargo test -p lode-meta -p lode-server -p lode-mod-locks -p lode-mod-shelves
+          -p lode-mod-webhooks -p lode-mod-checks -p lode-mod-mcp -p lode-client -p lode-cli
+          -p lode-proxy
+
   msrv:
     name: minimum Rust version
     runs-on: ubuntu-latest

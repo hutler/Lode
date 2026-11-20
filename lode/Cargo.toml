@@ -13,6 +13,7 @@ members = [
     "crates/lode-mod-webhooks",
     "crates/lode-mod-checks",
     "crates/lode-client",
+    "crates/lode-proxy",
     "crates/lode-workspace",
     "crates/lode-import",
     "crates/lode-ops",
@@ -25,7 +26,7 @@ members = [
 exclude = ["crates/lode-desk"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.88"
@@ -46,6 +47,7 @@ lode-mod-mcp = { path = "crates/lode-mod-mcp" }
 lode-mod-webhooks = { path = "crates/lode-mod-webhooks" }
 lode-mod-checks = { path = "crates/lode-mod-checks" }
 lode-client = { path = "crates/lode-client" }
+lode-proxy = { path = "crates/lode-proxy" }
 lode-workspace = { path = "crates/lode-workspace" }
 lode-import = { path = "crates/lode-import" }
 lode-ops = { path = "crates/lode-ops" }
@@ -91,6 +93,11 @@ windows-service = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "json", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+# Postgres metadata backend (T153): the maintained pure-Rust driver, blocking API used from
+# spawn_blocking threads through a small runtime of its own; TLS through rustls with ring, no OpenSSL.
+tokio-postgres = "0.7"
+tokio-postgres-rustls = "0.13"
+rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

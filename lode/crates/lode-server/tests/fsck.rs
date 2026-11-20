@@ -222,7 +222,7 @@ async fn a_branch_head_at_a_missing_revision_is_found() {
     h.commit("a", "a.txt", b"a").await;
     h.state
         .meta()
-        .with_writer(|c| Ok(c.execute("UPDATE branch SET head_rev = 99", [])?))
+        .with_writer(|c| c.execute("UPDATE branch SET head_rev = 99", lode_meta::vals![]))
         .unwrap();
     let problems = h.check(false).await;
     assert!(
@@ -261,7 +261,11 @@ async fn backup_during_commits_passes_fsck() {
         let dest = dest_parent.path().join(format!("b{n}"));
         let report = backup(&h.state, &dest).await.unwrap();
         assert!(report.objects > 0);
-        backups.push(dest);
+        // With Postgres the backup holds the objects but not the database (pg_dump's job),
+        // so it cannot be opened on its own.
+        if !report.database_external {
+            backups.push(dest);
+        }
     }
     writer.await.unwrap();
     for dest in backups {

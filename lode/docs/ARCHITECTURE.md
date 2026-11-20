@@ -96,7 +96,7 @@ Each object is one file: a 16-byte header followed by the payload.
 | --- | --- | --- |
 | 0 | 4 | magic `LODE` |
 | 4 | 1 | format version = 1 |
-| 5 | 1 | kind: 1 blob, 2 tree, 3 chunk list (reserved, not implemented) |
+| 5 | 1 | kind: 1 blob, 2 tree, 3 chunk list (§3.5) |
 | 6 | 1 | codec: 0 none, 1 zstd |
 | 7 | 1 | reserved = 0 |
 | 8 | 8 | raw length, little-endian |
@@ -153,6 +153,56 @@ server. `lode-store`'s feature `test-util` adds an in-process fake S3 that check
 and the store suite runs against the filesystem store, the fake and, with `LODE_TEST_S3`, a
 real service (MinIO in CI).
 
+### 3.5 Chunked files (T150)
+
+A file of at least 16 MiB (`CHUNK_THRESHOLD`, the same cut-off as text versus binary) may be
+stored as a **chunk list** instead of whole. The file keeps its id, `BLAKE3(content)`, so
+trees, revisions, locks, shelves, caches and older clients do not see a difference. Each
+chunk is an ordinary blob (kind 1) under its own id; the list is a kind-3 object stored
+under the **file's** id. Its payload:
+
+```
+u8      version = 1
+varint  count            at least 2
+chunk*  in file order
+  [32]    id            blob id of the chunk
+  varint  size          256 KiB ..= 4 MiB; only the last chunk may be smaller
+```
+
+Decoding is strict, like trees: a wrong version, a count under 2, a size out of range, a
+non-canonical varint or trailing bytes are rejected.
+
+**Chunker.** Cut points come from FastCDC (Xia et al., "The Design of Fast Content-Defined
+Chunking", 2020) with normalized chunking at level 2: minimum 256 KiB, average 1 MiB, maximum
+4 MiB. For each byte after the first 256 KiB of a chunk, `hash = (hash << 1) + GEAR[byte]`
+(wrapping, 64 bits, starting at 0 for each chunk); the chunk ends after that byte when
+`hash & mask == 0`, with the 22 highest bits as the mask up to 1 MiB into the chunk and the
+18 highest bits after it, or when it reaches 4 MiB. `GEAR[i]` is the first 8 bytes,
+little-endian, of `BLAKE3("lode gear v1" || u8 i)`. The scheme is named
+`fastcdc-2020-lode-v1` and `GET /info` reports it with its sizes (`chunking`), so every client
+cuts the same content at the same places and their uploads share chunks. Test vector: the
+24 MiB xorshift stream of `lode-core`'s `chunk::tests::noise(0x10de, …)` ends its first four
+chunks at 1,394,431, 2,789,073, 3,920,034 and 5,066,432 and has 20 chunks.
+
+**Upload.** The client uploads the chunks the server lacks (`objects/missing` with the chunk
+ids), then `PUT /depots/{d}/blobs/{id}/chunks` with the list. The server checks every chunk
+is stored with the size given (`missing_objects` names the others), streams them in order
+through BLAKE3 and compares with `id` (`hash_mismatch`), and only then stores the list with
+the same no-replace rule as any object. A file under the threshold is refused; a file already
+stored, whole or chunked, is `AlreadyPresent`. The check holds the GC fence shared, like a
+commit's object checks.
+
+**Reading.** The server wraps its store in `ChunkedStore`: `get` of a chunk list streams the
+chunks one after the other, so download, `files`, blame, MCP, shelves and fsck's re-hash see
+the whole file without knowing. `get_stored` still shows the list. `get_from(offset)` opens
+only the chunks from an offset on, which serves `Range`. `GET …/blobs/{id}/chunks` returns the
+list of a chunked file and `not_found` with `details.reason = "not_chunked"` for one stored
+whole. Chunks need not be stored as chunks only: a 1 MiB file whose content equals a chunk is
+the same object.
+
+Chunked files also lift the S3 store's 5 GiB single-`PUT` limit, since no object is bigger
+than a chunk or its list.
+
 ## 4. Metadata
 
 ### 4.1 Store
@@ -162,12 +212,58 @@ connection behind a mutex, a pool of read-only connections, all calls via `spawn
 All writers are serialized, which is what makes commits atomic and is ample for 100 users
 because blobs are uploaded before the write transaction begins.
 
-`MetaStore` is a concrete type with a narrow method surface, written so a Postgres
-implementation can be added later behind a trait without touching callers.
+`MetaStore` is a concrete type with a narrow method surface. Every statement, in the core
+and in modules, goes through the object-safe trait `lode_meta::Sql` (T152): `execute`,
+`query`, `query_opt`, `query_one` and `value` on `&dyn Sql`, with parameters built by
+`vals![…]` (`i64`, `&str`, `&[u8]`, `Option<…>`, `bool`) and results read from an owned
+`Row` with `row.get::<T>(i)`. `ReadTx::conn()`, `WriteTx::conn()` and `Reads::db()` return
+`&dyn Sql`; no crate but `lode-meta` names a database driver (a test enforces it; the
+client's local SQLite in `lode-workspace` and `lode-ops` is separate). Statements are
+written in a portable subset: numbered `?1` parameters (rewritten to `$1` for Postgres),
+`RETURNING id` instead of `last_insert_rowid()`, `ON CONFLICT … DO NOTHING/UPDATE` instead
+of `INSERT OR IGNORE/REPLACE`, no SQLite-only functions, and a parameter whose type
+Postgres cannot infer from its first use (`?2 IS NULL OR …`) written as `CAST(?2 AS BIGINT)`. Where a statement must differ,
+`Sql::dialect()` tells which one to run.
 
 Migrations are numbered SQL files embedded in the binary; `schema_version` table; the server
 refuses to start on a newer schema than it knows. Modules own tables prefixed `mod_<name>_`
-and ship their own migrations.
+and ship their own migrations. Each step has an SQLite and a Postgres form
+(`Migration::sql`, `Migration::postgres`; core files `NNNN_name.sql` and
+`NNNN_name.postgres.sql`).
+
+**Postgres (T153).** `[database] kind = "postgres"` with `url` or `url_file` puts the same
+schema in Postgres 14+: `BIGINT` for every integer, `BYTEA` for blobs, identity columns for
+ids, `TEXT COLLATE "C"` so text orders by bytes as in SQLite (the path range queries rely on
+it), and an explicit `rowid` column where SQLite's implicit one gave an order (`rev_merge`).
+The driver is `tokio-postgres` with `tokio-postgres-rustls` (ring), the maintained pure-Rust
+client; no OpenSSL. The store keeps its shape: one writer connection behind a mutex (so
+commits serialize exactly as with SQLite), a pool of reader connections whose transactions
+are `REPEATABLE READ READ ONLY` snapshots, and statements prepared once per connection.
+Connections are driven by a two-thread runtime inside `lode-meta`; the blocking threads wait
+on the client's futures with `futures::executor::block_on`, which is safe on any thread.
+Migrations run under a transaction-level advisory lock, so two servers starting together
+take turns.
+
+*One active server.* `loded serve` opens one more connection and takes the session-level
+advisory lock `hashtextextended('lode-server:' || current_database() || '.' ||
+current_schema(), 0)`, with `application_name = "loded <host> pid <n>"`. While another
+session holds it, `serve` refuses and names the holder (from `pg_locks` and
+`pg_stat_activity`); with `--wait-for-lock` it retries every second. Postgres frees the lock
+when the holder's connection ends, so a standby takes over when the active server stops or
+dies. The holder pings its lock connection every 3 seconds (10 second limit); on failure the
+server shuts down, since a standby may already be active. Both must share the object store
+(S3 or a shared filesystem).
+
+*Moving.* `loded migrate-db --to postgres --url-file <f>` opens the SQLite database (bringing
+it up to date), opens the empty Postgres database with the same modules (creating the
+schema), copies every table in foreign-key order inside one Postgres transaction, compares
+row counts, moves the identity sequences past the copied ids, and only then rewrites
+`loded.toml` (keeping `loded.toml.before-postgres`).
+
+*Tests.* With `LODE_TEST_POSTGRES` set to a server where tests may create schemas, `loded
+init` (and so every test server) puts its metadata in a fresh schema and records the URL in
+`<data>/test-postgres-url`, which the server then opens instead of `meta.db`. CI runs the
+server, module, client and CLI suites a second time this way.
 
 ### 4.2 Core schema
 
@@ -321,7 +417,8 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/branches/{b}/merge-info?source=<branch>` | Merging `source` into `b`: `{target, source, branch_point, merged: [{rev, from_rev, to_rev}], base, source_head, pending}`. `branch_point` is the newest revision both histories share; `merged` the ranges from `source` recorded in `b`'s history (§4.3); `base` the merge base of SPEC §5.4; `pending` how many source revisions come after it. Needs read on both branches |
 | `POST /depots/{d}/objects/missing` | `{ids}` → `{missing}`; at most 10,000 ids per call. Needs scope `write` or `shelve`, like upload, because the answer reveals whether content exists |
 | `PUT /depots/{d}/blobs/{id}` | Upload. Body is the raw content, optionally `Content-Encoding: zstd` |
-| `GET /depots/{d}/blobs/{id}` | Download; honours `Accept-Encoding: zstd`; supports `Range` on raw bytes only when stored uncompressed, otherwise full body |
+| `GET /depots/{d}/blobs/{id}` | Download, whole or chunked (§3.5); honours `Accept-Encoding: zstd` for an object stored compressed and whole; one `Range: bytes=` range on the raw content answers `206` (`416` when it cannot be met) |
+| `PUT /depots/{d}/blobs/{id}/chunks` · `GET …` | Store a large file as the chunk list in the body (needs scope `write` or `shelve`); read a chunked file's list (§3.5) |
 | `POST /depots/{d}/branches/{b}/commits` | Commit (section 5) |
 | `GET /depots/{d}/revisions?branch=&path=&before=&after=&own=&changes=&author=&author_kind=&limit=` | Revision list, paged. `author=<name>` and `author_kind=user|agent` filter by author. Default order is newest first, paging with `before`. With `after=N` the order is ascending from `N+1`, for polling. Without `branch` the list covers the whole depot; every item names its branch. With `branch`, inherited history (§4.3) is included unless `own=true`. `changes=true` adds each revision's changed paths, capped per revision (`[limits] max_changes_listed`, default 1,000) with a `changes_truncated` flag. With `path`, `follow=true` continues through `copy_from` into the source path's history |
 | `GET /depots/{d}/revisions/{n}` | One revision with its changes |
@@ -541,7 +638,7 @@ pub trait Module: Send + Sync + 'static {
 **Module surface (reviewed in T056).** The locks, shelves and MCP modules reach the server only
 through `ModuleCtx` (auth, depots, commits, blobs, meta, tools, limits, clock), the commit
 hooks (`CommitCtx`, `CommittedCtx`) and the `Module` trait. Their SQL touches only their own
-`mod_<name>_` tables; core data is read through `lode_meta::Reads` and written only through
+`mod_<name>_` tables and runs through `lode_meta::Sql` in the portable subset of §4.1; core data is read through `lode_meta::Reads` and written only through
 `Commits`, `set_rev_meta` and the event outbox. No module uses `AppState`, the permission
 engine's internals or the read handlers. `Blobs::store()` and `Meta::store()` hand out the raw
 stores, so the rule is kept by review rather than by the type system; a narrower surface is a
@@ -1001,6 +1098,64 @@ records `N..N`. Only ranges whose source is the merged branch count toward the b
 that reached the source through other merges is merged again, which three-way merging mostly
 absorbs.
 
+### 10.6 Large files (T151)
+
+When the server reports `chunking` in `/info` with the parameters this build uses, a file of
+at least 16 MiB travels in chunks (§3.5); otherwise, and against older servers, it travels
+whole. `LODE_TEST_NO_CHUNKING` forces whole transfers for tests.
+
+- **Upload** (commit, shelve, import): the file is cut and hashed in one read; a file that no
+  longer hashes to the id being committed stops the commit as changed. `objects/missing` is
+  asked for the chunk ids, the missing chunks are sent as blobs (four at a time, each read
+  from its offset in the file), then the list. If a GC removed a chunk in between, the list is
+  refused with `missing_objects` and the round runs once more. A rerun after a crash needs no
+  state: the server keeps what was sent.
+- **Download** (checkout, update, switch, view changes): the client asks for the list
+  (`not_chunked` means the file is stored whole and is downloaded whole). Chunks come, in
+  order of preference, from `.lode/tmp/chunks/` (left by an interrupted run), from the files
+  now at the paths being replaced (cut with the same chunker; whatever matches a chunk id is
+  copied, whether or not the file was modified), from the shared cache, and only then from the
+  server. The file is put together in `.lode/tmp`, checked against its id and renamed into
+  place; its chunks are then removed from `.lode/tmp/chunks/`.
+- **Shared cache:** for large files it holds chunks, not whole files, so several versions of
+  a big asset share most of their space.
+- Results report `bytes_uploaded`/`bytes_downloaded` and `bytes_reused` (CLI-JSON).
+
+### 10.7 Caching proxy (T154)
+
+`loded proxy --config proxy.toml` (crate `lode-proxy`) serves file content to a remote office
+from a disk cache and fetches each object from the main server ("upstream") once.
+
+- **Routes.** `GET /api/v1/depots/{d}/blobs/{id}` (whole, or one `Range`) and `…/chunks`,
+  answered as the server would (raw bytes, never zstd). `GET /api/v1/info` is the upstream's
+  plus `proxy: {upstream, version}`. `/admin/` and `/admin/metrics.json` show counters.
+  Anything else is `not_found` with `details.reason = "caching_proxy"`.
+- **Access.** No tokens are stored. Per (SHA-256 of the bearer token, depot) the proxy calls
+  the upstream's `GET /depots/{d}/obliterated-ids?after=` with the caller's token; success
+  means the caller may read the depot, a 4xx is passed on as it came. The answer, allowed or
+  refused, is kept for 60 s (injected clock). The same call refreshes the depot's obliterated
+  ids when they are older than 60 s: new ids are refused with `obliterated` and their cached
+  copies deleted. `after` is the previous answer's `now_ms` less five minutes, so an
+  obliteration committed just before that answer is not missed. Refreshes happen on demand;
+  a depot nobody asks for keeps its copies until someone does.
+- **Fetching.** On a miss the proxy asks for the blob; a raw answer of 16 MiB or more is
+  dropped unread and the chunk list asked for instead, so chunked files are cached chunk by
+  chunk and never whole. Chunks are fetched as a response reaches them. Each object is checked
+  against its BLAKE3 id before it is kept (`Client::fetch_content`, `download_blob_max`).
+  Requests for the same object wait on one per-object lock and then find it cached. A chunk
+  list cannot be checked on its own; when a whole chunked file is served, it is hashed on the
+  way and a mismatch drops the list and breaks the response off.
+- **Cache.** `<cache_dir>/objects/<depot as hex>/<ab>/<id>` (`.chunks` for lists), written
+  under `tmp/` and renamed in; `tmp/` is cleared at start and the index rebuilt from the files
+  in modification-time order (touched on each use). Entries are checked by hash on every read
+  and dropped if damaged. After each fill, the least recently used entries are removed until
+  the cache fits `cache_max_gib`.
+- **Client.** `ClientBuilder::proxy` sends blob and chunk-list downloads to the proxy and
+  everything else to the server. A transport error, a 5xx, or content that fails its hash
+  marks the proxy failed for that client (shared by its clones): one warning, then the
+  server. The proxy comes from `LODE_PROXY`, else `[proxies]` in `settings.toml` keyed by
+  server URL (`lode proxy set|clear|show`).
+
 ## 11. Maintenance
 
 - **GC** (`lode admin gc`): mark from every revision's root tree (walking tree objects, memoized
@@ -1010,6 +1165,12 @@ absorbs.
   shared from its blob checks to its transaction, and each batch first marks the revisions
   committed since the previous mark, so a finished commit never loses an object.
   `POST /admin/depots/{d}/gc[?dry_run=true]` returns objects checked, objects and bytes removed.
+- **Chunked files** (T150): the mark adds the chunks of every reachable chunk list (a file
+  entry of at least 16 MiB is looked up once), and of a module root that is one. fsck checks
+  that each chunk of a referenced list is stored with its size; `--full` re-hashes the
+  assembled file. Obliterating a chunked file also obliterates (records and deletes) the
+  chunks no other reachable file uses, found with a mark that skips the selected files, so
+  the content cannot be put together again; chunks shared with other files stay.
 - **fsck** (`lode admin fsck`): every revision's tree is reachable and decodes; every referenced
   object exists; optional `--full` re-hashes every object; branch heads and `next_rev` are
   consistent. `POST /admin/depots/{d}/fsck[?full=true]` returns every problem with its

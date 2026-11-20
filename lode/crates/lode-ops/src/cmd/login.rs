@@ -1,6 +1,7 @@
 //! `lode login`, `lode logout`, `lode whoami`.
 
-use lode_proto::auth::{ChangePasswordRequest, LoginRequest, REASON_PASSWORD_CHANGE_REQUIRED};
+use lode_client::ServerUrl;
+use lode_proto::auth::{ChangePasswordRequest, Info, LoginRequest, REASON_PASSWORD_CHANGE_REQUIRED};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
@@ -96,6 +97,9 @@ pub async fn login(ctx: &Ctx, args: LoginArgs) -> OpResult<Value> {
         Some(u) => ctx.parse_server(u)?,
         None => ctx.server_url(None)?,
     };
+    // A wrong address (such as the web admin page's) gets a clear error here instead of
+    // a refused sign-in.
+    find_server(ctx, &server).await?;
     let anon = ctx.anonymous_client(&server)?;
     let ui = ctx.out.ui();
     let token = if args.sso {
@@ -257,10 +261,66 @@ pub async fn passwd(ctx: &Ctx, args: PasswdArgs) -> OpResult<Value> {
 pub async fn sso_offer(ctx: &Ctx, url: &str) -> OpResult<Value> {
     let server = ctx.parse_server(url)?;
     let info = ctx.anonymous_client(&server)?.info().await?;
-    Ok(match info.sso {
+    Ok(sso_json(&info))
+}
+
+/// What answers at `url`: `{server, version, sso}` when it is a Lode server, with `sso` as
+/// [`sso_offer`] gives it. Otherwise a `not_a_lode_server` error, whose `details.suggested`
+/// holds the address to use instead when a Lode server answers at the same host without the
+/// path. Needs no token.
+pub async fn server_info(ctx: &Ctx, url: &str) -> OpResult<Value> {
+    let server = ctx.parse_server(url)?;
+    let info = find_server(ctx, &server).await?;
+    Ok(json!({
+        "server": server.as_str(),
+        "version": info.server_version,
+        "sso": sso_json(&info),
+    }))
+}
+
+fn sso_json(info: &Info) -> Value {
+    match &info.sso {
         Some(s) => json!({ "label": s.label, "password_login": s.password_login }),
         None => Value::Null,
-    })
+    }
+}
+
+/// Asks `server` what it is, and turns an answer that is not Lode's into an error that names
+/// the right address when there is one. `/info` needs no token and every Lode server answers
+/// it, so anything but a connection problem or a server that is down means the address
+/// points somewhere else: a web page, the admin pages under `/admin/`, another program.
+async fn find_server(ctx: &Ctx, server: &ServerUrl) -> OpResult<Info> {
+    use lode_client::Error as E;
+    match ctx.anonymous_client(server)?.info().await {
+        Ok(info) => Ok(info),
+        Err(e @ (E::Transport(_) | E::InsecureUrl(_) | E::InvalidUrl { .. })) => Err(e.into()),
+        Err(e) if e.is_transient() => Err(e.into()),
+        Err(_) => Err(not_a_lode_server(ctx, server).await),
+    }
+}
+
+async fn not_a_lode_server(ctx: &Ctx, server: &ServerUrl) -> OpError {
+    let mut root = server.clone();
+    root.set_path("/");
+    if root.path() != server.path() {
+        if let Ok(client) = ctx.anonymous_client(&root) {
+            if client.info().await.is_ok() {
+                let shown = root.as_str().trim_end_matches('/');
+                return OpError::failed(
+                    "not_a_lode_server",
+                    format!(
+                        "no Lode server answers at {server}; the server is at {shown}, use that address"
+                    ),
+                )
+                .with_details(json!({ "server": server.as_str(), "suggested": shown }));
+            }
+        }
+    }
+    OpError::failed(
+        "not_a_lode_server",
+        format!("no Lode server answers at {server}; check the address"),
+    )
+    .with_details(json!({ "server": server.as_str() }))
 }
 
 /// Revokes the stored token on the server (best effort) and forgets it.

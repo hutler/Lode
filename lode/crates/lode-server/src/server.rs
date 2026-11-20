@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use lode_meta::{MetaConfig, MetaStore, MigrationSet, NewPrincipal, PrincipalKind, Reads};
+use lode_meta::{
+    Database, MetaConfig, MetaStore, MigrationSet, NewPrincipal, PrincipalKind, Reads,
+};
 use lode_store::{BlobStore, FsBlobStore, FsBlobStoreConfig, S3BlobStore};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
@@ -16,7 +18,9 @@ use tokio_rustls::TlsAcceptor;
 use crate::acme::{Acme, AcmeError};
 use crate::auth::{generate_token, hash_token, ScopeRegistry, ADMIN_USER};
 use crate::clock::{Clock, SharedClock, SystemClock};
-use crate::config::{ServerConfig, TlsConfig, CONFIG_FILE_NAME, DEFAULT_CONFIG};
+use crate::config::{
+    DatabaseKind, ServerConfig, TlsConfig, CONFIG_FILE_NAME, DEFAULT_CONFIG, DEFAULT_DB_CONNECTIONS,
+};
 use crate::module::Modules;
 use crate::serve::{self, Settings};
 use crate::state::AppState;
@@ -24,6 +28,12 @@ use crate::tls::{acme_server_config, load_server_config, TlsError};
 
 /// Name of the metadata database inside the data directory.
 pub const META_DB_FILE: &str = "meta.db";
+
+/// Test support: when `LODE_TEST_POSTGRES` is set, `init` puts the metadata in a fresh
+/// Postgres schema and writes its URL to this file in the data directory, and the server
+/// opens that database instead of `meta.db`. This is how the server and module test suites
+/// run a second time against Postgres without changing each test.
+pub const TEST_POSTGRES_FILE: &str = "test-postgres-url";
 
 /// Name of the object directory inside the data directory.
 pub const DEPOTS_DIR: &str = "depots";
@@ -66,6 +76,9 @@ pub enum ServerError {
     /// The `[storage]` settings cannot be used.
     #[error("{0}")]
     Storage(String),
+    /// The `[database]` settings cannot be used.
+    #[error("{0}")]
+    Database(String),
     /// TLS setup error.
     #[error(transparent)]
     Tls(#[from] TlsError),
@@ -95,13 +108,26 @@ pub struct InitReport {
 /// Refuses a directory that already has a database. An existing `loded.toml` is kept.
 pub async fn init(data_dir: &Path) -> Result<InitReport, ServerError> {
     let db = data_dir.join(META_DB_FILE);
-    if db.exists() {
+    if db.exists() || data_dir.join(TEST_POSTGRES_FILE).exists() {
         return Err(ServerError::AlreadyInitialized(data_dir.to_owned()));
     }
     tokio::fs::create_dir_all(data_dir)
         .await
         .map_err(io_err(format!("cannot create {}", data_dir.display())))?;
-    let meta = open_meta(db, Vec::new()).await?;
+    let test_pg = tokio::task::spawn_blocking(lode_meta::test_postgres_url)
+        .await
+        .map_err(|e| ServerError::Database(format!("test database task failed: {e}")))?;
+    let db = match test_pg {
+        None => Database::Sqlite(db),
+        Some(url) => {
+            let url = url?;
+            tokio::fs::write(data_dir.join(TEST_POSTGRES_FILE), &url)
+                .await
+                .map_err(io_err("cannot write the test database URL"))?;
+            Database::Postgres(url)
+        }
+    };
+    let meta = open_meta(db, Vec::new(), DEFAULT_DB_CONNECTIONS).await?;
     FsBlobStore::open(data_dir, FsBlobStoreConfig::default()).await?;
 
     let token = generate_token(&mut rand::rngs::OsRng);
@@ -146,8 +172,46 @@ pub async fn init(data_dir: &Path) -> Result<InitReport, ServerError> {
     })
 }
 
-async fn open_meta(db: PathBuf, modules: Vec<MigrationSet>) -> Result<MetaStore, ServerError> {
-    tokio::task::spawn_blocking(move || MetaStore::open(db, &modules, MetaConfig::default()))
+/// Where the server's metadata is: `meta.db`, the `[database]` Postgres URL, or a test
+/// database (see [`TEST_POSTGRES_FILE`]).
+pub fn database_of(config: &ServerConfig) -> Result<Database, ServerError> {
+    match config.database.kind {
+        DatabaseKind::Postgres => config
+            .database
+            .postgres_url()
+            .map(Database::Postgres)
+            .map_err(ServerError::Database),
+        DatabaseKind::Sqlite => {
+            let test = config.data_dir.join(TEST_POSTGRES_FILE);
+            if test.is_file() {
+                let url = std::fs::read_to_string(&test)
+                    .map_err(io_err(format!("cannot read {}", test.display())))?;
+                return Ok(Database::Postgres(url.trim().to_owned()));
+            }
+            Ok(Database::Sqlite(config.data_dir.join(META_DB_FILE)))
+        }
+    }
+}
+
+/// Opens the configured database and brings its schema up to date.
+pub async fn open_database(
+    config: &ServerConfig,
+    modules: Vec<MigrationSet>,
+) -> Result<MetaStore, ServerError> {
+    let db = check_initialized(config)?;
+    open_meta(db, modules, config.database.connections).await
+}
+
+async fn open_meta(
+    db: Database,
+    modules: Vec<MigrationSet>,
+    connections: usize,
+) -> Result<MetaStore, ServerError> {
+    let config = MetaConfig {
+        read_connections: connections,
+        ..MetaConfig::default()
+    };
+    tokio::task::spawn_blocking(move || MetaStore::open_database(&db, &modules, config))
         .await
         .map_err(|e| ServerError::Io {
             context: "opening the database".into(),
@@ -156,13 +220,16 @@ async fn open_meta(db: PathBuf, modules: Vec<MigrationSet>) -> Result<MetaStore,
         .map_err(ServerError::from)
 }
 
-fn check_initialized(dir: &Path) -> Result<PathBuf, ServerError> {
+fn check_initialized(config: &ServerConfig) -> Result<Database, ServerError> {
+    let dir = &config.data_dir;
     if !dir.is_dir() {
         return Err(ServerError::DataDirMissing(dir.to_owned()));
     }
-    let db = dir.join(META_DB_FILE);
-    if !db.is_file() {
-        return Err(ServerError::NotInitialized(dir.to_owned()));
+    let db = database_of(config)?;
+    if let Database::Sqlite(file) = &db {
+        if !file.is_file() {
+            return Err(ServerError::NotInitialized(dir.to_owned()));
+        }
     }
     Ok(db)
 }
@@ -170,8 +237,7 @@ fn check_initialized(dir: &Path) -> Result<PathBuf, ServerError> {
 /// Offline recovery: revokes every token of the built-in `admin` user, re-enables it, and
 /// returns a new token with all core scopes.
 pub async fn reset_admin(config: &ServerConfig) -> Result<String, ServerError> {
-    let db = check_initialized(&config.data_dir)?;
-    let meta = open_meta(db, Vec::new()).await?;
+    let meta = open_database(config, Vec::new()).await?;
     let token = generate_token(&mut rand::rngs::OsRng);
     let hash = hash_token(&token);
     let now = SystemClock.now_ms();
@@ -220,8 +286,8 @@ pub async fn generate_admin_password(config: &ServerConfig) -> Result<String, Se
 /// Offline: revokes every token of the built-in `admin` user (`loded setup` keeps only the
 /// password unless asked for a token).
 pub async fn revoke_admin_tokens(config: &ServerConfig) -> Result<(), ServerError> {
-    let db = check_initialized(&config.data_dir)?;
-    let meta = open_meta(db, Vec::new()).await?;
+    let db = check_initialized(config)?;
+    let meta = open_meta(db, Vec::new(), config.database.connections).await?;
     let found = meta
         .write(move |tx| {
             let Some(admin) = tx
@@ -249,8 +315,7 @@ async fn write_admin_password(
     if password.chars().count() < crate::auth::MIN_PASSWORD_LEN {
         return Err(ServerError::WeakPassword);
     }
-    let db = check_initialized(&config.data_dir)?;
-    let meta = open_meta(db, Vec::new()).await?;
+    let meta = open_database(config, Vec::new()).await?;
     let password = password.to_owned();
     let hash = tokio::task::spawn_blocking(move || crate::auth::hash_password(&password))
         .await
@@ -293,8 +358,6 @@ pub async fn open_state(
     clock: SharedClock,
     modules: Modules,
 ) -> Result<AppState, ServerError> {
-    let dir = config.data_dir.clone();
-    let db = check_initialized(&dir)?;
     // Only enabled modules migrate, so a disabled module adds no tables.
     let sets = modules
         .iter()
@@ -303,7 +366,7 @@ pub async fn open_state(
             migrations: m.migrations(),
         })
         .collect();
-    let meta = open_meta(db, sets).await?;
+    let meta = open_database(&config, sets).await?;
     let blobs = open_blob_store(&config).await?;
     let state = AppState::new(meta, blobs, config, clock, modules);
     state.permissions().reload(state.meta()).await?;

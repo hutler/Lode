@@ -1,5 +1,6 @@
 //! Global options, user settings, sign-in resolution and the client.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,6 +42,10 @@ pub struct Settings {
     /// Size cap of the shared download cache in GiB (default 20).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_max_gib: Option<u64>,
+    /// Caching proxy (T154) per server URL: content downloads from that server go through
+    /// it. `LODE_PROXY` overrides it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub proxies: BTreeMap<String, String>,
 }
 
 /// What a command runs with.
@@ -220,11 +225,33 @@ impl Ctx {
         Ok(Some(BlobCache::new(dir, cap)))
     }
 
-    /// A client for `server` without a token.
+    /// The caching proxy for `server` and where it was set: `LODE_PROXY` (empty or `none`
+    /// for none), else the `[proxies]` setting.
+    pub fn proxy_for(&self, server: &ServerUrl) -> OpResult<Option<(String, &'static str)>> {
+        if let Some(p) = std::env::var_os("LODE_PROXY") {
+            let p = p.to_string_lossy().trim().to_owned();
+            if p.is_empty() || p.eq_ignore_ascii_case("none") {
+                return Ok(None);
+            }
+            return Ok(Some((p, "LODE_PROXY")));
+        }
+        Ok(self
+            .settings()?
+            .proxies
+            .get(server.as_str())
+            .filter(|p| !p.is_empty())
+            .map(|p| (p.clone(), "settings")))
+    }
+
+    /// A client for `server` without a token. Content downloads go through the caching
+    /// proxy when one is set; if it fails, a warning is shown once and the server is used.
     pub fn anonymous_client(&self, server: &ServerUrl) -> OpResult<Client> {
+        let out = self.out.clone();
         Ok(Client::builder(server.as_str())
             .allow_insecure_http(self.g.insecure)
             .product(PRODUCT)
+            .proxy(self.proxy_for(server)?.map(|(p, _)| p))
+            .on_proxy_failure(Arc::new(move |m| out.warn(m)))
             .build()?)
     }
 

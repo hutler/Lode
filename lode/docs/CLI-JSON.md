@@ -96,16 +96,30 @@ replaces a first password before any sign-in). The name defaults to the signed-i
 
 `{ "server", "removed": bool, "revoked": bool }` (`revoked` absent when nothing was stored)
 
+### `lode proxy set <url>` / `clear` / `show`
+
+The caching proxy (0.3) used for the server's file content.
+
+- `set`: `{ "server", "proxy" }`. A URL that answers as a Lode server rather than a proxy is
+  a `usage` error; one that does not answer is saved with a warning.
+- `clear`: `{ "server", "removed": bool }`
+- `show`: `{ "server", "proxy": url|null, "source": "LODE_PROXY"|"settings", "reachable":
+  bool, "upstream": url|null }`
+
+`status --remote` reports the proxy as `remote.proxy` (null without one).
+
 ### `lode whoami`
 
 `{ "server", "name", "kind": "user"|"agent", "owner": name|null, "scopes": [..] }`
 
 ### `lode checkout <url>/<depot> [dir]`
 
-`{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "obliterated", "resumed": bool }`
+`{ "workspace", "server", "depot", "branch", "rev", "files", "fetched", "downloaded", "bytes_downloaded", "bytes_reused", "obliterated", "resumed": bool }`
 
 `files` counts the files in the view, `fetched` those placed by this run, `downloaded` the
-distinct blobs fetched from the server.
+distinct blobs fetched from the server. `bytes_downloaded` is the content received from the
+server and `bytes_reused` the content found locally instead: the shared cache, and for
+large files the chunks already in the workspace or left by an interrupted run (0.3).
 
 ### `lode init <url>/<depot> [--template T] [--dry-run] [-m MSG]`
 
@@ -172,6 +186,7 @@ replaces the release list URL (a GitHub-style `releases` JSON).
   "invalid": [ { "local": "/abs/path", "reason": "…" } ],
   "remote": {
     "head_rev": 14,
+    "proxy": "https://lode-office.example.com/",
     "files": [
       { "path": "Content/Hero.uasset", "newer": false, "deleted_at_head": false,
         "locked_by": { "name": "bob", "kind": "user" }, "lock_workspace": "…", "mine": false }
@@ -234,7 +249,11 @@ them); `--all` reverts everything and forgets the merge as well.
 
 ### `lode commit`
 
-`{ "rev", "branch", "files", "uploaded", "replayed": bool, "resumed": bool }`
+`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool }`
+
+`uploaded` counts the blobs the server lacked; `bytes_uploaded` is the content sent and
+`bytes_reused` what the server already had, which for a large file is every chunk that did
+not change (0.3).
 
 `resumed` is true when the command finished an earlier commit whose answer was lost
 (`replayed` then tells whether the server had already made the revision).
@@ -276,7 +295,8 @@ neither `-m` nor `-F` is given.
 ### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
 
 `{ "shelf": id, "link": "lode://…/shelf/ID" | null, "version": n, "files": n, "uploaded": n,
-"kept": bool, "updated": bool, "merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
+"bytes_uploaded": n, "bytes_reused": n, "kept": bool, "updated": bool,
+"merged_from": [ { "branch", "from_rev", "to_rev" } ] }`
 
 `link` (T176) is the shelf's `lode://` link, to paste for a reviewer; `null` when the server
 address has a path, which links cannot carry. The local MCP server's `shelve` tool returns
@@ -361,7 +381,7 @@ side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
   "rev": 12, "from": 9, "full": false,
   "files": [ { "path": "a.txt", "outcome": "merged" } ],
   "counts": { "merged": 1 },
-  "downloaded": 0,
+  "downloaded": 0, "bytes_downloaded": 0, "bytes_reused": 0,
   "obliterated": []
 }
 ```
