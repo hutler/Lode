@@ -3371,11 +3371,11 @@ dependencies = [
 
 [[package]]
 name = "lode-build"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "lode-client"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3398,7 +3398,7 @@ dependencies = [
 
 [[package]]
 name = "lode-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "blake3",
  "globset",
@@ -3411,7 +3411,7 @@ dependencies = [
 
 [[package]]
 name = "lode-desk"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "directories",
@@ -3443,7 +3443,7 @@ dependencies = [
 
 [[package]]
 name = "lode-import"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "blake3",
  "futures",
@@ -3458,7 +3458,7 @@ dependencies = [
 
 [[package]]
 name = "lode-meta"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "futures",
@@ -3474,7 +3474,7 @@ dependencies = [
 
 [[package]]
 name = "lode-mod-checks"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "lode-core",
@@ -3489,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "lode-mod-feed"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "lode-core",
@@ -3503,7 +3503,7 @@ dependencies = [
 
 [[package]]
 name = "lode-mod-locks"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "lode-core",
@@ -3518,7 +3518,7 @@ dependencies = [
 
 [[package]]
 name = "lode-mod-mcp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "diffy",
@@ -3535,7 +3535,7 @@ dependencies = [
 
 [[package]]
 name = "lode-mod-shelves"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3554,7 +3554,7 @@ dependencies = [
 
 [[package]]
 name = "lode-mod-webhooks"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "futures",
@@ -3576,7 +3576,7 @@ dependencies = [
 
 [[package]]
 name = "lode-ops"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -3599,7 +3599,7 @@ dependencies = [
 
 [[package]]
 name = "lode-proto"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "lode-core",
  "serde",
@@ -3609,7 +3609,7 @@ dependencies = [
 
 [[package]]
 name = "lode-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3648,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "lode-store"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "blake3",
@@ -3669,7 +3669,7 @@ dependencies = [
 
 [[package]]
 name = "lode-testkit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -3695,7 +3695,7 @@ dependencies = [
 
 [[package]]
 name = "lode-workspace"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "blake3",
  "ignore",

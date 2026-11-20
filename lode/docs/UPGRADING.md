@@ -130,11 +130,33 @@ so take a backup first.
   `LODE_PROXY`; nothing changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
   open to the depot's readers (ids only).
 
-### Next (0.4): the agent as a desktop client (M18)
+### 0.4.0: streams and smarter merge (M16)
 
-Nothing has to be done to upgrade: replace the programs and restart. The database widens the
-access-rule subject check (core schema 8) and gains the feed module's tables, on the first
-start. Take a backup first; a 0.3 server refuses a database a 0.4 server has opened.
+Nothing has to be done to upgrade: replace the programs and restart. The database gains
+`branch.stream_type` (core schema 7), added on the first start; every existing branch has no
+type and keeps the 0.3 merge rules. A 0.3 server refuses a database a 0.4 server has opened,
+so take a backup first.
+
+- Streams (T160, T161) are opt-in. To turn a depot into streams, a depot admin gives the
+  trunk a type first (`lode branch set-type main mainline`), then its children
+  (`lode branch set-type dev/ui development`, `... rel/1.0 release`). From then on the
+  server refuses merges between streams that go the wrong way (`conflict` with
+  `details.reason = "stream_flow"`); `lode branch tree` shows what each stream could merge.
+  Merges where either side has no type are unchanged. Older clients can still commit; a
+  refused merge reaches them as an ordinary `conflict` error.
+- `GET …/merge-info` gains `flow`, `BranchView` gains `stream`, and there is a new webhook
+  event `branch.stream_changed`. Clients that ignore unknown fields are unaffected.
+- `lode merge` follows renames (T162), merges JSON files key by key (T163, `[merge] json` in
+  `.lodeconfig`, on by default for `*.json`, `*.uproject` and `*.uplugin`), and names a
+  merge tool for conflicted files (T164, `[merge.tools]`); a tool runs only through
+  `lode resolve --tool` and only as set up in your own `settings.toml`.
+- Backups can be copied to an S3-compatible bucket and restored from it
+  (`[backup.copy_to]`, `loded restore`; see the user guide, "Copies on another machine").
+
+#### Also in 0.4.0: the agent as a desktop client (M18)
+
+The database also widens the access-rule subject check (core schema 8) and gains the feed
+module's tables, on the same first start.
 
 - `lode mcp` gains `branches`, `locks`, `conflicts`, `switch`, `merge`, `resolve`,
   `changelist` and `wait_for_events` (T190, T191, T193); `status` takes `remote` and, like
