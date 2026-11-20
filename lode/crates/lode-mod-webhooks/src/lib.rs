@@ -861,6 +861,26 @@ impl Module for Webhooks {
         NAME
     }
 
+    fn metrics(&self, tx: &dyn Reads) -> Result<Vec<lode_server::metrics::Sample>, MetaError> {
+        // Deliveries are kept for a while after they settle, so these are recent counts.
+        let rows = tx.db().query(
+            "SELECT state, count(*) FROM mod_webhooks_delivery GROUP BY state ORDER BY state",
+            vals![],
+            |r| Ok((r.get::<String>(0)?, r.get::<i64>(1)?)),
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|(state, n)| {
+                lode_server::metrics::Sample::gauge(
+                    "lode_webhook_deliveries",
+                    "Webhook deliveries kept on the server, by state (pending, ok, failed).",
+                    n as f64,
+                )
+                .label("state", state)
+            })
+            .collect())
+    }
+
     fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
         tx.conn().execute(
             "DELETE FROM mod_webhooks_delivery WHERE hook_id IN \

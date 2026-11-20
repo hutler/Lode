@@ -121,6 +121,13 @@ grace_seconds = 86400
 [admin_ui]
 enabled = true
 
+# Prometheus metrics at <server>/metrics, in the text format: requests, commits, blob bytes,
+# open shelves, held locks, webhook deliveries, sizes, certificate expiry, last backup.
+# Readable with a token that has the `metrics` scope, or from the addresses listed here.
+# [metrics]
+# enabled = true
+# allow_from = ["127.0.0.1", "10.0.0.0/8"]
+
 # Webhooks module, when enabled in [modules].
 [webhooks]
 # Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
@@ -191,6 +198,9 @@ pub struct ServerConfig {
     /// Where the metadata is kept.
     #[serde(default)]
     pub database: DatabaseConfig,
+    /// Prometheus metrics at `/metrics`.
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 /// The `[database]` table (T153).
@@ -325,6 +335,93 @@ pub struct AdminUiConfig {
 impl Default for AdminUiConfig {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+/// The `[metrics]` table (T181): Prometheus metrics at `/metrics`, off by default.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct MetricsConfig {
+    /// Serve `/metrics`; off answers 404 there.
+    pub enabled: bool,
+    /// Addresses (`10.0.0.5`) or networks (`10.0.0.0/8`) that may read `/metrics` without a
+    /// token. Others need a token with the `metrics` scope.
+    pub allow_from: Vec<IpNet>,
+}
+
+/// An address or a network in CIDR notation, such as `127.0.0.1` or `fd00::/8`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IpNet {
+    /// The network's address.
+    pub addr: std::net::IpAddr,
+    /// Leading bits that must match.
+    pub prefix: u8,
+}
+
+impl IpNet {
+    /// Whether `ip` is in this network. An IPv4 address mapped into IPv6 counts as IPv4.
+    pub fn contains(&self, ip: std::net::IpAddr) -> bool {
+        use std::net::IpAddr;
+        let ip = match ip {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+            v4 => v4,
+        };
+        let bits = |a: IpAddr| -> (u128, u8) {
+            match a {
+                IpAddr::V4(v) => (u128::from(u32::from(v)) << 96, 32),
+                IpAddr::V6(v) => (u128::from(v), 128),
+            }
+        };
+        let ((net, width), (have, other)) = (bits(self.addr), bits(ip));
+        if width != other {
+            return false;
+        }
+        let keep = u32::from(self.prefix.min(width));
+        let mask = if keep == 0 {
+            0
+        } else {
+            u128::MAX << (128 - keep)
+        };
+        net & mask == have & mask
+    }
+}
+
+impl std::str::FromStr for IpNet {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, String> {
+        let (addr, prefix) = match text.split_once('/') {
+            Some((a, p)) => (a, Some(p)),
+            None => (text, None),
+        };
+        let addr: std::net::IpAddr = addr
+            .trim()
+            .parse()
+            .map_err(|_| format!("`{text}` is not an address or network"))?;
+        let max = if addr.is_ipv4() { 32 } else { 128 };
+        let prefix = match prefix {
+            None => max,
+            Some(p) => p
+                .trim()
+                .parse::<u8>()
+                .ok()
+                .filter(|p| *p <= max)
+                .ok_or_else(|| format!("`{text}`: the prefix length must be 0 to {max}"))?,
+        };
+        Ok(Self { addr, prefix })
+    }
+}
+
+impl std::fmt::Display for IpNet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.addr, self.prefix)
+    }
+}
+
+impl<'de> Deserialize<'de> for IpNet {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -1328,6 +1425,19 @@ impl ServerConfig {
         let mut t = Table::new();
         t.insert("enabled".into(), Value::Boolean(self.admin_ui.enabled));
         root.insert("admin_ui".into(), Value::Table(t));
+        let mut t = Table::new();
+        t.insert("enabled".into(), Value::Boolean(self.metrics.enabled));
+        t.insert(
+            "allow_from".into(),
+            Value::Array(
+                self.metrics
+                    .allow_from
+                    .iter()
+                    .map(|n| Value::String(n.to_string()))
+                    .collect(),
+            ),
+        );
+        root.insert("metrics".into(), Value::Table(t));
         root.to_string()
     }
 
@@ -1348,6 +1458,7 @@ impl ServerConfig {
             storage: StorageConfig::default(),
             admin_ui: AdminUiConfig::default(),
             database: DatabaseConfig::default(),
+            metrics: MetricsConfig::default(),
         }
     }
 }

@@ -630,6 +630,12 @@ checks = false
 [gc]
 grace_seconds = 86400              # unused data younger than this is kept</code></pre>
 <p>Restart the server after changing the file. The log level is set with the environment variable <code>LODED_LOG</code> (<code>info</code> by default; <code>debug</code> for more).</p>
+<h3>Prometheus metrics</h3>
+<p>Teams that already run Prometheus can scrape the server. Metrics are off by default; turn them on and say who may read them:</p>
+<pre><code>[metrics]
+enabled = true
+allow_from = ["127.0.0.1", "10.0.0.0/8"]   # addresses or networks that need no token</code></pre>
+<p><code>GET /metrics</code> on the server's own port answers in the Prometheus text format. From other addresses it needs a token with the <code>metrics</code> scope, for example <code>lode admin token create --for prometheus --name scrape --scope metrics</code> for an agent made for it, given to Prometheus as a bearer token (<code>authorization: { credentials_file: ... }</code>). It reports HTTP requests by kind of route and status (<code>lode_http_requests_total</code>), commits, file content bytes received and sent, depots and each depot's head revision, open shelves and held locks per depot, webhook deliveries by state, the size of the store and of the SQLite database, when the certificate expires and when the newest backup was made. Counters start at zero when the server starts. Metrics carry depot names but never paths, user names or file content. With metrics off, <code>/metrics</code> answers 404.</p>
 <h3>Keeping content in S3</h3>
 <p>File content can live in an S3-compatible bucket (Amazon S3, Backblaze B2, MinIO, Wasabi and others) instead of the data directory, so a small server can hold a large depot. The database stays in the data directory. Create the bucket first, then add a <code>[storage]</code> table:</p>
 <pre><code>[storage]

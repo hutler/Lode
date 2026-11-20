@@ -137,6 +137,9 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 - Webhooks gain `format` (T175, webhooks module schema 2, added on the first start):
   `slack`, `discord` or `telegram` send one line of text to team chat; `lode` (the default)
   is unchanged byte for byte. `lode admin webhook add --format F`.
+- Optional Prometheus metrics (T181): `[metrics] enabled = true` serves `GET /metrics` in
+  the text format, for tokens with the new `metrics` scope or addresses in `allow_from`.
+  Off by default; nothing changes unless it is turned on.
 - `loded doctor --config C` and `lode doctor [URL]` (T178) check a server's setup and the
   way to it, one line per check; exit 0, 2 on warnings, 1 on a failure. `--json` gives the
   report (docs/CLI-JSON.md).

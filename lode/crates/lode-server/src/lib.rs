@@ -21,6 +21,7 @@ pub mod failpoint;
 mod idle;
 pub mod lru;
 pub mod maintenance;
+pub mod metrics;
 pub mod module;
 pub mod perm;
 pub mod read;
@@ -35,9 +36,9 @@ pub mod trash;
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
-    AcmeConfig, AdminUiConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, Limits,
-    ModulesConfig, OidcConfig, PasswordLogin, S3Settings, ServerConfig, StorageConfig, StorageKind,
-    TlsConfig, WebhooksConfig,
+    AcmeConfig, AdminUiConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, IpNet,
+    Limits, MetricsConfig, ModulesConfig, OidcConfig, PasswordLogin, S3Settings, ServerConfig,
+    StorageConfig, StorageKind, TlsConfig, WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};

@@ -512,6 +512,20 @@ them out, so `/admin/…` falls through to the API's 404.
   stands) and parses pages as XML. `cargo run -p lode-testkit --example admin_demo` starts a
   server with sample data; `docs/admin-guide/shoot.mjs` takes the guide's screenshots.
 
+### 6.2 Metrics (T181)
+
+`[metrics] enabled = true` mounts `GET /metrics` (outside `/api/v1`, on the same port) and a
+middleware around every route that counts requests by a fixed route class (`api_read`,
+`api_write`, `commit`, `blob_upload`, `blob_download`, `admin_ui`, `web_ui`, `metrics`,
+`other`) and status code, accepted commits, and blob body bytes as they stream. These
+counters live in `AppState` and reset with the process. Gauges are read per scrape: depots
+and head revisions from the metadata, module samples from `Module::metrics(tx)` (locks
+held and open shelves per depot, webhook deliveries by state), store and SQLite sizes
+(through the size cache), certificate expiry and the newest backup. The text format is
+written by `lode_server::metrics::render`; `check_text_format` is the test's checker. Access:
+the peer address in `allow_from` (CIDR), else a token with the `metrics` scope, which is
+registered only while metrics are on. Labels carry depot names and states, never paths.
+
 ## 7. Security
 
 - **Transport.** `loded` terminates TLS itself with rustls, with a certificate and key from
