@@ -19,6 +19,7 @@ path = "src/main.rs"
 lode-build.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
 lode-meta.workspace = true
 lode-mod-locks.workspace = true
 lode-mod-mcp.workspace = true

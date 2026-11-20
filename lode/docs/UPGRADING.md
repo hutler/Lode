@@ -123,3 +123,5 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 - `GET /admin/acl` takes optional `depot` and `subject` filters (`lode admin acl list --depot
   D --subject S`); the admin Access page has the same filter.
 - `lode link` prints `lode://` links; `lode shelve --json` gains `link`.
+- `lode completions` and `loded completions`; the Linux packages install bash, zsh and fish
+  completion.

@@ -172,6 +172,13 @@ Get-FileHash lode-0.2.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the
 lode --version</code></pre>
 <p>There is nothing else to install.</p>
 <p>A <code>lode</code> installed from an archive updates itself: <code>lode self-update</code> downloads the newest release for your platform, checks it against the release's <code>SHA256SUMS</code>, and replaces the executable. <code>lode self-update --check</code> only tells you whether there is a newer one. A <code>lode</code> installed by winget, the MSI, Homebrew or a Linux package is left to that tool, and <code>self-update</code> says which command to run instead.</p>
+<h3>Tab completion</h3>
+<p>The Linux packages install completion for bash, zsh and fish (open a new shell). Otherwise <code>lode completions &lt;bash|zsh|fish|powershell|elvish&gt;</code> prints the script, and <code>loded completions …</code> the server's:</p>
+<pre><code>lode completions bash &gt; ~/.local/share/bash-completion/completions/lode
+lode completions zsh &gt; ~/.zfunc/_lode          # with fpath+=~/.zfunc before compinit in ~/.zshrc
+lode completions fish &gt; ~/.config/fish/completions/lode.fish
+# PowerShell: add this line to your profile (notepad $PROFILE)
+lode completions powershell | Out-String | Invoke-Expression</code></pre>
 
 <h1>2. Signing in</h1>
 <p>Your administrator gives you a server address and an account name.</p>
@@ -494,6 +501,7 @@ cache_max_gib = 50            # optional; the default cap is 20 GiB</code></pre>
   <tr><th style="width:44%">Command</th><th>Purpose</th></tr>
   <tr><td><code>lode login</code> · <code>logout</code> · <code>whoami</code></td><td>Sign in and out; show the current account</td></tr>
   <tr><td><code>lode passwd</code></td><td>Change your own password</td></tr>
+  <tr><td><code>lode completions &lt;shell&gt;</code></td><td>Print a tab completion script (bash, zsh, fish, powershell, elvish)</td></tr>
   <tr><td><code>lode link</code></td><td>Print the <code>lode://</code> link of a file (<code>PATH[@REV]</code>), a revision (<code>-r</code>) or a shelf (<code>--shelf</code>), the same links Lode Desk copies</td></tr>
   <tr><td><code>lode checkout URL/DEPOT [DIR]</code></td><td>Create a workspace</td></tr>
   <tr><td><code>lode init URL/DEPOT [--template T] [--dry-run]</code></td><td>Make the current folder a new depot</td></tr>

@@ -63,6 +63,7 @@ directories = "6"
 diffy = { version = "0.5", features = ["std"] }
 similar = "2.7"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4.5"
 futures = "0.3"
 globset = "0.4"
 hex = "0.4"

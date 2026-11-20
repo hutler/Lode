@@ -132,6 +132,11 @@ enum Command {
     Checks(cmd::checks::ChecksArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
     Mcp(cmd::mcp::McpArgs),
+    /// Print a shell completion script: bash, zsh, fish, powershell or elvish.
+    Completions {
+        /// The shell.
+        shell: clap_complete::Shell,
+    },
     /// Administer the server: depots, users, agents, groups, tokens, access rules.
     Admin(cmd::admin::AdminArgs),
     /// Any other command runs `lode-<command>` from PATH.
@@ -142,6 +147,12 @@ enum Command {
 async fn run(cli: Cli) -> OpResult<Value> {
     // Already turned into path arguments by `paths_from::expand`.
     let _ = cli.paths_from;
+    if let Some(Command::Completions { shell }) = &cli.command {
+        // The script alone on stdout, also with --json (it is meant for a file or `source`).
+        use clap::CommandFactory;
+        clap_complete::generate(*shell, &mut Cli::command(), "lode", &mut std::io::stdout());
+        std::process::exit(0);
+    }
     let ctx = Ctx::new(
         Globals {
             json: cli.json,
@@ -200,6 +211,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
         Some(Command::Checks(a)) => cmd::checks::checks(&ctx, a).await,
         Some(Command::Link(a)) => cmd::link::link(&ctx, a).await,
+        Some(Command::Completions { .. }) => Ok(Value::Null),
         Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {
             // The child owns stdout; `lode` adds nothing to it and passes its exit code on.

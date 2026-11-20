@@ -26,6 +26,11 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Print a shell completion script: bash, zsh, fish, powershell or elvish.
+    Completions {
+        /// The shell.
+        shell: clap_complete::Shell,
+    },
     /// Create a data directory: database, object store and a default loded.toml.
     Init {
         /// Directory to create or fill.
@@ -128,6 +133,11 @@ fn main() -> anyhow::Result<()> {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(shell, &mut Cli::command(), "loded", &mut std::io::stdout());
+            Ok(())
+        }
         Command::Init { data_dir } => {
             let report = lode_server::init(&data_dir).await?;
             println!(

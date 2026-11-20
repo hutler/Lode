@@ -313,6 +313,12 @@ A submit refused by the checks gate exits 1 with code `checks_required`; `detail
 "reported_by"? } ] }` (`reason`: `absent`, `not_success`, `wrong_reporter`), and the human
 message lists each unmet check on its own line.
 
+### `lode completions <shell>`
+
+Prints the completion script for `bash`, `zsh`, `fish`, `powershell` or `elvish` to stdout,
+also with `--json` (the script is the output). `loded completions` does the same for the
+server.
+
 ### `lode link PATH[@REV] [-b BRANCH] | -r REV | --shelf ID [--depot D]`
 
 Prints the `lode://` link Lode Desk would copy (T176), using the workspace's server and depot
