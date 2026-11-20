@@ -50,6 +50,8 @@ pub(super) struct ReadState {
     diff: Rc<VecModel<DiffRow>>,
     /// Bumped each time a view opens; answers for an older one are dropped.
     generation: Cell<u64>,
+    /// Bumped each time a diff is asked for, in its own view or beside a list.
+    diff_generation: Cell<u64>,
     /// The loaded revisions of the history, newest first.
     revisions: RefCell<Vec<Value>>,
     /// The checks of the loaded revisions, as `Desk::checks` answers, merged page by page.
@@ -86,6 +88,7 @@ impl ReadState {
             blame: Rc::new(VecModel::default()),
             diff: Rc::new(VecModel::default()),
             generation: Cell::new(0),
+            diff_generation: Cell::new(0),
             revisions: RefCell::new(Vec::new()),
             checks: RefCell::new(Value::Null),
             rev_checks: Rc::new(VecModel::default()),
@@ -187,6 +190,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
         });
     });
     let a = Rc::clone(app);
+    r.on_peek_file(move |p, rev| a.peek_file(p.to_string(), u64::try_from(rev).ok()));
+    let a = Rc::clone(app);
     r.on_show_revision(move |rev| {
         a.open_view(View::History {
             path: None,
@@ -276,8 +281,14 @@ impl App {
         let generation = self.read.generation.get() + 1;
         self.read.generation.set(generation);
         let r = w.global::<Reading>();
+        if !matches!(view, View::Diff { .. }) {
+            self.clear_peek();
+        }
         match view {
-            View::Changes => r.set_pane(Pane::Changes),
+            View::Changes => {
+                r.set_pane(Pane::Changes);
+                self.peek_selected();
+            }
             View::History { path, rev } => {
                 r.set_pane(Pane::History);
                 self.load_history(&w, root, path, rev, generation);
@@ -288,7 +299,8 @@ impl App {
             }
             View::Diff { path, rev } => {
                 r.set_pane(Pane::Diff);
-                self.load_diff(&w, root, path, rev, generation);
+                let g = self.next_diff();
+                self.load_diff(&w, root, path, rev, g);
             }
             View::Locks => {
                 r.set_pane(Pane::Locks);
@@ -335,6 +347,38 @@ impl App {
 
     fn current(&self, generation: u64) -> bool {
         self.read.generation.get() == generation
+    }
+
+    fn diff_current(&self, generation: u64) -> bool {
+        self.read.diff_generation.get() == generation
+    }
+
+    fn next_diff(&self) -> u64 {
+        let g = self.read.diff_generation.get() + 1;
+        self.read.diff_generation.set(g);
+        g
+    }
+
+    /// Shows `path`'s diff (in `rev`, or the working copy's) beside the list it was picked
+    /// from, without leaving the view.
+    pub(super) fn peek_file(&self, path: String, rev: Option<u64>) {
+        let Some((w, root)) = self.reading() else {
+            return;
+        };
+        let g = self.next_diff();
+        self.load_diff(&w, root, path, rev, g);
+    }
+
+    /// Empties the diff beside the lists, and drops any answer still on its way.
+    pub(super) fn clear_peek(&self) {
+        self.next_diff();
+        self.read.diff.set_vec(Vec::new());
+        self.read.hunks.borrow_mut().clear();
+        if let Some(w) = self.window.upgrade() {
+            let r = w.global::<Reading>();
+            r.set_diff(DiffState::default());
+            r.set_image(ImageState::default());
+        }
     }
 
     fn load_history(
@@ -609,7 +653,13 @@ impl App {
                 Ok(v) => {
                     let (d, files) = history::detail(&v, &me.read.branch.borrow());
                     r.set_detail(d);
+                    // The first file's diff shows beside the list, as a start.
+                    let first = files.first().map(|f| f.path.to_string());
                     me.read.files.set_vec(files);
+                    match first {
+                        Some(p) => me.peek_file(p, Some(rev)),
+                        None => me.clear_peek(),
+                    }
                 }
                 Err(e) => {
                     let mut h = r.get_history();
@@ -698,7 +748,7 @@ impl App {
                 None => me.desk.diff(root.clone(), path.clone()).await,
                 Some(r) => me.desk.diff_revision(root.clone(), r, path.clone()).await,
             };
-            if !me.current(generation) {
+            if !me.diff_current(generation) {
                 return;
             }
             let Some(w) = me.window.upgrade() else { return };
@@ -827,7 +877,7 @@ impl App {
                     },
                 });
             }
-            if !me.current(generation) {
+            if !me.diff_current(generation) {
                 return;
             }
             let Some(w) = me.window.upgrade() else { return };
@@ -876,7 +926,7 @@ impl App {
 
     /// The images cannot be shown: the error, or a note with the sizes and why.
     fn image_failed(&self, generation: u64, e: Option<&ErrorView>, why: &str) {
-        if !self.current(generation) {
+        if !self.diff_current(generation) {
             return;
         }
         let Some(w) = self.window.upgrade() else {

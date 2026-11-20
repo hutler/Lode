@@ -257,6 +257,45 @@ pub fn rows(
     out
 }
 
+/// Splits the rows for the two lists of the changes view: the picked files (for "To commit"),
+/// and the rest under their groups (for "Pending"; a group whose files are all picked is left
+/// out unless it is a named changelist, which keeps its actions). The third list is the named
+/// changelists, for the sidebar.
+pub fn split_rows(rows: &[ChangeRow]) -> (Vec<ChangeRow>, Vec<ChangeRow>, Vec<ChangeRow>) {
+    let mut picked = Vec::new();
+    let mut pending = Vec::new();
+    let mut lists = Vec::new();
+    let mut i = 0;
+    while i < rows.len() {
+        let g = &rows[i];
+        if !g.is_group {
+            if g.picked {
+                picked.push(g.clone());
+            } else {
+                pending.push(g.clone());
+            }
+            i += 1;
+            continue;
+        }
+        if g.named {
+            lists.push(g.clone());
+        }
+        let end = rows[i + 1..]
+            .iter()
+            .position(|r| r.is_group)
+            .map_or(rows.len(), |n| i + 1 + n);
+        let files = &rows[i + 1..end];
+        let left: Vec<ChangeRow> = files.iter().filter(|f| !f.picked).cloned().collect();
+        picked.extend(files.iter().filter(|f| f.picked).cloned());
+        if !left.is_empty() || g.named {
+            pending.push(g.clone());
+            pending.extend(left);
+        }
+        i = end;
+    }
+    (picked, pending, lists)
+}
+
 /// One file's row.
 pub fn file_row(f: &FileEntry, picked: bool, selected: bool) -> ChangeRow {
     let (dir, name) = split_path(&f.path);

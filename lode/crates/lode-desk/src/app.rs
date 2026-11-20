@@ -147,6 +147,14 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         desk = desk.with_config_dir(dir);
     }
     let recent = Rc::new(VecModel::<Recent>::default());
+    let servers = Rc::new(VecModel::<ServerRowData>::default());
+    window.set_servers(ModelRc::from(Rc::clone(&servers)));
+    let picked_rows = Rc::new(VecModel::<ChangeRow>::default());
+    let pending_rows = Rc::new(VecModel::<ChangeRow>::default());
+    let list_rows = Rc::new(VecModel::<ChangeRow>::default());
+    window.set_picked_rows(ModelRc::from(Rc::clone(&picked_rows)));
+    window.set_pending_rows(ModelRc::from(Rc::clone(&pending_rows)));
+    window.set_list_rows(ModelRc::from(Rc::clone(&list_rows)));
     let workspaces = Rc::new(VecModel::<WorkspaceTab>::default());
     window.set_version(lode_build::VERSION.into());
     window.set_recent(ModelRc::from(Rc::clone(&recent)));
@@ -166,6 +174,10 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         window: window.as_weak(),
         desk,
         recent,
+        servers,
+        picked_rows,
+        pending_rows,
+        list_rows,
         workspaces,
         pick_folder: options.pick_folder,
         sign_in_generation: Cell::new(0),
@@ -253,6 +265,12 @@ struct App {
     window: slint::Weak<AppWindow>,
     desk: Desk,
     recent: Rc<VecModel<Recent>>,
+    /// The servers of the recent workspaces, on the Workspaces tab.
+    servers: Rc<VecModel<ServerRowData>>,
+    /// The changes split for the two lists, and the named changelists for the sidebar.
+    picked_rows: Rc<VecModel<ChangeRow>>,
+    pending_rows: Rc<VecModel<ChangeRow>>,
+    list_rows: Rc<VecModel<ChangeRow>>,
     workspaces: Rc<VecModel<WorkspaceTab>>,
     pick_folder: PickFolder,
     /// Bumped each time the sign-in dialog opens or closes, so a late answer from an
@@ -315,6 +333,17 @@ fn connect(window: &AppWindow, app: &Rc<App>) {
     window.on_check_out(move || a.check_out());
     let a = Rc::clone(app);
     window.on_close_dialog(move || a.close_dialog());
+    let a = Rc::clone(app);
+    window.on_sign_out(move |url| a.sign_out(url.to_string()));
+    let a = Rc::clone(app);
+    window.on_show_folder(move || {
+        let root = a.shown_root.borrow().clone();
+        if let Some(root) = root {
+            if let (Err(e), Some(w)) = (crate::desk::show_folder(&root), a.window.upgrade()) {
+                w.set_workspace_error(error_info(&e));
+            }
+        }
+    });
 }
 
 /// Runs `future` on the UI thread's event loop.
@@ -325,8 +354,56 @@ fn spawn(future: impl Future<Output = ()> + 'static) {
 
 impl App {
     fn refresh_recent(&self) {
-        let rows: Vec<Recent> = self.desk.recent().iter().map(recent_row).collect();
+        let recent = self.desk.recent();
+        let rows: Vec<Recent> = recent.iter().map(recent_row).collect();
         self.recent.set_vec(rows);
+        // The servers of the workspaces, each once, then who is signed in to each.
+        let mut urls: Vec<String> = Vec::new();
+        for r in &recent {
+            let u = r.server.trim_end_matches('/').to_owned();
+            if !u.is_empty() && !urls.contains(&u) {
+                urls.push(u);
+            }
+        }
+        self.servers.set_vec(
+            urls.iter()
+                .map(|u| ServerRowData {
+                    url: u.as_str().into(),
+                    host: host_of(u).into(),
+                    signed_in: false,
+                    status: "Checking…".into(),
+                })
+                .collect::<Vec<_>>(),
+        );
+        let Some(me) = self.me() else { return };
+        spawn(async move {
+            for (i, u) in urls.into_iter().enumerate() {
+                let who = me.desk.signed_in(u.clone()).await;
+                let (signed_in, status) = match who {
+                    Ok(Value::Null) => (false, "Not signed in".to_owned()),
+                    Ok(v) => (true, format!("Signed in as {}", text(&v["name"]))),
+                    Err(e) if e.code == "network" => (true, "Cannot reach it right now".to_owned()),
+                    Err(e) => (false, e.message),
+                };
+                if let Some(mut row) = me.servers.row_data(i).filter(|r| r.url == u.as_str()) {
+                    row.signed_in = signed_in;
+                    row.status = status.into();
+                    me.servers.set_row_data(i, row);
+                }
+            }
+        });
+    }
+
+    fn sign_out(&self, url: String) {
+        let Some(me) = self.me() else { return };
+        spawn(async move {
+            if let Err(e) = me.desk.sign_out(url).await {
+                if let Some(w) = me.window.upgrade() {
+                    w.set_home_error(error_info(&e));
+                }
+            }
+            me.refresh_recent();
+        });
     }
 
     /// Opens the workspace at `path` in a tab (or selects its tab when it is open).
@@ -454,6 +531,13 @@ impl App {
             let mut state = w.get_sign_in();
             state.sso_label = SharedString::new();
             state.password_login = true;
+            state.probe = SharedString::new();
+            state.probe_text = SharedString::new();
+            state.suggested = SharedString::new();
+            let server = server.trim();
+            if looks_like_server(server) {
+                state.probe = "checking".into();
+            }
             w.set_sign_in(state);
         }
         let server = server.trim().to_owned();
@@ -467,23 +551,13 @@ impl App {
                 return;
             }
             spawn(async move {
-                let offer = me.desk.sso_offer(server).await;
+                let found = me.desk.server_info(server).await;
                 if me.sso_offer_generation.get() != generation {
                     return;
                 }
                 let Some(w) = me.window.upgrade() else { return };
                 let mut state = w.get_sign_in();
-                match offer {
-                    Ok(o) if !o.is_null() => {
-                        state.sso_label = text(&o["label"]).into();
-                        state.password_login = o["password_login"].as_bool().unwrap_or(true);
-                    }
-                    // No offer, or a server that does not answer yet: password only.
-                    _ => {
-                        state.sso_label = SharedString::new();
-                        state.password_login = true;
-                    }
-                }
+                show_probe(&mut state, found);
                 w.set_sign_in(state);
             });
         });
@@ -495,6 +569,9 @@ impl App {
         };
         let mut state = w.get_sign_in();
         if state.busy || !state.done.is_empty() {
+            return;
+        }
+        if state.probe == "bad" {
             return;
         }
         let server = state.server.trim().to_owned();
@@ -559,11 +636,16 @@ impl App {
                 )
                 .into();
             }
+            Err(e) if e.code == "not_a_lode_server" => show_probe(&mut state, Err(e)),
             Err(e) => {
                 state.error = error_info(&e);
                 if e.code == "unauthenticated" {
-                    // "Sign in, then try again" says nothing here: this is the sign-in.
-                    state.error.next = SharedString::new();
+                    // The server's text adds advice for the command line, and "sign in, then
+                    // try again" says nothing here: this is the sign-in.
+                    state.error.message = "The name or password is wrong.".into();
+                    state.error.next =
+                        "Check both and try again. A server administrator can reset your password."
+                            .into();
                 }
             }
         }
@@ -709,6 +791,13 @@ fn recent_row(r: &RecentWorkspace) -> Recent {
         depot: r.depot.as_str().into(),
         branch: r.branch.as_str().into(),
         host: host_of(&r.server).into(),
+        initial: r
+            .depot
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>())
+            .unwrap_or_else(|| "?".into())
+            .into(),
     }
 }
 
@@ -745,10 +834,87 @@ pub fn error_info(e: &ErrorView) -> ErrorInfo {
     }
 }
 
+/// Shows what answers at the address being typed: the server and the sign-in it offers, or
+/// why nothing usable does and the address to use instead.
+fn show_probe(state: &mut SignInState, found: Result<Value, ErrorView>) {
+    state.suggested = SharedString::new();
+    match found {
+        Ok(v) => {
+            let host = lode_client::ServerUrl::parse(&text(&v["server"]))
+                .ok()
+                .and_then(|u| {
+                    u.host_str().map(|h| match u.port() {
+                        Some(p) => format!("{h}:{p}"),
+                        None => h.to_owned(),
+                    })
+                })
+                .unwrap_or_default();
+            let sso = &v["sso"];
+            state.probe = "ok".into();
+            state.probe_text = if sso.is_null() {
+                format!("Lode server {} at {host}.", text(&v["version"]))
+            } else {
+                format!(
+                    "Lode server {} at {host}. It offers {} sign-in.",
+                    text(&v["version"]),
+                    text(&sso["label"])
+                )
+            }
+            .into();
+            if sso.is_null() {
+                state.sso_label = SharedString::new();
+                state.password_login = true;
+            } else {
+                state.sso_label = text(&sso["label"]).into();
+                state.password_login = sso["password_login"].as_bool().unwrap_or(true);
+            }
+        }
+        Err(e) => {
+            state.probe = "bad".into();
+            state.sso_label = SharedString::new();
+            state.password_login = true;
+            let suggested = e.details["suggested"].as_str().unwrap_or("");
+            state.probe_text =
+                match e.code.as_str() {
+                    "not_a_lode_server" if !suggested.is_empty() => {
+                        let admin = e.details["server"]
+                            .as_str()
+                            .and_then(|s| lode_client::ServerUrl::parse(s).ok())
+                            .is_some_and(|u| u.path().trim_matches('/') == "admin");
+                        format!(
+                        "No Lode server answers at this address. The server is at {suggested}{}",
+                        if admin { "; /admin/ is its web admin page." } else { "." }
+                    )
+                    }
+                    "not_a_lode_server" => {
+                        "No Lode server answers at this address. Check it, or ask \
+                                        whoever runs the server for its address."
+                            .to_owned()
+                    }
+                    "network" => format!(
+                        "Cannot reach this address. Check the spelling and your connection. ({})",
+                        e.message.trim_start_matches("cannot reach the server: ")
+                    ),
+                    _ => upper_first(&e.message),
+                }
+                .into();
+            state.suggested = suggested.into();
+        }
+    }
+}
+
+fn upper_first(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
+}
+
 /// What to do next, for errors where the message alone leaves the user stuck.
 pub fn next_step(code: &str) -> Option<&'static str> {
     Some(match code {
-        "unauthenticated" => "Sign in to the server from the Home tab, then try again.",
+        "unauthenticated" => "Sign in to the server from the Workspaces tab, then try again.",
         "permission_denied" => "Ask a depot admin for access.",
         "workspace_in_use" => {
             "Another lode command is using this workspace; try again when it has finished."
@@ -759,6 +925,9 @@ pub fn next_step(code: &str) -> Option<&'static str> {
             "An update or branch switch stopped before it finished. Finish it, then try again."
         }
         "network" => "Check the server address and your connection.",
+        "not_a_lode_server" => {
+            "Use the server's own address, usually https:// and its name without a path."
+        }
         "sso_failed" => {
             "The company sign-in did not finish. If the message names your account, ask a server \
              administrator to add or enable it; otherwise sign in again."
