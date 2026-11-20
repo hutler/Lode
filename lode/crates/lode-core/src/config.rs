@@ -16,6 +16,84 @@ pub struct CheckRequirement {
     pub reporter: String,
 }
 
+/// Longest validation script name (`[[validate.script]].name`); the check it reports is
+/// `validate/<name>`.
+pub const MAX_VALIDATE_NAME_LEN: usize = 64;
+/// Default and largest timeout of one validation script.
+pub const DEFAULT_VALIDATE_TIMEOUT_SECS: u32 = 60;
+/// Largest timeout of one validation script (10 minutes).
+pub const MAX_VALIDATE_TIMEOUT_SECS: u32 = 600;
+
+/// `[validate]`: Python scripts that check content before it lands (SPEC §6.8).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidateConfig {
+    /// `python`: the lowest Python version the scripts need, as `(major, minor, patch)`.
+    pub python: Option<(u32, u32, u32)>,
+    /// `support`: files a script may import or read besides the changed files and itself.
+    pub support: PathGlobSet,
+    /// `[[validate.script]]`, in file order.
+    pub scripts: Vec<ValidateScript>,
+}
+
+impl Default for ValidateConfig {
+    fn default() -> Self {
+        Self {
+            python: None,
+            support: PathGlobSet::empty(),
+            scripts: Vec::new(),
+        }
+    }
+}
+
+impl ValidateConfig {
+    /// Whether any script is configured.
+    pub fn is_empty(&self) -> bool {
+        self.scripts.is_empty()
+    }
+
+    /// The `python` setting as text, such as `3.10`.
+    pub fn python_text(&self) -> Option<String> {
+        self.python.map(|(a, b, c)| {
+            if c == 0 {
+                format!("{a}.{b}")
+            } else {
+                format!("{a}.{b}.{c}")
+            }
+        })
+    }
+}
+
+/// One `[[validate.script]]` entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidateScript {
+    /// Name; the check is `validate/<name>`.
+    pub name: String,
+    /// Depot path of the script, ending in `.py`.
+    pub run: DepotPath,
+    /// The script runs only when a changed path matches.
+    pub paths: PathGlobSet,
+    /// Seconds before the script is stopped.
+    pub timeout_secs: u32,
+    /// Whether the server runs it too (default `true`).
+    pub server: bool,
+}
+
+impl ValidateScript {
+    /// The name of the check the server reports for this script.
+    pub fn check_name(&self) -> String {
+        format!("validate/{}", self.name)
+    }
+}
+
+/// Whether `s` is a valid validation script name: 1 to 64 of `a-z`, `0-9`, `.`, `_`, `-`.
+pub fn valid_validate_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= MAX_VALIDATE_NAME_LEN
+        && s
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+}
+
 /// Patterns merged as JSON when `[merge].json` is not set.
 pub const DEFAULT_JSON_MERGE: &[&str] = &["**/*.json", "**/*.uproject", "**/*.uplugin"];
 
@@ -48,6 +126,10 @@ pub struct LodeConfig {
     pub checks_branches: PathGlobSet,
     /// `[checks].required`: checks that must be `success`.
     pub checks_required: Vec<CheckRequirement>,
+    /// `[branches].shelf_only`: branches that take changes through shelf submits only.
+    pub shelf_only: PathGlobSet,
+    /// `[validate]`: validation scripts.
+    pub validate: ValidateConfig,
     /// `[merge].json`: files merged key by key when a line merge conflicts (0.4). Defaults to
     /// [`DEFAULT_JSON_MERGE`] when the key is absent.
     pub merge_json: PathGlobSet,
@@ -66,6 +148,8 @@ impl Default for LodeConfig {
             text: PathGlobSet::empty(),
             checks_branches: PathGlobSet::empty(),
             checks_required: Vec::new(),
+            shelf_only: PathGlobSet::empty(),
+            validate: ValidateConfig::default(),
             merge_json: default_json_merge(),
             merge_tools: Vec::new(),
             sections: BTreeMap::new(),
@@ -88,6 +172,9 @@ pub enum ConfigError {
     /// A required check has an empty name or reporter.
     #[error(".lodeconfig: [checks].required entries need a non-empty name and reporter")]
     CheckEntry,
+    /// A `[validate]` setting is wrong.
+    #[error(".lodeconfig: [validate] {0}")]
+    Validate(String),
 }
 
 #[derive(Deserialize, Default)]
@@ -100,6 +187,10 @@ struct Raw {
     checks: RawChecks,
     #[serde(default)]
     merge: RawMerge,
+    #[serde(default)]
+    branches: RawBranches,
+    #[serde(default)]
+    validate: RawValidate,
     #[serde(flatten)]
     rest: toml::Table,
 }
@@ -131,6 +222,132 @@ struct RawMerge {
     json: Option<Vec<String>>,
     #[serde(default)]
     tools: toml::Table,
+}
+
+#[derive(Deserialize, Default)]
+struct RawBranches {
+    #[serde(default)]
+    shelf_only: Vec<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawValidate {
+    python: Option<String>,
+    #[serde(default)]
+    support: Vec<String>,
+    #[serde(default)]
+    script: Vec<RawScript>,
+}
+
+#[derive(Deserialize)]
+struct RawScript {
+    name: String,
+    run: String,
+    paths: Vec<String>,
+    timeout: Option<toml::Value>,
+    server: Option<bool>,
+}
+
+fn parse_python_version(s: &str) -> Option<(u32, u32, u32)> {
+    let parts: Vec<&str> = s.trim().split('.').collect();
+    if !(2..=3).contains(&parts.len()) || parts[0] != "3" {
+        return None;
+    }
+    let num = |p: &str| -> Option<u32> {
+        if p.is_empty() || p.len() > 4 || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        p.parse().ok()
+    };
+    Some((
+        num(parts[0])?,
+        num(parts[1])?,
+        match parts.get(2) {
+            Some(p) => num(p)?,
+            None => 0,
+        },
+    ))
+}
+
+/// `60`, `"60"`, `"60s"`, `"2m"`: seconds.
+fn parse_timeout(v: &toml::Value) -> Option<u32> {
+    match v {
+        toml::Value::Integer(n) => u32::try_from(*n).ok(),
+        toml::Value::String(s) => {
+            let s = s.trim();
+            let (num, mul) = if let Some(n) = s.strip_suffix('s') {
+                (n, 1)
+            } else if let Some(n) = s.strip_suffix('m') {
+                (n, 60)
+            } else {
+                (s, 1)
+            };
+            num.trim().parse::<u32>().ok()?.checked_mul(mul)
+        }
+        _ => None,
+    }
+}
+
+fn parse_validate(raw: RawValidate) -> Result<ValidateConfig, ConfigError> {
+    let bad = |m: String| ConfigError::Validate(m);
+    let python = match raw.python {
+        Some(p) => Some(parse_python_version(&p).ok_or_else(|| {
+            bad(format!(
+                "python = \"{p}\" is not a Python 3 version such as \"3.10\""
+            ))
+        })?),
+        None => None,
+    };
+    let mut scripts: Vec<ValidateScript> = Vec::new();
+    for s in raw.script {
+        if !valid_validate_name(&s.name) {
+            return Err(bad(format!(
+                "script name \"{}\" must be 1 to {MAX_VALIDATE_NAME_LEN} of a-z, 0-9, `.`, `_` and `-`",
+                s.name
+            )));
+        }
+        if scripts.iter().any(|o| o.name == s.name) {
+            return Err(bad(format!("script name \"{}\" is used twice", s.name)));
+        }
+        let run = DepotPath::parse(&s.run)
+            .ok()
+            .filter(|p| p.as_str().ends_with(".py"))
+            .ok_or_else(|| {
+                bad(format!(
+                    "script \"{}\": run = \"{}\" must be a depot path ending in .py",
+                    s.name, s.run
+                ))
+            })?;
+        if s.paths.is_empty() {
+            return Err(bad(format!(
+                "script \"{}\": paths must list at least one pattern",
+                s.name
+            )));
+        }
+        let timeout_secs = match &s.timeout {
+            None => DEFAULT_VALIDATE_TIMEOUT_SECS,
+            Some(v) => parse_timeout(v)
+                .filter(|t| (1..=MAX_VALIDATE_TIMEOUT_SECS).contains(t))
+                .ok_or_else(|| {
+                    bad(format!(
+                        "script \"{}\": timeout must be 1 s to 10 min, such as \"60s\" or \"5m\"",
+                        s.name
+                    ))
+                })?,
+        };
+        scripts.push(ValidateScript {
+            name: s.name,
+            run,
+            paths: PathGlobSet::new(s.paths)?,
+            timeout_secs,
+            server: s.server.unwrap_or(true),
+        });
+    }
+    Ok(ValidateConfig {
+        python,
+        support: PathGlobSet::new(raw.support)?,
+        scripts,
+    })
 }
 
 #[derive(Deserialize)]
@@ -197,6 +414,8 @@ impl LodeConfig {
             text: PathGlobSet::new(raw.files.text)?,
             checks_branches: PathGlobSet::new(raw.checks.branches)?,
             checks_required,
+            shelf_only: PathGlobSet::new(raw.branches.shelf_only)?,
+            validate: parse_validate(raw.validate)?,
             merge_json,
             merge_tools,
             sections: raw
@@ -316,6 +535,117 @@ required = [{ name = "ci/build", reporter = "ci" }]
             LodeConfig::parse(b"[merge.tools]\n\"*.x\" = 3\n"),
             Err(ConfigError::Toml(_))
         ));
+    }
+
+    #[test]
+    fn branches_section() {
+        let c = LodeConfig::parse(b"[branches]\nshelf_only = [\"main\", \"release/*\"]\n").unwrap();
+        assert!(c.shelf_only.matches_str("main"));
+        assert!(c.shelf_only.matches_str("release/1.0"));
+        assert!(!c.shelf_only.matches_str("dev"));
+        assert!(LodeConfig::parse(b"").unwrap().shelf_only.is_empty());
+        assert!(c.section("branches").is_none());
+        assert!(matches!(
+            LodeConfig::parse(b"[branches]\nshelf_only = [\"a/[b\"]\n"),
+            Err(ConfigError::Glob(_))
+        ));
+    }
+
+    #[test]
+    fn validate_section() {
+        let c = LodeConfig::parse(
+            br#"
+[validate]
+python  = "3.10"
+support = ["tools/validate/**"]
+
+[[validate.script]]
+name    = "json"
+run     = "tools/validate/json_valid.py"
+paths   = ["Data/**/*.json"]
+timeout = "90s"
+
+[[validate.script]]
+name    = "naming"
+run     = "tools/validate/asset_names.py"
+paths   = ["Content/**"]
+timeout = "2m"
+server  = false
+
+[[validate.script]]
+name  = "size"
+run   = "tools/validate/max_size.py"
+paths = ["**"]
+timeout = 5
+"#,
+        )
+        .unwrap();
+        let v = &c.validate;
+        assert_eq!(v.python, Some((3, 10, 0)));
+        assert_eq!(v.python_text().as_deref(), Some("3.10"));
+        assert!(v.support.matches(&p("tools/validate/lib/x.py")));
+        assert_eq!(v.scripts.len(), 3);
+        assert_eq!(v.scripts[0].check_name(), "validate/json");
+        assert_eq!(v.scripts[0].run.as_str(), "tools/validate/json_valid.py");
+        assert!(v.scripts[0].paths.matches(&p("Data/a/b.json")));
+        assert_eq!(v.scripts[0].timeout_secs, 90);
+        assert!(v.scripts[0].server);
+        assert_eq!(v.scripts[1].timeout_secs, 120);
+        assert!(!v.scripts[1].server);
+        assert_eq!(v.scripts[2].timeout_secs, 5);
+        assert!(c.section("validate").is_none());
+        let d = LodeConfig::parse(b"").unwrap();
+        assert!(d.validate.is_empty());
+        assert_eq!(d.validate.python, None);
+    }
+
+    #[test]
+    fn validate_rejects() {
+        let one = |extra: &str| {
+            LodeConfig::parse(
+                format!("[[validate.script]]\nname = \"a\"\nrun = \"t/a.py\"\npaths = [\"**\"]\n{extra}")
+                    .as_bytes(),
+            )
+        };
+        assert!(one("").is_ok());
+        assert!(matches!(one("timeout = \"0s\""), Err(ConfigError::Validate(_))));
+        assert!(matches!(one("timeout = \"11m\""), Err(ConfigError::Validate(_))));
+        assert!(matches!(one("timeout = \"soon\""), Err(ConfigError::Validate(_))));
+        assert!(matches!(one("timeout = -1"), Err(ConfigError::Validate(_))));
+        assert!(matches!(
+            one("[[validate.script]]\nname = \"a\"\nrun = \"t/b.py\"\npaths = [\"**\"]"),
+            Err(ConfigError::Validate(_))
+        ));
+        let script = |name: &str, run: &str, paths: &str| {
+            LodeConfig::parse(
+                format!("[[validate.script]]\nname = \"{name}\"\nrun = \"{run}\"\npaths = {paths}\n")
+                    .as_bytes(),
+            )
+        };
+        assert!(matches!(script("A", "t/a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
+        assert!(matches!(script("a/b", "t/a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
+        assert!(matches!(script("", "t/a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
+        assert!(matches!(script("a", "t/a.sh", "[\"**\"]"), Err(ConfigError::Validate(_))));
+        assert!(matches!(script("a", "../a.py", "[\"**\"]"), Err(ConfigError::Validate(_))));
+        assert!(matches!(script("a", "t/a.py", "[]"), Err(ConfigError::Validate(_))));
+        assert!(matches!(script("a", "t/a.py", "[\"a/[b\"]"), Err(ConfigError::Glob(_))));
+        assert!(matches!(
+            LodeConfig::parse(b"[[validate.script]]\nname = \"a\"\npaths = [\"**\"]\n"),
+            Err(ConfigError::Toml(_))
+        ));
+        for bad in ["2.7", "3", "3.x", "python3", "3.10.1.2", ""] {
+            assert!(
+                matches!(
+                    LodeConfig::parse(format!("[validate]\npython = \"{bad}\"\n").as_bytes()),
+                    Err(ConfigError::Validate(_))
+                ),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            LodeConfig::parse(b"[validate]\npython = \"3.9.2\"\n").unwrap().validate.python,
+            Some((3, 9, 2))
+        );
     }
 
     #[test]

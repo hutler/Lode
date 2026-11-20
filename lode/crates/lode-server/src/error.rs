@@ -139,6 +139,7 @@ mod tests {
             (ErrorCode::TooLarge, 413),
             (ErrorCode::Internal, 500),
             (ErrorCode::ChecksRequired, 409),
+            (ErrorCode::ShelfRequired, 409),
             (ErrorCode::Obliterated, 410),
         ];
         for (code, status) in cases {

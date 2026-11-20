@@ -17,7 +17,8 @@ use lode_meta::{
     RevisionRow,
 };
 use lode_proto::commit::{
-    CommitRequest, CommitResponse, MergedFrom, Provenance, Via, EXT_FORCE_FLOW,
+    CommitRequest, CommitResponse, MergedFrom, Provenance, ShelfOnlyOverride, Via,
+    EXT_FORCE_FLOW, EXT_OVERRIDE_SHELF_ONLY, MAX_OVERRIDE_REASON_BYTES,
 };
 use lode_proto::consts::MAX_PROVENANCE_BYTES;
 use lode_store::{PutOptions, StoreError};
@@ -142,9 +143,14 @@ async fn branch_config(
     Ok(config)
 }
 
-fn provenance_json(req: Option<Provenance>, opts: &CommitOptions) -> ApiResult<String> {
+fn provenance_json(
+    req: Option<Provenance>,
+    opts: &CommitOptions,
+    shelf_only_override: Option<ShelfOnlyOverride>,
+) -> ApiResult<String> {
     let mut p = req.unwrap_or_default();
     p.via = Some(opts.via);
+    p.shelf_only_override = shelf_only_override;
     // Only a module (the shelves module's submit) may say where a revision came from.
     if opts.origin == Origin::Direct {
         p.submitted_shelf = None;
@@ -207,8 +213,9 @@ pub async fn commit(
     let _fence = state.gc_fence().read().await;
 
     check_blobs(state, d, &req.changes).await?;
-    check_lodeconfig(state, d, &req.changes).await?;
-    let provenance = provenance_json(req.provenance.clone(), &opts)?;
+    let new_config = check_lodeconfig(state, d, &req.changes).await?;
+    // Size check before taking the branch lock; the stored form is built below.
+    provenance_json(req.provenance.clone(), &opts, None)?;
 
     // --- Serialized per branch from here ---
     let lock = state.branch_lock(d, branch);
@@ -237,6 +244,9 @@ pub async fn commit(
     }
 
     let config = branch_config(state, d, &head.root_tree).await?;
+    let shelf_only_override = check_shelf_only(state, caller, d, branch, &config, &req, &opts)?;
+    let overridden = shelf_only_override.is_some();
+    let provenance = provenance_json(req.provenance.clone(), &opts, shelf_only_override)?;
 
     // Compare every change with the head, building the new trees.
     let edited = TreeEditor::new(state.trees(), d)
@@ -269,6 +279,10 @@ pub async fn commit(
                 },
             )
             .await?;
+    }
+
+    if let Some(c) = &new_config {
+        check_validate_scripts(state, d, &edited.root, c).await?;
     }
 
     let author = opts
@@ -387,6 +401,7 @@ pub async fn commit(
                 &submitter,
                 origin.label(),
                 forced_flow,
+                overridden,
             );
             tx.append_outbox(Some(d), "revision.created", &data, now)?;
             Ok(TxOutcome::Done(num))
@@ -513,11 +528,14 @@ async fn check_blobs(state: &AppState, d: lode_core::DepotId, changes: &[Change]
 }
 
 /// A branch head never holds an unparseable configuration.
+/// Refuses a `.lodeconfig` that does not parse, and answers the new file's configuration when
+/// the commit writes one.
 async fn check_lodeconfig(
     state: &AppState,
     d: lode_core::DepotId,
     changes: &[Change],
-) -> ApiResult<()> {
+) -> ApiResult<Option<LodeConfig>> {
+    let mut parsed = None;
     for c in changes {
         if c.path.as_str() == LODECONFIG && c.action != ChangeAction::Delete {
             let id = c.new_id.ok_or_else(ApiError::internal)?;
@@ -525,13 +543,85 @@ async fn check_lodeconfig(
                 return Err(invalid(format!("{LODECONFIG} must be a regular file")));
             }
             let bytes = read_small_blob(state, d, &id, MAX_LODECONFIG_BYTES).await?;
-            LodeConfig::parse(&bytes).map_err(|e| {
+            parsed = Some(LodeConfig::parse(&bytes).map_err(|e| {
                 invalid(format!("invalid {LODECONFIG}: {e}"))
                     .with_details(json!({ "paths": [LODECONFIG] }))
-            })?;
+            })?);
+        }
+    }
+    Ok(parsed)
+}
+
+/// A `.lodeconfig` written by this commit may only name validation scripts that exist in
+/// the resulting tree, so a typo never reaches anyone's workspace.
+async fn check_validate_scripts(
+    state: &AppState,
+    d: lode_core::DepotId,
+    root: &ObjectId,
+    config: &LodeConfig,
+) -> ApiResult<()> {
+    for s in &config.validate.scripts {
+        let entry = lookup(state.trees(), d, root, &s.run)
+            .await
+            .map_err(load_error)?;
+        if !entry.is_some_and(|e| e.kind == EntryKind::File) {
+            return Err(invalid(format!(
+                "invalid {LODECONFIG}: [validate] script \"{}\" runs {}, which is not a file in this revision",
+                s.name, s.run
+            ))
+            .with_details(json!({ "paths": [LODECONFIG, s.run.as_str()] })));
         }
     }
     Ok(())
+}
+
+/// SPEC §5.6: a branch listed in `[branches].shelf_only` takes shelf submits only. A depot
+/// admin (a user, not an agent) may commit directly with [`EXT_OVERRIDE_SHELF_ONLY`] and a
+/// reason, which the revision records.
+fn check_shelf_only(
+    state: &AppState,
+    caller: &Caller,
+    depot: lode_core::DepotId,
+    branch: &str,
+    config: &LodeConfig,
+    req: &CommitRequest,
+    opts: &CommitOptions,
+) -> ApiResult<Option<ShelfOnlyOverride>> {
+    let requested = req.extensions.get(EXT_OVERRIDE_SHELF_ONLY);
+    let shelf_submit = matches!(&opts.origin, Origin::Module { name, .. } if name == "shelves");
+    if shelf_submit || !config.shelf_only.matches_str(branch) {
+        return Ok(None);
+    }
+    let Some(requested) = requested else {
+        let shelves_on = state.modules().iter().any(|m| m.name() == "shelves");
+        let mut msg = format!(
+            "branch `{branch}` takes changes through shelves only; shelve the changes and submit the shelf"
+        );
+        if !shelves_on {
+            msg.push_str(" (the shelves module is off on this server, so only a depot admin override can commit here)");
+        }
+        return Err(ApiError::new(ErrorCode::ShelfRequired, msg)
+            .with_details(json!({ "branch": branch })));
+    };
+    let reason = requested.as_str().map(str::trim).unwrap_or_default();
+    if reason.is_empty() || reason.len() > MAX_OVERRIDE_REASON_BYTES {
+        return Err(invalid(format!(
+            "{EXT_OVERRIDE_SHELF_ONLY} needs a reason of 1 to {MAX_OVERRIDE_REASON_BYTES} bytes"
+        )));
+    }
+    let admin = caller.principal.kind == lode_meta::PrincipalKind::User
+        && caller.has_scope(crate::auth::SCOPE_ADMIN)
+        && state.permissions().depot(caller, depot).is_depot_admin();
+    if !admin {
+        return Err(ApiError::new(
+            ErrorCode::PermissionDenied,
+            "committing directly to a shelf-only branch needs a user with admin on the depot",
+        ));
+    }
+    Ok(Some(ShelfOnlyOverride {
+        by: caller.principal.name.clone(),
+        reason: reason.to_owned(),
+    }))
 }
 
 /// The tree edits of a change set.

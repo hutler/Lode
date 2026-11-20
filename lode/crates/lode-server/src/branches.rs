@@ -66,6 +66,7 @@ pub(crate) fn revision_created(
     submitter: &lode_meta::PrincipalRow,
     origin: &str,
     forced_flow: bool,
+    shelf_only_override: bool,
 ) -> String {
     let mut v = json!({
         "rev": rev,
@@ -80,6 +81,9 @@ pub(crate) fn revision_created(
     });
     if forced_flow {
         v["forced_flow"] = json!(true);
+    }
+    if shelf_only_override {
+        v["shelf_only_override"] = json!(true);
     }
     v.to_string()
 }
@@ -513,7 +517,7 @@ async fn create(
                 provenance: None,
                 request_id: None,
             })?;
-            let rev_event = revision_created(num, &req.name, &author, &author, "direct", false);
+            let rev_event = revision_created(num, &req.name, &author, &author, "direct", false, false);
             tx.append_outbox(Some(id), "revision.created", &rev_event, now)?;
             let mut branch_event = json!({
                 "branch": req.name,

@@ -31,8 +31,8 @@ pub enum Via {
     Mcp,
 }
 
-/// Provenance record. Only `via` is set by the server; everything else is reported by the
-/// client and must not be used for decisions.
+/// Provenance record. `via`, `submitted_shelf` and `shelf_only_override` are set by the
+/// server; everything else is reported by the client and must not be used for decisions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Provenance {
     /// Client name and version, from the `User-Agent` header.
@@ -51,7 +51,27 @@ pub struct Provenance {
     /// Where an imported revision came from (`lode import git`). Self-reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported: Option<ImportedFrom>,
+    /// A depot admin committed directly to a `[branches].shelf_only` branch. Set by the
+    /// server, removed from anything a client sends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shelf_only_override: Option<ShelfOnlyOverride>,
 }
+
+/// Who committed directly to a shelf-only branch, and why (SPEC §5.6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShelfOnlyOverride {
+    /// The depot admin's principal name.
+    pub by: String,
+    /// The reason they gave.
+    pub reason: String,
+}
+
+/// `CommitRequest.extensions` key: a reason string that asks the server to accept a direct
+/// commit to a `[branches].shelf_only` branch. Honoured only for a user with the `admin`
+/// scope and depot admin rights; the revision records it.
+pub const EXT_OVERRIDE_SHELF_ONLY: &str = "override_shelf_only";
+/// Longest reason accepted with [`EXT_OVERRIDE_SHELF_ONLY`].
+pub const MAX_OVERRIDE_REASON_BYTES: usize = 500;
 
 /// The source of an imported revision: the commit in another version control system and its
 /// original author, date and message. Reported by the importer and stored as given; the
