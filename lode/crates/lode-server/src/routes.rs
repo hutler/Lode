@@ -73,7 +73,7 @@ pub fn router(state: AppState) -> Router {
 
 async fn info(State(state): State<AppState>) -> Json<Info> {
     Json(Info {
-        server_version: env!("CARGO_PKG_VERSION").to_owned(),
+        server_version: lode_build::VERSION.to_owned(),
         api_version: API_VERSION.to_owned(),
         modules: state.module_names().to_vec(),
         sso: state.config().oidc.as_ref().map(|o| SsoInfo {

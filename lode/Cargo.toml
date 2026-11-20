@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lode-build",
     "crates/lode-core",
     "crates/lode-proto",
     "crates/lode-store",
@@ -34,6 +35,7 @@ publish = false
 
 [workspace.dependencies]
 # Internal crates
+lode-build = { path = "crates/lode-build" }
 lode-core = { path = "crates/lode-core" }
 lode-proto = { path = "crates/lode-proto" }
 lode-store = { path = "crates/lode-store" }

@@ -1,0 +1,4 @@
+# The cross containers have no Git, so the release workflow works out the build version on the
+# runner (`lode-build-version`) and passes it in.
+[build.env]
+passthrough = ["LODE_BUILD_VERSION"]

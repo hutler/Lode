@@ -384,7 +384,7 @@ pub(crate) async fn page(State(ctx): State<Ctx>, admin: Admin) -> Response {
             .collect()
     };
     let mut server = Html::new();
-    server.push(fact("Version", text(env!("CARGO_PKG_VERSION"))));
+    server.push(fact("Version", text(lode_build::VERSION)));
     server.push(fact(
         "Running for",
         html!(

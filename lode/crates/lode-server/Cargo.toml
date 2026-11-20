@@ -12,6 +12,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+lode-build.workspace = true
 argon2.workspace = true
 async-trait.workspace = true
 axum.workspace = true

@@ -1486,6 +1486,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-build"
+version = "0.2.0"
+
+[[package]]
 name = "lode-cli"
 version = "0.2.0"
 dependencies = [
@@ -1496,6 +1500,7 @@ dependencies = [
  "futures",
  "hex",
  "insta",
+ "lode-build",
  "lode-client",
  "lode-core",
  "lode-meta",
@@ -1773,6 +1778,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "instant-acme",
+ "lode-build",
  "lode-core",
  "lode-meta",
  "lode-proto",
@@ -1832,6 +1838,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures",
+ "lode-build",
  "lode-client",
  "lode-core",
  "lode-meta",
@@ -1877,6 +1884,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "lode-build",
  "lode-meta",
  "lode-mod-checks",
  "lode-mod-locks",
