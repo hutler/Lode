@@ -1,4 +1,5 @@
-//! The admin web UI (M14): `loded` serves pages for server administrators at `/admin/`.
+//! The admin web UI (M14): `loded` serves pages for server administrators at `/admin/`,
+//! and a read-only depot browser for every user at `/web/` (T173, see [`web`]).
 //!
 //! Pages are HTML rendered here, with every value escaped by [`html`]; they work without
 //! JavaScript, and one small script (served as a file, under a content security policy that
@@ -23,9 +24,8 @@ mod people;
 mod session;
 mod settings;
 mod signin;
+mod web;
 mod webhooks;
-
-
 
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -36,7 +36,7 @@ use crate::html;
 use crate::state::AppState;
 
 pub(crate) use layout::{Nav, Page};
-pub(crate) use session::{Admin, Fields};
+pub(crate) use session::{Admin, Fields, Viewer};
 
 /// What every admin page handler gets.
 #[derive(Clone)]
@@ -64,7 +64,7 @@ pub fn routes(state: AppState, api: Router) -> Router {
         return Router::new();
     }
     let ctx = Ctx { state, api };
-    Router::new()
+    web::routes(Router::new())
         .route("/admin", get(|| async { Redirect::permanent("/admin/") }))
         .route("/admin/", get(overview::page))
         .route(signin::SIGN_IN, get(signin::form).post(signin::submit))

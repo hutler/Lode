@@ -1,4 +1,6 @@
-//! Signing in and out of the admin web UI: a name and password, or single sign-on.
+//! Signing in and out of the web pages: a name and password, or single sign-on. Any user
+//! signs in (T173); server administrators land on the admin pages, everyone else on the
+//! depot browser under `/web/`.
 
 use axum::extract::rejection::{FormRejection, QueryRejection};
 use axum::extract::{Query, State};
@@ -9,8 +11,9 @@ use lode_meta::{PrincipalRow, Reads};
 use serde::Deserialize;
 
 use super::html;
-use super::session::{cookie, set_cookie, Post, SESSION_COOKIE, SESSION_HOURS, SIGN_IN_COOKIE};
-use super::{html_response, Admin, Ctx, Nav, Page};
+use super::session::{cookie, set_cookie, SESSION_COOKIE, SESSION_HOURS, SIGN_IN_COOKIE};
+use super::session::{ViewerPost};
+use super::{html_response, Ctx, Nav, Page, Viewer};
 use crate::auth::{
     change_own_password, check_password_sign_in, ct_eq, finish_admin, issue_token, random_verifier, start_admin,
     would_be_server_admin, ClientAddr,
@@ -24,8 +27,12 @@ pub(crate) const SIGN_IN_PASSWORD: &str = "/admin/sign-in/password";
 pub(crate) const SSO_START: &str = "/admin/sign-in/sso";
 /// Signs out.
 pub(crate) const SIGN_OUT: &str = "/admin/sign-out";
-/// The name of the token behind a session.
+/// The name of the token behind a server administrator's session.
 pub(crate) const TOKEN_NAME: &str = "web admin";
+/// The name of the token behind any other user's session.
+pub(crate) const VIEWER_TOKEN_NAME: &str = "web";
+/// The depot browser, where users who are not server administrators land.
+pub(crate) const WEB_HOME: &str = "/web/";
 
 /// How long the sign-in cookie lives: long enough to fill in the form or finish a single
 /// sign-on.
@@ -39,11 +46,12 @@ pub(crate) struct SignInQuery {
     signed_out: Option<String>,
 }
 
-/// Where to go after signing in: a page of the admin UI, or the overview.
+/// Where to go after signing in: a page of the admin UI or the depot browser, or the
+/// overview.
 fn safe_next(next: Option<&str>) -> String {
     match next {
         Some(n)
-            if n.starts_with("/admin/")
+            if (n.starts_with("/admin/") || n.starts_with(WEB_HOME))
                 && !n.contains("//")
                 && !n.contains('\\')
                 && !n.starts_with("/admin/sign-")
@@ -103,7 +111,8 @@ fn sign_in_page(
     };
     let body = html!(
         "<div class=\"signin card\"><h1>Sign in</h1>\
-         <p class=\"muted\">The admin pages are for server administrators.</p>{}{}\
+         <p class=\"muted\">Browse depots and review shelves. Server administrators also \
+         get the admin pages.</p>{}{}\
          <form class=\"stack\" method=\"post\" action=\"{}\">\
          <input type=\"hidden\" name=\"csrf\" value=\"{}\"/>\
          <input type=\"hidden\" name=\"next\" value=\"{}\"/>\
@@ -162,12 +171,13 @@ fn change_page(
 pub(crate) async fn form(
     State(ctx): State<Ctx>,
     headers: HeaderMap,
-    admin: Option<Admin>,
+    viewer: Option<Viewer>,
     query: Result<Query<SignInQuery>, QueryRejection>,
 ) -> Response {
     let q = query.map(|Query(q)| q).unwrap_or_default();
     let next = safe_next(q.next.as_deref());
-    if admin.is_some() {
+    if let Some(v) = viewer {
+        let next = landing(&next, v.is_admin(&ctx));
         return Redirect::to(&next).into_response();
     }
     let (csrf, new) = sign_in_cookie(&headers);
@@ -182,14 +192,16 @@ pub(crate) async fn form(
 async fn start_session(
     ctx: &Ctx,
     principal: &PrincipalRow,
+    admin: bool,
     mut r: Response,
 ) -> Result<Response, String> {
     let state = ctx.state();
     let expires = state.clock().now_ms() + SESSION_HOURS * 3_600_000;
+    let name = if admin { TOKEN_NAME } else { VIEWER_TOKEN_NAME };
     let (token, _) = issue_token(
         state,
         principal.id,
-        TOKEN_NAME.to_owned(),
+        name.to_owned(),
         state.scopes().all(),
         Some(expires),
     )
@@ -210,11 +222,23 @@ async fn start_session(
         header::SET_COOKIE,
         set_cookie(SIGN_IN_COOKIE, "", 0, ctx.secure(), false),
     );
-    tracing::info!(principal = %principal.name, "admin web UI: signed in");
+    h.append(
+        header::SET_COOKIE,
+        super::session::clear_legacy_session(ctx.secure()),
+    );
+    tracing::info!(principal = %principal.name, admin, "web UI: signed in");
     Ok(r)
 }
 
-const NOT_ADMIN: &str = "This account is not a server administrator.";
+/// Where a user lands: `next`, except that a user who is not a server administrator goes
+/// to the depot browser instead of an admin page.
+fn landing(next: &str, admin: bool) -> String {
+    if admin || next.starts_with(WEB_HOME) {
+        next.to_owned()
+    } else {
+        WEB_HOME.to_owned()
+    }
+}
 
 pub(crate) async fn submit(
     State(ctx): State<Ctx>,
@@ -261,20 +285,19 @@ pub(crate) async fn submit(
     finish_sign_in(&ctx, &principal, &next, refuse).await
 }
 
-/// Lets an administrator in: the session cookie and a redirect to `next`.
+/// Lets a user in: the session cookie and a redirect to where they land.
 async fn finish_sign_in(
     ctx: &Ctx,
     principal: &PrincipalRow,
     next: &str,
     refuse: impl Fn(StatusCode, &str) -> Response,
 ) -> Response {
-    match would_be_server_admin(ctx.state(), principal).await {
-        Ok(true) => {}
-        Ok(false) => return refuse(StatusCode::FORBIDDEN, NOT_ADMIN),
+    let admin = match would_be_server_admin(ctx.state(), principal).await {
+        Ok(a) => a,
         Err(e) => return refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.body().message),
-    }
-    let r = Redirect::to(next).into_response();
-    match start_session(ctx, principal, r).await {
+    };
+    let r = Redirect::to(&landing(next, admin)).into_response();
+    match start_session(ctx, principal, admin, r).await {
         Ok(r) => r,
         Err(message) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &message),
     }
@@ -391,10 +414,11 @@ pub(crate) async fn sso_done(
         Ok(Some(p)) if !p.disabled => p,
         _ => return refuse(StatusCode::FORBIDDEN, "This account is disabled."),
     };
-    match would_be_server_admin(ctx.state(), &principal).await {
-        Ok(true) => {}
-        _ => return refuse(StatusCode::FORBIDDEN, NOT_ADMIN),
-    }
+    let admin = match would_be_server_admin(ctx.state(), &principal).await {
+        Ok(a) => a,
+        Err(e) => return refuse(StatusCode::INTERNAL_SERVER_ERROR, &e.body().message),
+    };
+    let next = landing(&next, admin);
     // The browser arrives from the identity provider, so it would not send the new
     // SameSite=Strict cookie on a redirect; a page of this site that moves on sends it.
     let page = html!(
@@ -411,22 +435,27 @@ pub(crate) async fn sso_done(
         header::SET_COOKIE,
         set_cookie(NEXT_COOKIE, "", 0, ctx.secure(), false),
     );
-    match start_session(&ctx, &principal, r).await {
+    match start_session(&ctx, &principal, admin, r).await {
         Ok(r) => r,
         Err(message) => refuse(StatusCode::INTERNAL_SERVER_ERROR, &message),
     }
 }
 
-pub(crate) async fn sign_out(State(ctx): State<Ctx>, post: Post) -> Response {
-    let id = post.admin.caller.token_id.0;
+pub(crate) async fn sign_out(State(ctx): State<Ctx>, post: ViewerPost) -> Response {
+    let session = &post.viewer.0;
+    let id = session.caller.token_id.0;
     let path = super::api::path(lode_proto::consts::paths::TOKEN, &[&id.to_string()]);
-    if let Err(e) = ctx.api(&post.admin).delete(&path).await {
+    if let Err(e) = ctx.api(session).delete(&path).await {
         tracing::warn!(error = %e.message, "admin web UI: cannot delete the session token");
     }
     let mut r = Redirect::to(&format!("{SIGN_IN}?signed_out=1")).into_response();
     r.headers_mut().append(
         header::SET_COOKIE,
         set_cookie(SESSION_COOKIE, "", 0, ctx.secure(), true),
+    );
+    r.headers_mut().append(
+        header::SET_COOKIE,
+        super::session::clear_legacy_session(ctx.secure()),
     );
     r
 }
@@ -442,5 +471,9 @@ mod tests {
         assert_eq!(safe_next(Some("/admin//evil.example")), "/admin/");
         assert_eq!(safe_next(Some("/admin/sign-out")), "/admin/");
         assert_eq!(safe_next(None), "/admin/");
+        assert_eq!(safe_next(Some("/web/game")), "/web/game");
+        assert_eq!(landing("/admin/people", false), "/web/");
+        assert_eq!(landing("/web/game", false), "/web/game");
+        assert_eq!(landing("/admin/people", true), "/admin/people");
     }
 }

@@ -191,10 +191,11 @@ impl Page {
         self.headers.get("location").map(String::as_str)
     }
 
-    /// The `Set-Cookie` header for cookie `name`.
+    /// The `Set-Cookie` header for cookie `name` (path `/`).
     pub fn cookie(&self, name: &str) -> Option<&str> {
         self.set_cookies
             .iter()
+            .filter(|c| !c.contains("Path=/admin"))
             .find(|c| c.starts_with(&format!("{name}=")))
             .map(String::as_str)
     }
@@ -270,6 +271,16 @@ impl Browser {
                 .or_insert(v);
         }
         for c in &set_cookies {
+            // Pages live under `/`; a cookie for a narrower path (such as the removal of an
+            // older release's `/admin` cookie) is not this jar's.
+            let path = c
+                .split(';')
+                .filter_map(|a| a.trim().strip_prefix("Path="))
+                .next()
+                .unwrap_or("/");
+            if path != "/" {
+                continue;
+            }
             let first = c.split(';').next().unwrap_or("");
             if let Some((name, value)) = first.split_once('=') {
                 let gone = c.contains("Max-Age=0") || value.is_empty();
