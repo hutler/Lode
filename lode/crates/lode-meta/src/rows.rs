@@ -148,6 +148,8 @@ pub enum AclSubject {
     User(PrincipalId),
     /// Members of a group.
     Group(GroupId),
+    /// Every principal of kind `agent`.
+    Agents,
 }
 
 /// Allow or deny.

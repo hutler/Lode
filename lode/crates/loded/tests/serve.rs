@@ -97,7 +97,7 @@ fn init_then_serve_answers_info() {
     // Modules on by default that this build has.
     assert_eq!(
         info["modules"],
-        serde_json::json!(["locks", "shelves", "mcp"])
+        serde_json::json!(["locks", "shelves", "mcp", "feed"])
     );
     assert!(response.to_ascii_lowercase().contains("x-request-id:"));
 

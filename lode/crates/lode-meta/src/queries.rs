@@ -73,6 +73,7 @@ fn acl_row(r: &Row) -> Result<AclRow> {
     let sid: Option<i64> = r.get(3)?;
     let subject = match (kind.as_str(), sid) {
         ("all", _) => AclSubject::All,
+        ("agents", _) => AclSubject::Agents,
         ("user", Some(id)) => AclSubject::User(PrincipalId(id)),
         ("group", Some(id)) => AclSubject::Group(GroupId(id)),
         _ => return Err(bad(2, "bad acl subject")),
@@ -1098,6 +1099,7 @@ impl WriteTx<'_> {
     pub fn insert_acl(&self, rule: &AclRow) -> Result<AclId> {
         let (kind, sid) = match rule.subject {
             AclSubject::All => ("all", None),
+            AclSubject::Agents => ("agents", None),
             AclSubject::User(p) => ("user", Some(p.0)),
             AclSubject::Group(g) => ("group", Some(g.0)),
         };

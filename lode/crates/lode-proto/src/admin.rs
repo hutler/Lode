@@ -82,6 +82,8 @@ pub enum AclSubject {
     User(String),
     /// A group, by name.
     Group(String),
+    /// Every principal of kind `agent` (0.3.1).
+    Agents,
 }
 
 /// Allow or deny.
