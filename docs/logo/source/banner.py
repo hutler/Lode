@@ -31,4 +31,6 @@ banner = out.resize((Wd * scale, H * scale), Image.Resampling.NEAREST)
 with Image.open('lode-mascot.png') as portrait:
     sprite = portrait.convert('RGBA').resize((H * scale, H * scale), Image.Resampling.LANCZOS)
 banner.alpha_composite(sprite, (0, 0))
+# Give each redesign a fresh README URL while keeping the original download link.
+banner.save('lode-banner-v2.png')
 banner.save('lode-banner.png')
