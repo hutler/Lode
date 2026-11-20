@@ -1138,6 +1138,18 @@ async fn access_rules_are_listed_added_checked_and_removed() {
         rows[1].starts_with(&format!("2 #{deny} game user ana")),
         "{rows:?}"
     );
+    // Filtered by who: the order numbers stay those of the whole list.
+    let filtered = b.get("/admin/access?who=ana#rules").await;
+    let rows: Vec<String> = filtered
+        .doc()
+        .find(&|n| n.name == "tr" && n.attr("id").is_some_and(|i| i.starts_with("rule-")))
+        .iter()
+        .map(|n| n.text())
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].starts_with(&format!("2 #{deny}")), "{rows:?}");
+    let none = b.get("/admin/access?who=bob").await;
+    assert!(none.doc().text().contains("No rule matches the filter."));
 
     // The allow decides on art, the deny under Secret.
     let check = b

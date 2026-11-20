@@ -120,3 +120,5 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   `password_expired`); older clients show the message.
 - `lode passwd` and `POST /auth/password` let users change their own password.
   `loded reset-admin --generate-password` prints a new first password instead of a token.
+- `GET /admin/acl` takes optional `depot` and `subject` filters (`lode admin acl list --depot
+  D --subject S`); the admin Access page has the same filter.

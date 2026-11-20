@@ -776,6 +776,8 @@ lode admin acl add allow write group:release --depot game --branch "release-*"
 lode admin acl add deny read group:contractors --depot game --path "sdk/**"
 
 lode admin acl list              # every rule, with its id
+lode admin acl list --depot game # the rules that can apply in game (its own and server-wide)
+lode admin acl list --subject group:artists
 lode admin acl remove 7</code></pre>
 <h3>How rules combine</h3>
 <ol>

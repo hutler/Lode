@@ -357,7 +357,14 @@ pub enum TokenCmd {
 #[derive(Debug, clap::Subcommand)]
 pub enum AclCmd {
     /// List the rules in evaluation order.
-    List,
+    List {
+        /// Only the rules that can apply in this depot (its own and the server-wide ones).
+        #[arg(long)]
+        depot: Option<String>,
+        /// Only this subject's rules: `user:NAME` (or just NAME), `group:NAME`, or `all`.
+        #[arg(long)]
+        subject: Option<String>,
+    },
     /// Add a rule: EFFECT LEVEL SUBJECT, such as `allow write group:devs`.
     Add {
         /// `allow` or `deny`.
@@ -1095,8 +1102,11 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             ctx.out.line(format!("Revoked token {id}"));
             Ok(json!({ "revoked": id }))
         }
-        AdminCmd::Acl(AclCmd::List) => {
-            let list = c.acl().await?;
+        AdminCmd::Acl(AclCmd::List { depot, subject }) => {
+            let subject = subject.as_deref().map(parse_subject).transpose()?;
+            let list = c
+                .acl_filtered(depot.as_deref(), subject.as_ref().map(subject_text).as_deref())
+                .await?;
             for r in &list.rules {
                 ctx.out.line(rule_line(r));
             }

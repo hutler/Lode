@@ -921,8 +921,23 @@ impl Client {
 
     /// `GET /admin/acl`.
     pub async fn acl(&self) -> Result<AclList> {
-        self.json(Retry::Yes, Method::GET, self.url(&["admin", "acl"])?)
-            .await
+        self.acl_filtered(None, None).await
+    }
+
+    /// `GET /admin/acl?depot=&subject=`: the rules that can apply in `depot` (its own and the
+    /// server-wide ones), and only `subject`'s (`user:NAME`, `group:NAME` or `all`).
+    pub async fn acl_filtered(&self, depot: Option<&str>, subject: Option<&str>) -> Result<AclList> {
+        let mut url = self.url(&["admin", "acl"])?;
+        if depot.is_some() || subject.is_some() {
+            let mut q = url.query_pairs_mut();
+            if let Some(d) = depot {
+                q.append_pair("depot", d);
+            }
+            if let Some(s) = subject {
+                q.append_pair("subject", s);
+            }
+        }
+        self.json(Retry::Yes, Method::GET, url).await
     }
 
     /// `POST /admin/acl`: adds a rule and returns it with its id.

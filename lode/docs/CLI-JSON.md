@@ -477,7 +477,7 @@ may also manage that agent's tokens).
 | `group add|remove <group> <member>` | `{ "group", "added"|"removed" }` |
 | `token create [--for P] [--name N] [--scope S,…] [--expires-in-days D]` | `{ "token", "info": token }` |
 | `token list [--for P]` / `token revoke <id> [--for P]` | `{ "tokens": [token] }` / `{ "revoked": id }` |
-| `acl list` | `{ "rules": [rule] }` in evaluation order |
+| `acl list [--depot D] [--subject S]` | `{ "rules": [rule] }` in evaluation order; `--depot`: only the rules that can apply in D (its own and server-wide ones; an unknown depot is `not_found`); `--subject`: only that subject's (`user:NAME`, `group:NAME`, `all`) |
 | `acl add <allow|deny> <read|write|admin> <subject> [--depot D] [--branch G] [--path G] [--check P B PATH]` | the rule, plus `"check"` with `--check` |
 | `acl remove <id>` | `{ "removed": id }` |
 | `acl check <principal> <depot> <branch> <path>` | `{ "principal", "depot", "branch", "path", "level": "read"|"write"|"admin"|null, "depot_admin"?, "matched"?, "decided_by"? }`: `depot_admin` (only when true) means an admin rule on the depot passes over path rules; `matched` lists the ids of the rules that apply, in order; `decided_by` is the rule that set the level, absent when none did or for the built-in `admin` |

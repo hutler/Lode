@@ -144,6 +144,11 @@ async fn scripted_setup_then_behaviour() {
             .len(),
         4
     );
+    let filtered = admin.json(&["admin", "acl", "list", "--depot", "game", "--subject", "bob"]);
+    assert_eq!(filtered["rules"].as_array().unwrap().len(), 2, "{filtered}");
+    let (code, err) = admin.json_status(&["admin", "acl", "list", "--depot", "nope"]);
+    assert_ne!(code, 0);
+    assert_eq!(err["error"]["code"], "not_found");
     // Bad patterns never reach the server.
     let (code, err) = admin.json_status(&[
         "admin", "acl", "add", "allow", "read", "all", "--path", "a/[", "--depot", "game",
