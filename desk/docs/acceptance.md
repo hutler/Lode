@@ -1,8 +1,8 @@
 # Lode Desk acceptance checklist
 
-What [the Lode Desk guide](desk-guide.md) promises that only a person can check: installers, an
+What [the Lode Desk guide](guide.md) promises that only a person can check: installers, an
 update, and a link clicked in another app. Everything else in the guide is driven through the
-app's commands against a real server by `crates/lode-desk/tests/acceptance.rs` (run by CI in
+app's commands against a real server by `desk/tests/acceptance.rs` (run by CI in
 the Lode Desk job), and the screens by the UI tests.
 
 Run this on each system before a release, with the release's own files, and note the result
@@ -62,7 +62,7 @@ Write ✓ with the date, ✕ with what went wrong, or – when not run. Tester a
 ## A test feed
 
 Until there is a previous release, step 6 uses two builds signed with a test key and a feed
-served from the same computer. In `lode/crates/lode-desk`, with Rust and cargo-packager
+served from the same computer. In `desk/`, with Rust and cargo-packager
 installed (`cargo install cargo-packager --locked`); PowerShell on Windows:
 
 1. Make a test key: `cargo packager signer generate -w test.key` (it asks for a password; an

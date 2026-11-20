@@ -37,7 +37,7 @@ One Cargo workspace. Library crates never depend on binaries; arrows point downw
 
 | Crate | Kind | Contents |
 | --- | --- | --- |
-| `lode-build` | lib | The build version (`0.2.0`, or `0.2.0+5.g4a33c89` after a release), worked out from Git by its `build.rs`; what `lode --version`, `loded --version`, `/info`, the admin pages and Lode Desk show |
+| `lode-build` | lib | The build version (`0.2.0`, or `0.2.0+5.g4a33c89` after a release), worked out from Git by its `build.rs`; what `lode --version`, `loded --version`, `/info` and the admin pages show |
 | `lode-core` | lib, no I/O | `ObjectId`, `DepotPath` + validation, tree encoding, object header, change types, error codes, glob matching, `.lodeconfig` parsing |
 | `lode-proto` | lib | Request/response types of the HTTP API (serde). Shared by server and client |
 | `lode-store` | lib | `BlobStore` trait and filesystem implementation |
@@ -54,7 +54,7 @@ One Cargo workspace. Library crates never depend on binaries; arrows point downw
 | `lode-import` | lib | Imports history from other systems: Git through the `git` command (first-parent replay, renames, LFS content) |
 | `lode-ops` | lib | Every client operation (context, sign-in resolution, workspace helpers, the commands). Each returns the command's `--json` document and reports through a `Ui` trait (lines, warnings, progress, questions), so it never touches the terminal. Used by `lode` and by the Lode Desk app |
 | `lode-cli` | bin `lode` | Argument parsing, the terminal `Ui` (printing, progress, prompts, editor), the `--json` envelope, local MCP server, `self-update`, external subcommands |
-| `lode-desk` | bin `lode-desk` (own workspace) | Lode Desk, the desktop client: `desk.rs` runs `lode-ops` operations on a thread each; the Slint window (`app.rs`, screens in `ui/slint/`) awaits them on the UI thread and receives progress through `slint::invoke_from_event_loop`. One copy runs per user (`instance.rs`, a lock file and a loopback socket that takes `lode://` links from later starts); updates come from a signed feed (`update.rs`, `minisign-verify`); installers are made by cargo-packager. Kept out of the main workspace so the CLI and server build without GUI libraries |
+| `lode-desk` | bin `lode-desk`, in `desk/` beside the core | Lode Desk, the desktop client, a separate subproject that depends on `lode-ops`, `lode-client` and `lode-core` at a pinned commit or tag of this repository (see `desk/README.md`), so the core can change without fixing Desk in the same change. `desk.rs` runs `lode-ops` operations on a thread each; the Slint window (`app.rs`, screens in `ui/slint/`) awaits them on the UI thread and receives progress through `slint::invoke_from_event_loop`. One copy runs per user (`instance.rs`, a lock file and a loopback socket that takes `lode://` links from later starts); updates come from a signed feed (`update.rs`, `minisign-verify`); installers are made by cargo-packager. Not part of the core workspace |
 | `loded` | bin | Wires `lode-server` and enabled modules together |
 | `lode-testkit` | lib (dev) | Starts an in-process server on a temp directory; helpers to drive CLI workspaces |
 

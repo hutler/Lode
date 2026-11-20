@@ -9,7 +9,7 @@ and large binary files. Part of SimpleDevOps.
 - Rules for contributors and agents: [AGENTS.md](AGENTS.md)
 - Using and running it: [docs/user-guide.html](docs/user-guide.html)
   ([PDF](docs/Lode-User-Guide.pdf))
-- The desktop app, Lode Desk: [docs/desk-guide.md](docs/desk-guide.md)
+- The desktop app, Lode Desk, lives beside Lode in [../desk/](../desk/README.md)
 - Deploying a server on a Linux VDS, step by step for AI agents: [docs/deploy-linux-for-agents.md](docs/deploy-linux-for-agents.md)
 - Robustness tests and their findings: [docs/HARDENING.md](docs/HARDENING.md)
 - Performance against the SPEC targets: [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
@@ -23,9 +23,9 @@ list, and the server image `ghcr.io/<owner>/loded`. Unpack, put the binaries on 
 and follow the user guide: Part I for the client, Part II for running a server (systemd,
 Windows service, container).
 
-The same release holds Lode Desk, the desktop app: an MSI and an NSIS setup for Windows, a
-universal `.dmg` for macOS, and `.deb`, `.rpm` and AppImage for Linux. Installed, it keeps
-itself up to date (see [crates/lode-desk/README.md](crates/lode-desk/README.md)).
+Lode Desk, the desktop app, has its own releases under tags `desk-v<version>`: an MSI and an
+NSIS setup for Windows, a universal `.dmg` for macOS, and `.deb` and AppImage for Linux.
+Installed, it keeps itself up to date (see [../desk/README.md](../desk/README.md)).
 
 A release is made by pushing a tag `lode-v<version>`; `.github/workflows/lode-release.yml`
 builds and publishes it. The checklist, including the keys it needs, is in

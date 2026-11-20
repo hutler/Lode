@@ -1,7 +1,7 @@
-//! T115 acceptance: the Lode Desk guide (`docs/desk-guide.md`) followed section by section
+//! T115 acceptance: the Lode Desk guide (`docs/guide.md`) followed section by section
 //! against a real server, by two people in two apps, through the same commands the window calls.
 //! What needs a person (installers, an update, a link clicked in another app) is in
-//! `docs/desk-acceptance.md`.
+//! `docs/acceptance.md`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
