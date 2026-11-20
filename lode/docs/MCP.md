@@ -147,6 +147,17 @@ lode admin acl add deny write agents --depot game --branch main
 On `main` agents can still read and shelve, but not commit, submit or lock (a lock needs
 write access); a person submits their shelves.
 
+### Validation
+
+When the depot has validation scripts (SPEC §6.8), the `validate` tool runs them on the
+workspace's changes (`paths`, `changelist`, `script`) and answers the results of
+`lode validate --json`. `shelve` and `commit` run them first and fail with
+`validation_failed` (problems in `details.results`) until the content is fixed. The agent
+cannot trust scripts or skip them: a person trusts a depot's scripts once with
+`lode validate --trust` on that machine, otherwise the tools answer `validation_untrusted`.
+On a branch in `[branches].shelf_only`, `commit` answers `shelf_required`; the agent shelves
+instead.
+
 ## `/mcp` (server, streamable HTTP)
 
 The endpoint is `https://<server>/mcp` with `Authorization: Bearer <token>`. It is on unless

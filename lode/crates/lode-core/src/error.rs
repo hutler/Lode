@@ -34,6 +34,8 @@ pub enum ErrorCode {
     TooLarge,
     /// Required checks have not passed (409). Defined by the checks module.
     ChecksRequired,
+    /// The branch takes changes through shelf submits only (409, `[branches].shelf_only`).
+    ShelfRequired,
     /// The content was obliterated from the depot and cannot be read or stored again (410).
     Obliterated,
     /// Server fault (500).
@@ -42,7 +44,7 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     /// Every code, for exhaustive tests and documentation.
-    pub const ALL: [ErrorCode; 16] = [
+    pub const ALL: [ErrorCode; 17] = [
         ErrorCode::Unauthenticated,
         ErrorCode::PermissionDenied,
         ErrorCode::NotFound,
@@ -57,6 +59,7 @@ impl ErrorCode {
         ErrorCode::HashMismatch,
         ErrorCode::TooLarge,
         ErrorCode::ChecksRequired,
+        ErrorCode::ShelfRequired,
         ErrorCode::Obliterated,
         ErrorCode::Internal,
     ];
@@ -78,6 +81,7 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::TooLarge => "too_large",
             ErrorCode::ChecksRequired => "checks_required",
+            ErrorCode::ShelfRequired => "shelf_required",
             ErrorCode::Obliterated => "obliterated",
             ErrorCode::Internal => "internal",
         }
@@ -96,7 +100,8 @@ impl ErrorCode {
             | ErrorCode::LockRequired
             | ErrorCode::MissingObjects
             | ErrorCode::BranchArchived
-            | ErrorCode::ChecksRequired => 409,
+            | ErrorCode::ChecksRequired
+            | ErrorCode::ShelfRequired => 409,
             ErrorCode::HashMismatch => 422,
             ErrorCode::TooLarge => 413,
             ErrorCode::Obliterated => 410,

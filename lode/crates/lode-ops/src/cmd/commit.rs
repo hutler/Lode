@@ -13,7 +13,7 @@ use std::time::SystemTime;
 use futures::StreamExt;
 use lode_client::Client;
 use lode_core::{validate_changes, Change, ChangeAction, DepotPath, EntryKind, ObjectId};
-use lode_proto::commit::{CommitRequest, EXT_FORCE_FLOW};
+use lode_proto::commit::{CommitRequest, EXT_FORCE_FLOW, EXT_OVERRIDE_SHELF_ONLY};
 use lode_workspace::db::keys;
 use lode_workspace::scan::{symlink_id, trusted_mtime};
 use lode_workspace::{FileRow, FileState, Status, Workspace};
@@ -56,6 +56,27 @@ pub struct CommitArgs {
     /// admins only; `lode merge --force-flow` sets it for you).
     #[arg(long)]
     pub force_flow: bool,
+    /// Commit directly to a branch that takes shelf submits only (`[branches].shelf_only`),
+    /// giving the reason the revision records. Depot admins only.
+    #[arg(long = "override", value_name = "REASON")]
+    pub override_reason: Option<String>,
+    /// Do not run the depot's validation scripts first.
+    #[arg(long)]
+    pub no_verify: bool,
+}
+
+/// The refusal for a direct commit to a `[branches].shelf_only` branch, as the server words
+/// it, with what to do instead.
+pub(crate) fn shelf_required(branch: &str) -> OpError {
+    let mut e = OpError::failed(
+        "shelf_required",
+        format!(
+            "branch `{branch}` takes changes through shelves only; {}",
+            advice("shelf_required").unwrap_or_default()
+        ),
+    );
+    e.details = json!({ "branch": branch });
+    e
 }
 
 /// A commit in flight, as stored under [`PENDING_COMMIT`].
@@ -178,6 +199,7 @@ fn advice(code: &str) -> Option<&'static str> {
         "locked" => "someone else holds the lock on these files",
         "lock_required" => "these files need a lock: run `lode lock <path>` first",
         "permission_denied" => "you may not write these paths; ask a depot admin",
+        "shelf_required" => "shelve your changes with `lode shelve`, then submit the shelf with `lode shelf submit ID@VERSION`",
         _ => return None,
     })
 }
@@ -189,6 +211,14 @@ pub(crate) fn explain(e: lode_client::Error) -> OpError {
         .map(|a| a.paths().iter().map(|p| p.to_string()).collect())
         .unwrap_or_default();
     let mut err = OpError::from(e);
+    if err.code == "shelf_required" {
+        let branch = err
+            .details
+            .get("branch")
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        return shelf_required(branch);
+    }
     if let Some(hint) = advice(&err.code) {
         if !paths.is_empty() {
             err.message = format!("{}: {}", err.message, paths.join(", "));
@@ -302,6 +332,7 @@ async fn finish_pending(
                 "replayed": resp.replayed,
                 "resumed": true,
                 "forced_flow": pending.request.extensions.contains_key(EXT_FORCE_FLOW),
+                "shelf_only_override": pending.request.extensions.contains_key(EXT_OVERRIDE_SHELF_ONLY),
             }))
         }
         Err(e) if maybe_committed(&e) => Err(explain(e)),
@@ -530,6 +561,13 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
         return finish_pending(ctx, &mut ws, &client, &depot, &branch, pending).await;
     }
 
+    // Refuse before uploading anything; the server checks again against the branch head.
+    if args.override_reason.is_none()
+        && crate::cmd::update::local_config(&ws).is_some_and(|c| c.shelf_only.matches_str(&branch))
+    {
+        return Err(shelf_required(&branch));
+    }
+
     let paths = local::depot_paths(ctx, &ws, &args.paths)?;
     // `Some(None)` is `-c default`: files in no changelist.
     let list = args
@@ -574,6 +612,14 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
     }
     let changes: Vec<Change> = out.iter().map(|o| o.change.clone()).collect();
     validate_changes(&changes).map_err(|e| OpError::failed("invalid_change", e.to_string()))?;
+    crate::cmd::validate::before_send(
+        ctx,
+        &ws,
+        crate::cmd::validate::Phase::Commit,
+        &changes,
+        args.no_verify,
+    )
+    .await?;
     let summary: Vec<String> = changes
         .iter()
         .map(|c| {
@@ -616,6 +662,12 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
                 }
                 if force_flow {
                     ext.insert(EXT_FORCE_FLOW.to_owned(), Value::Bool(true));
+                }
+                if let Some(reason) = &args.override_reason {
+                    ext.insert(
+                        EXT_OVERRIDE_SHELF_ONLY.to_owned(),
+                        Value::String(reason.clone()),
+                    );
                 }
                 ext
             },
@@ -666,5 +718,6 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
         "replayed": resp.replayed,
         "resumed": false,
         "forced_flow": force_flow,
+        "shelf_only_override": args.override_reason.is_some(),
     }))
 }

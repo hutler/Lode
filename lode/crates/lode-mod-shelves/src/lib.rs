@@ -774,6 +774,29 @@ async fn show(
     Ok(Json(get_shelf(&ctx, &caller, &depot, id, diff).await?))
 }
 
+/// One shelf with its changes, for another module working on the server's own behalf (the
+/// validation module). No caller and no access check: never hand the result to a client
+/// without checking access yourself.
+pub async fn shelf_for_module(
+    ctx: &ModuleCtx,
+    depot: DepotId,
+    id: u64,
+) -> ApiResult<Option<ShelfView>> {
+    let Ok(id) = i64::try_from(id) else {
+        return Ok(None);
+    };
+    let loaded = ctx
+        .meta()
+        .read(move |tx| {
+            let Some(row) = db::shelf(tx.db(), depot, id).map_err(sql_error)? else {
+                return Ok(None);
+            };
+            Loader::new(tx).load(row, true).map(Some)
+        })
+        .await?;
+    Ok(loaded.map(|l| l.view()))
+}
+
 /// One shelf with its changes and, with `diff`, a diff per changed file.
 pub async fn get_shelf(
     ctx: &ModuleCtx,

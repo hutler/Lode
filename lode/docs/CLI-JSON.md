@@ -282,7 +282,13 @@ them); `--all` reverts everything and forgets the merge as well.
 
 ### `lode commit`
 
-`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool, "forced_flow": bool }`
+`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool, "forced_flow": bool, "shelf_only_override": bool }`
+
+A branch listed in `[branches].shelf_only` refuses the commit with exit 1, code
+`shelf_required` and `details: { "branch" }` (0.5). The workspace's `.lodeconfig` is checked
+before anything is uploaded; the server checks again against the branch head.
+`--override "REASON"` commits anyway for a depot admin and sets `shelf_only_override`; anyone
+else gets `permission_denied`.
 
 `forced_flow` (0.4) is true when the commit asked the server to skip the stream rules
 (`--force-flow`, or a `lode merge --force-flow` before it). The server refuses that with
@@ -302,6 +308,24 @@ released by the commit.
 With a merge pending the commit records it as `merged_from` and may have no file changes. It
 must then include everything: paths and `-c` are a usage error. The default message is
 `Merge <branch> r<from>..r<to>`.
+
+### `lode validate [paths] [-c NAME] [--script NAME] [--trust]`
+
+`{ "passed": bool, "results": [ { "name", "outcome": "passed"|"failed"|"error"|"skipped",
+"reason"?, "problems": [ { "path"?, "line"?, "level": "error"|"warning", "message" } ],
+"text"?, "files", "seconds" } ] }` (0.5). Runs the depot's validation scripts (SPEC §6.8) on
+the workspace's changes. A failed or broken script exits 1 with code `validation_failed` and
+the same `results` in `details`.
+
+- `validation_untrusted` (`details: { "depot", "scripts": [paths] }`): this machine has not
+  trusted the scripts' current content. `--trust` trusts every script the depot lists, then
+  runs them.
+- `python_missing` (`details: { "need", "found" }`): no suitable Python and
+  `[validate] missing_python = "refuse"` in `settings.toml`; otherwise a warning and the
+  scripts count as `skipped`.
+
+`lode shelve` and `lode commit` run the same scripts first and fail with the same codes;
+`--no-verify` skips them.
 
 ### `lode lock <paths…> [-m COMMENT]` / `lode unlock <paths…> [--force]`
 
@@ -330,7 +354,7 @@ workspace.
 `default` for files in none) and takes the changelist's description as the message when
 neither `-m` nor `-F` is given.
 
-### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID]`
+### `lode shelve [paths] -m DESC [-c NAME] [--keep] [--update ID] [--no-verify]`
 
 `{ "shelf": id, "link": "lode://…/shelf/ID" | null, "version": n, "files": n, "uploaded": n,
 "bytes_uploaded": n, "bytes_reused": n, "kept": bool, "updated": bool,

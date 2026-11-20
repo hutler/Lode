@@ -68,6 +68,7 @@ mcp = true
 webhooks = false
 checks = false
 feed = true                                 # events of a depot from a cursor (GET .../events)
+validate = false                            # run [validate] scripts on shelves (needs checks)
 
 [gc]
 # Unreferenced objects younger than this are kept (24 hours).
@@ -147,6 +148,14 @@ enabled = true
 # Allow hooks with plain http:// URLs. Leave off unless the receivers are on a trusted
 # network: the signature proves who sent a request, but not that nobody read it.
 allow_http = false
+
+# Validation module, when enabled in [modules]: runs the Python scripts a depot lists under
+# [validate] in .lodeconfig on every shelf version, as checks `validate/<name>`. The scripts
+# run as the server's own user; see HARDENING.md before turning this on.
+[validate]
+# python = "/usr/bin/python3"      # required when the module is on
+workers = 2
+max_input_mib = 512
 "#;
 
 /// Errors reading the configuration.
@@ -200,6 +209,9 @@ pub struct ServerConfig {
     /// Webhooks module settings.
     #[serde(default)]
     pub webhooks: WebhooksConfig,
+    /// Validation module settings.
+    #[serde(default)]
+    pub validate: ValidateServerConfig,
     /// Single sign-on, when configured.
     #[serde(default)]
     pub oidc: Option<OidcConfig>,
@@ -931,6 +943,54 @@ pub struct WebhooksConfig {
     pub allow_http: bool,
 }
 
+/// The `[validate]` table, read by the validation module (SPEC §6.8).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ValidateServerConfig {
+    /// The Python that runs the depots' validation scripts: a program, or a program and its
+    /// first arguments. Required when the module is on.
+    pub python: Option<PythonCommand>,
+    /// Scripts run at the same time, at most.
+    pub workers: usize,
+    /// Most content, in MiB, written out for one run; larger shelves report the check as an
+    /// error.
+    pub max_input_mib: u64,
+    /// Where runs get their temporary trees. Default `<data_dir>/validate`. Resolved against
+    /// the config file's directory.
+    pub work_dir: Option<PathBuf>,
+}
+
+impl Default for ValidateServerConfig {
+    fn default() -> Self {
+        Self {
+            python: None,
+            workers: 2,
+            max_input_mib: 512,
+            work_dir: None,
+        }
+    }
+}
+
+/// A program, or a program and its first arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum PythonCommand {
+    /// One program, such as `/usr/bin/python3`.
+    Program(String),
+    /// A program and arguments, such as `["py", "-3.12"]`.
+    Command(Vec<String>),
+}
+
+impl PythonCommand {
+    /// As program and arguments.
+    pub fn argv(&self) -> Vec<String> {
+        match self {
+            PythonCommand::Program(p) => vec![p.clone()],
+            PythonCommand::Command(c) => c.clone(),
+        }
+    }
+}
+
 /// The `[backup]` table.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(try_from = "RawBackup")]
@@ -1278,6 +1338,8 @@ pub struct ModulesConfig {
     pub checks: bool,
     /// The event feed (`GET /depots/{d}/events`, `wait_for_events`).
     pub feed: bool,
+    /// Validation scripts run on every shelf version (SPEC §6.8).
+    pub validate: bool,
 }
 
 impl Default for ModulesConfig {
@@ -1289,6 +1351,7 @@ impl Default for ModulesConfig {
             webhooks: false,
             checks: false,
             feed: true,
+            validate: false,
         }
     }
 }
@@ -1303,6 +1366,7 @@ impl ModulesConfig {
             "webhooks" => self.webhooks,
             "checks" => self.checks,
             "feed" => self.feed,
+            "validate" => self.validate,
             _ => false,
         }
     }
@@ -1350,6 +1414,21 @@ impl ServerConfig {
         if cfg.connections.max_per_address == 0 {
             return Err(invalid("[connections] max_per_address must be at least 1"));
         }
+        if cfg.modules.validate {
+            if !cfg.modules.checks || !cfg.modules.shelves {
+                return Err(invalid(
+                    "[modules] validate needs the checks and shelves modules on",
+                ));
+            }
+            if cfg.validate.python.is_none() {
+                return Err(invalid(
+                    "[modules] validate needs [validate] python (for example \"python3\")",
+                ));
+            }
+        }
+        if cfg.validate.workers == 0 {
+            return Err(invalid("[validate] workers must be at least 1"));
+        }
         cfg.data_dir = base.join(&cfg.data_dir);
         match &mut cfg.tls {
             Some(TlsConfig::Files { cert, key }) => {
@@ -1364,6 +1443,9 @@ impl ServerConfig {
             None => {}
         }
         cfg.backup.dir = base.join(&cfg.backup.dir);
+        if let Some(d) = &cfg.validate.work_dir {
+            cfg.validate.work_dir = Some(base.join(d));
+        }
         if let Some(c) = &mut cfg.backup.copy_to {
             if let Some(f) = &mut c.s3.secret_access_key_file {
                 *f = base.join(&*f);
@@ -1461,6 +1543,7 @@ impl ServerConfig {
             ("webhooks", m.webhooks),
             ("checks", m.checks),
             ("feed", m.feed),
+            ("validate", m.validate),
         ] {
             t.insert(name.into(), Value::Boolean(on));
         }
@@ -1523,6 +1606,16 @@ impl ServerConfig {
         );
         root.insert("webhooks".into(), Value::Table(t));
         let mut t = Table::new();
+        if let Some(py) = &self.validate.python {
+            t.insert("python".into(), list(&py.argv()));
+        }
+        t.insert("workers".into(), n(self.validate.workers));
+        t.insert("max_input_mib".into(), n(self.validate.max_input_mib));
+        if let Some(d) = &self.validate.work_dir {
+            t.insert("work_dir".into(), p(d));
+        }
+        root.insert("validate".into(), Value::Table(t));
+        let mut t = Table::new();
         t.insert("enabled".into(), Value::Boolean(self.admin_ui.enabled));
         root.insert("admin_ui".into(), Value::Table(t));
         let mut t = Table::new();
@@ -1554,6 +1647,7 @@ impl ServerConfig {
             backup: BackupConfig::default(),
             modules: ModulesConfig::default(),
             webhooks: WebhooksConfig::default(),
+            validate: ValidateServerConfig::default(),
             oidc: None,
             storage: StorageConfig::default(),
             admin_ui: AdminUiConfig::default(),
@@ -1646,6 +1740,32 @@ mod tests {
             let err = ServerConfig::parse(text, Path::new("."), Path::new("x")).unwrap_err();
             assert!(matches!(err, ConfigError::Parse { .. }), "{text}");
         }
+    }
+
+    #[test]
+    fn the_validate_module_needs_its_partners_and_python() {
+        let refused = [
+            "data_dir = '.'\n[modules]\nvalidate = true\nchecks = true\n",
+            "data_dir = '.'\n[modules]\nvalidate = true\n[validate]\npython = 'python3'\n",
+            "data_dir = '.'\n[modules]\nvalidate = true\nchecks = true\nshelves = false\n[validate]\npython = 'python3'\n",
+            "data_dir = '.'\n[validate]\nworkers = 0\n",
+        ];
+        for text in refused {
+            assert!(
+                ServerConfig::parse(text, Path::new("."), Path::new("x")).is_err(),
+                "{text}"
+            );
+        }
+        let text = "data_dir = '.'\n[modules]\nvalidate = true\nchecks = true\n[validate]\npython = ['py', '-3']\nwork_dir = 'v'\n";
+        let cfg = ServerConfig::parse(text, Path::new("/etc/lode"), Path::new("x")).unwrap();
+        assert_eq!(
+            cfg.validate.python.as_ref().map(PythonCommand::argv),
+            Some(vec!["py".to_owned(), "-3".to_owned()])
+        );
+        assert_eq!(
+            cfg.validate.work_dir,
+            Some(Path::new("/etc/lode").join("v"))
+        );
     }
 
     #[test]

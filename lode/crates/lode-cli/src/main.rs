@@ -120,6 +120,8 @@ enum Command {
     Changelist(cmd::changelist::ChangelistArgs),
     /// Put pending changes on a shelf on the server.
     Shelve(cmd::shelve::ShelveArgs),
+    /// Run the depot's validation scripts on your changes.
+    Validate(cmd::validate::ValidateArgs),
     /// List the shelves of this depot.
     Shelves(cmd::shelve::ShelvesArgs),
     /// Show, diff or delete a shelf.
@@ -230,6 +232,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Locks(a)) => cmd::locks::locks(&ctx, a).await,
         Some(Command::Changelist(a)) => cmd::changelist::changelist(&ctx, a).await,
         Some(Command::Shelve(a)) => cmd::shelve::shelve(&ctx, a).await,
+        Some(Command::Validate(a)) => cmd::validate::validate(&ctx, a).await,
         Some(Command::Shelves(a)) => cmd::shelve::shelves(&ctx, a).await,
         Some(Command::Shelf(a)) => cmd::shelve::shelf(&ctx, a).await,
         Some(Command::Unshelve(a)) => cmd::shelve::unshelve(&ctx, a).await,
@@ -277,7 +280,22 @@ fn finish(json: bool, result: OpResult<Value>) -> ExitCode {
     }
 }
 
+/// Stack for the thread that runs the command. Building clap's command tree for every
+/// subcommand needs more than the 1 MiB main thread Windows gives a debug build.
+const MAIN_STACK: usize = 8 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    match std::thread::Builder::new()
+        .name("lode".into())
+        .stack_size(MAIN_STACK)
+        .spawn(main_thread)
+    {
+        Ok(handle) => handle.join().unwrap_or(ExitCode::FAILURE),
+        Err(_) => main_thread(),
+    }
+}
+
+fn main_thread() -> ExitCode {
     let json = wants_json();
     // `--paths-from` is applied to the arguments before they are parsed.
     let argv = match paths_from::expand(std::env::args_os().collect()) {

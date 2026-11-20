@@ -262,6 +262,8 @@ pub async fn init(ctx: &Ctx, args: InitArgs) -> OpResult<Value> {
             keep_locks: false,
             changelist: None,
             force_flow: false,
+            override_reason: None,
+            no_verify: false,
         },
     )
     .await;

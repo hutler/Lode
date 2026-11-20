@@ -1,0 +1,29 @@
+# Example validation setup (SPEC §6.8). Copy this folder's contents to the root of a depot.
+
+[branches]
+# Every change on main goes through a shelf, so the server's checks cover everything.
+shelf_only = ["main"]
+
+[checks]
+# Shelves submitted to main must pass every script below that runs on the server.
+branches = ["main"]
+
+[validate]
+python  = "3.11"                 # asset_names.py reads TOML with tomllib
+support = ["tools/validate/**"]
+
+[[validate.script]]
+name  = "json"
+run   = "tools/validate/json_valid.py"
+paths = ["**/*.json"]
+
+[[validate.script]]
+name  = "asset-names"
+run   = "tools/validate/asset_names.py"
+paths = ["Content/**"]
+
+[[validate.script]]
+name    = "max-size"
+run     = "tools/validate/max_size.py"
+paths   = ["Content/**/*.png", "Content/**/*.wav"]
+timeout = "30s"

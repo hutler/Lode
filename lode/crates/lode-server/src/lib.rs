@@ -37,8 +37,8 @@ pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};
 pub use config::{
     AcmeConfig, AdminUiConfig, BackupConfig, ConfigError, ConnectionsConfig, GcConfig, IpNet,
-    Limits, MetricsConfig, ModulesConfig, OidcConfig, PasswordLogin, S3Settings, ServerConfig,
-    StorageConfig, StorageKind, TlsConfig, WebhooksConfig,
+    Limits, MetricsConfig, ModulesConfig, OidcConfig, PasswordLogin, PythonCommand, S3Settings,
+    ServerConfig, StorageConfig, StorageKind, TlsConfig, ValidateServerConfig, WebhooksConfig,
 };
 pub use error::{ApiError, ApiResult};
 pub use extract::{ApiJson, ApiPath, ApiQuery};

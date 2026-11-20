@@ -91,7 +91,7 @@ jobs:
           echo "LODE_TEST_POSTGRES=postgres://lode:lode@127.0.0.1/lode_test?sslmode=disable" >> "$GITHUB_ENV"
       - run: >-
           cargo test -p lode-meta -p lode-server -p lode-mod-locks -p lode-mod-shelves
-          -p lode-mod-webhooks -p lode-mod-checks -p lode-mod-mcp -p lode-client -p lode-cli
+          -p lode-mod-webhooks -p lode-mod-checks -p lode-mod-validate -p lode-mod-mcp -p lode-client -p lode-cli
           -p lode-proxy
 
   msrv:

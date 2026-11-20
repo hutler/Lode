@@ -104,6 +104,7 @@ fn provenance() -> Provenance {
         ])),
         submitted_shelf: None,
         imported: None,
+        shelf_only_override: None,
     }
 }
 
@@ -326,6 +327,7 @@ fn commit_types() {
                 agent: None,
                 submitted_shelf: None,
                 imported: None,
+                shelf_only_override: None,
             }),
             extensions,
         }

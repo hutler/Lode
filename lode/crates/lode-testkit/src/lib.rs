@@ -88,6 +88,7 @@ pub fn available_modules() -> lode_server::module::Modules {
         lode_mod_webhooks::Webhooks::module(),
         lode_mod_checks::Checks::module(),
         lode_mod_feed::Feed::module(),
+        lode_mod_validate::Validate::module(),
     ]
 }
 
@@ -576,6 +577,7 @@ impl TestWorkspace {
             .env_remove("LODE_TOKEN_FILE")
             .env_remove("LODE_CACHE_DIR")
             .env_remove("LODE_PROXY")
+            .env_remove("LODE_PYTHON")
             .env("LODE_CONFIG_DIR", self.config_dir())
             .env("HOME", home)
             .env("USERPROFILE", home)

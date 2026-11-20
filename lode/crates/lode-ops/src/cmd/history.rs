@@ -288,6 +288,16 @@ fn print_revision(ctx: &Ctx, r: &RevisionView, verbose: bool) {
         }
         ctx.out.line(from);
     }
+    if let Some(o) = r
+        .provenance
+        .as_ref()
+        .and_then(|p| p.shelf_only_override.as_ref())
+    {
+        ctx.out.line(format!(
+            "    committed directly to a shelf-only branch by {}: {}",
+            o.by, o.reason
+        ));
+    }
     for line in r.message.lines() {
         if line.trim().is_empty() {
             ctx.out.line("");

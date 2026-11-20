@@ -162,6 +162,14 @@ json = ["**/*.json", "**/*.uproject", "**/*.uplugin"]  # the default: merged key
 A tool name only names a tool: the command it runs is set by each person in their own
 `settings.toml` (`[merge_tools.unreal]`), so a depot can never make Lode start a program.
 
+**Shelf-only branches (0.5).** `[branches] shelf_only = ["main", "release/*"]` makes the
+matching branches take changes through shelf submits only. Any other commit to them, a merge
+result included, is refused with `shelf_required`: shelve it and submit the shelf. A depot
+admin (a user, not an agent) can still commit directly with `lode commit --override
+"REASON"`; the revision records who and why (`provenance.shelf_only_override`, shown by
+`lode log`), so a broken check can never lock a branch. With the shelves module off, only
+such overrides can commit to a shelf-only branch.
+
 A commit that would leave `.lodeconfig` unparseable is refused. Rules are always taken from
 the branch head, never from the change being committed.
 
@@ -337,8 +345,10 @@ from the shelves module); the MCP module hosts them and adds the tools that read
   named principal, before a shelf can be submitted to matching branches. A submit that does
   not meet them is refused (`checks_required`). Because checks belong to a shelf version,
   changing the shelf means it must pass again.
-- Direct commits are not gated. Lode stores and enforces results; it does not run builds and
-  has no review workflow.
+- Direct commits are not gated by checks. To make every change on a branch go through a
+  gated shelf, list it in `[branches].shelf_only` (§5.6, 0.5). Lode stores and enforces
+  results; it does not run builds (except the validation scripts of §6.8) and has no review
+  workflow.
 
 ### 6.7 Event feed (0.4, on by default)
 
@@ -354,6 +364,52 @@ from the shelves module); the MCP module hosts them and adds the tools that read
 - `lode events [--depot D] [--after ID] [--kinds K,…] [--wait S]` and the MCP tool
   `wait_for_events` read it. Lode does not run agents: the loop that waits lives in the agent
   runtime.
+
+### 6.8 Validation scripts (0.5)
+
+- A depot keeps its own content checks as Python scripts in the depot, listed in
+  `.lodeconfig`. They reach every client and the server with an ordinary `lode update` or
+  submit, so there is nothing to install per machine.
+
+  ```toml
+  [validate]
+  python  = "3.8"                  # oldest Python the scripts need (optional)
+  support = ["tools/validate/**"]  # files the scripts import or read
+
+  [[validate.script]]
+  name    = "json"                 # check name on the server: validate/json
+  run     = "tools/validate/json_valid.py"
+  paths   = ["Data/**/*.json"]     # the changed files it is given
+  timeout = "60s"                  # default 60 s, at most 10 min
+  server  = true                   # also run by the server (default true)
+  ```
+
+  A commit whose `.lodeconfig` names a script that is not in the new revision, or a setting
+  that does not parse, is refused (`invalid_request`, `details.paths`).
+- **Contract.** The script runs as `python -X utf8 <run>` with the workspace (or the
+  server's temporary tree) as working directory and a cleared environment plus
+  `LODE_VALIDATE=1`. Standard input is one JSON object: `{ "version": 1, "phase":
+  "shelve"|"commit"|"manual"|"server", "depot", "branch", "files": [ { "path", "action":
+  "add"|"edit"|"delete"|"move", "from"? } ] }`. Exit 0 passes, exit 1 fails, anything else,
+  a timeout or an uncaught exception is an error ("the check broke"). Each standard output
+  line that is a JSON object `{ "path"?, "line"?, "level": "error"|"warning", "message" }`
+  is a problem; other lines are kept as text.
+- **Clients.** `lode shelve` and `lode commit` run the scripts whose `paths` match the
+  changes first and stop with `validation_failed` (`details.results`) when one fails;
+  `--no-verify` skips them. `lode validate [paths] [-c NAME] [--script NAME]` runs them on
+  demand. A script runs on a machine only after its owner trusted that exact content once
+  (`lode validate --trust`, or a prompt in a terminal); otherwise `validation_untrusted`.
+  Without a suitable Python the client warns and goes on, or refuses with `python_missing`
+  when `[validate] missing_python = "refuse"` is set in `settings.toml`.
+- **Server (module `validate`, off by default).** On every new shelf version the server
+  runs the scripts with `server = true` that match the shelf's changes and reports each as
+  the check `validate/<name>` (§6.6) from the service user `lode-validate`. Scripts and
+  support files come from the target branch head, never from the shelf. On branches in
+  `[checks].branches` every such script must have passed on the submitted shelf version, in
+  addition to `[checks].required`; with `[branches].shelf_only` that covers every change.
+  `GET /depots/{d}/validate/{shelf}/{version}` (scope `read`) answers the full results.
+- Client runs are a convenience; the server run is the enforcement. Neither is a sandbox:
+  a script runs with the rights of whoever runs it.
 
 ## 7. AI support
 

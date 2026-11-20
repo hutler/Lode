@@ -61,6 +61,13 @@ runs in CI in a short bounded form; the long forms are under [Running longer](#r
   crash points are what guarantees each durable step is covered every run.
 - **No third-party audit** (out of scope for T054).
 
+- **Validation scripts run code.** With the `validate` module on, anyone who can land a
+  script on a branch head (by commit or submitted shelf) runs code on the server as the
+  `loded` user, in a fresh directory with a cleared environment, a timeout and capped output.
+  That is not a sandbox. Run `loded` as its own user (the packages do) or in the container,
+  and gate the branches that hold the scripts with `[branches].shelf_only` and required
+  checks. Clients run a script only after its owner trusted that exact content.
+
 ## Running longer
 
 ```sh
