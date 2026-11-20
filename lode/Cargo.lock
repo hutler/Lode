@@ -1617,6 +1617,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lode-mod-feed"
+version = "0.3.0"
+dependencies = [
+ "axum",
+ "lode-core",
+ "lode-meta",
+ "lode-proto",
+ "lode-server",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "lode-mod-locks"
 version = "0.3.0"
 dependencies = [
@@ -1843,6 +1857,7 @@ dependencies = [
  "lode-core",
  "lode-meta",
  "lode-mod-checks",
+ "lode-mod-feed",
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",
@@ -1887,6 +1902,7 @@ dependencies = [
  "lode-build",
  "lode-meta",
  "lode-mod-checks",
+ "lode-mod-feed",
  "lode-mod-locks",
  "lode-mod-mcp",
  "lode-mod-shelves",

@@ -129,6 +129,8 @@ enum Command {
     Ls(cmd::history::LsArgs),
     /// List the checks reported on a revision or a shelf version.
     Checks(cmd::checks::ChecksArgs),
+    /// List what happened in a depot since a cursor, optionally waiting for it.
+    Events(cmd::events::EventsArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
     Mcp(cmd::mcp::McpArgs),
     /// Administer the server: depots, users, agents, groups, tokens, access rules.
@@ -198,6 +200,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Blame(a)) => cmd::history::blame(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
         Some(Command::Checks(a)) => cmd::checks::checks(&ctx, a).await,
+        Some(Command::Events(a)) => cmd::events::events(&ctx, a).await,
         Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {
             // The child owns stdout; `lode` adds nothing to it and passes its exit code on.

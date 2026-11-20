@@ -23,6 +23,7 @@ lode-meta.workspace = true
 lode-mod-locks.workspace = true
 lode-mod-mcp.workspace = true
 lode-mod-checks.workspace = true
+lode-mod-feed.workspace = true
 lode-mod-webhooks.workspace = true
 lode-mod-shelves.workspace = true
 lode-proxy.workspace = true

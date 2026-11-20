@@ -67,6 +67,7 @@ shelves = true
 mcp = true
 webhooks = false
 checks = false
+feed = true                                 # events of a depot from a cursor (GET .../events)
 
 [gc]
 # Unreferenced objects younger than this are kept (24 hours).
@@ -1081,6 +1082,8 @@ pub struct ModulesConfig {
     pub webhooks: bool,
     /// Reported checks and the submit gate.
     pub checks: bool,
+    /// The event feed (`GET /depots/{d}/events`, `wait_for_events`).
+    pub feed: bool,
 }
 
 impl Default for ModulesConfig {
@@ -1091,6 +1094,7 @@ impl Default for ModulesConfig {
             mcp: true,
             webhooks: false,
             checks: false,
+            feed: true,
         }
     }
 }
@@ -1104,6 +1108,7 @@ impl ModulesConfig {
             "mcp" => self.mcp,
             "webhooks" => self.webhooks,
             "checks" => self.checks,
+            "feed" => self.feed,
             _ => false,
         }
     }
@@ -1240,6 +1245,7 @@ impl ServerConfig {
             ("mcp", m.mcp),
             ("webhooks", m.webhooks),
             ("checks", m.checks),
+            ("feed", m.feed),
         ] {
             t.insert(name.into(), Value::Boolean(on));
         }

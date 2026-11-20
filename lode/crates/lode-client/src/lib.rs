@@ -1047,6 +1047,30 @@ impl Client {
         self.json(Retry::Yes, Method::GET, url).await
     }
 
+    // ---- feed module ----
+
+    /// `GET /depots/{d}/events`: events after a cursor, optionally waiting for one.
+    pub async fn events(
+        &self,
+        depot: &str,
+        q: &lode_proto::feed::EventsQuery,
+    ) -> Result<lode_proto::feed::EventList> {
+        let mut url = self.url(&["depots", depot, "events"])?;
+        {
+            let mut p = url.query_pairs_mut();
+            if let Some(a) = q.after {
+                p.append_pair("after", &a.to_string());
+            }
+            if let Some(k) = &q.kinds {
+                p.append_pair("kinds", k);
+            }
+            if let Some(w) = q.wait {
+                p.append_pair("wait", &w.to_string());
+            }
+        }
+        self.json(Retry::Yes, Method::GET, url).await
+    }
+
     // ---- webhooks module ----
 
     /// `GET /depots/{d}/webhooks`.

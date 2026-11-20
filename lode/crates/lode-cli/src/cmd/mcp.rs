@@ -68,8 +68,14 @@ pub async fn serve(ctx: &Ctx, args: McpArgs) -> OpResult<Value> {
             ..ctx.g.clone()
         },
     };
+    // A second worker for `wait_for_events`, so a long wait never holds up other tools.
+    let waiter = Worker {
+        root: worker.root.clone(),
+        g: worker.g.clone(),
+    };
     let server = Server {
         jobs: worker.spawn()?,
+        waits: waiter.spawn()?,
         can_write: Arc::new(OnceCell::new()),
     };
     let running = server
@@ -123,6 +129,8 @@ struct Worker {
 #[derive(Clone)]
 struct Server {
     jobs: mpsc::UnboundedSender<Job>,
+    /// The worker that runs `wait_for_events`.
+    waits: mpsc::UnboundedSender<Job>,
     /// Whether the stored token may commit, asked once.
     can_write: Arc<OnceCell<bool>>,
 }
@@ -136,7 +144,12 @@ impl Server {
             reply,
         };
         let gone = || OpError::failed("mcp", "the command worker stopped");
-        self.jobs.send(job).map_err(|_| gone())?;
+        let queue = if name == "wait_for_events" {
+            &self.waits
+        } else {
+            &self.jobs
+        };
+        queue.send(job).map_err(|_| gone())?;
         answer.await.map_err(|_| gone())?
     }
 
@@ -249,6 +262,20 @@ impl Worker {
             "changelist" => {
                 let i: Changelist = parse(input)?;
                 changelist(&ctx, root, i).await
+            }
+            "wait_for_events" => {
+                let i: WaitForEvents = parse(input)?;
+                let wait = i
+                    .timeout_s
+                    .unwrap_or(DEFAULT_WAIT_SECONDS)
+                    .min(MAX_WAIT_SECONDS);
+                let args = cmd::events::EventsArgs {
+                    depot: i.depot,
+                    after: i.after,
+                    kinds: i.kinds.map(|k| k.join(",")),
+                    wait: Some(wait),
+                };
+                cmd::events::events(&ctx, args).await
             }
             "diff" => {
                 let i: Paths = parse(input)?;
@@ -665,6 +692,19 @@ struct Changelist {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct WaitForEvents {
+    depot: Option<String>,
+    after: Option<i64>,
+    kinds: Option<Vec<String>>,
+    timeout_s: Option<u64>,
+}
+
+/// Default and longest wait of `wait_for_events`, below common MCP client tool timeouts.
+const DEFAULT_WAIT_SECONDS: u64 = 25;
+const MAX_WAIT_SECONDS: u64 = 50;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Paths {
     #[serde(default)]
     paths: Vec<String>,
@@ -1040,6 +1080,30 @@ fn tools(can_write: bool) -> Vec<Tool> {
                     "paths": paths_prop("For `move`: files to put into the changelist")
                 }),
                 &["action"],
+            ),
+        ),
+        Tool::new(
+            "wait_for_events",
+            "Wait for something to happen in the workspace's depot: a new revision, a branch \
+             created or archived, a lock taken or released, a shelf created, updated, \
+             submitted or deleted, or a check result. Answers at once when events after \
+             `after` exist, otherwise waits up to `timeout_s` seconds (default 25, at most \
+             50). Without `after` it answers no events and the current cursor. Keep `next` \
+             and pass it as `after` next time. Events carry ids only: read details with \
+             `log`, `locks` or `status` with `remote`. If `truncated` is true, events were \
+             dropped (they are kept for 7 days): read the history again.",
+            schema(
+                json!({
+                    "after": { "type": "integer", "minimum": 0, "description": "The `next` of the previous call" },
+                    "kinds": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": lode_proto::feed::EVENTS },
+                        "description": "Only these events (default: all)"
+                    },
+                    "timeout_s": { "type": "integer", "minimum": 0, "maximum": MAX_WAIT_SECONDS, "description": "Seconds to wait (default 25)" },
+                    "depot": { "type": "string", "description": "Another depot on the same server (default: the workspace's)" }
+                }),
+                &[],
             ),
         ),
     ];

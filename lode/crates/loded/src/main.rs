@@ -469,5 +469,6 @@ fn available_modules() -> lode_server::module::Modules {
         lode_mod_mcp::Mcp::module(),
         lode_mod_webhooks::Webhooks::module(),
         lode_mod_checks::Checks::module(),
+        lode_mod_feed::Feed::module(),
     ]
 }
