@@ -405,6 +405,25 @@ lode branch create spike --switch             # create and switch in one step
 lode switch feature-inventory</code></pre>
 <p>Creating a branch is instant and uses no extra storage. <code>lode switch</code> changes your workspace to another branch, carrying your uncommitted edits along and merging them if needed. Finished branches can be archived by an administrator; they are hidden and become read-only, but are never deleted.</p>
 
+<h2>Streams</h2>
+<p>Streams are branches with a type that says which way changes may flow. They are optional: ordinary branches keep working as before.</p>
+<table>
+  <tr><th style="width:18%">Type</th><th>What it is for</th><th>Rules</th></tr>
+  <tr><td><code>mainline</code></td><td>The trunk everything else starts from</td><td>A branch without a parent, usually <code>main</code></td></tr>
+  <tr><td><code>development</code></td><td>Work in progress: a feature, a team</td><td>Takes merges from its parent at any time. Copies up into the parent only when it already has everything the parent has</td></tr>
+  <tr><td><code>release</code></td><td>Stabilising a version</td><td>Takes only picked revisions from its parent (<code>lode merge main -r 231</code>). Its fixes merge up freely</td></tr>
+</table>
+<pre><code>lode branch set-type main mainline                     # once, by a depot admin
+lode branch create ui --from main --type development
+lode branch create release-2 --from main --type release
+lode branch tree                                        # streams, with ↓ to merge down and ↑ to merge up</code></pre>
+<p>To finish work on a development stream, merge down first, then copy up:</p>
+<pre><code>lode switch ui
+lode merge main && lode commit -m "Merge main"         # "merge down"
+lode switch main
+lode merge ui && lode commit -m "Merge ui"             # "copy up", allowed now</code></pre>
+<p><code>lode merge</code> checks the rules before it touches your files and says what to do instead, for example <em>merge `main` into `ui` first: it is 3 revisions behind</em>. Merges between streams that are not parent and child are refused. A depot administrator can override a refusal with <code>lode merge … --force-flow</code>; the commit then records that the rules were skipped.</p>
+
 <h2>Merging</h2>
 <p>To bring a branch's changes into the branch your workspace is on:</p>
 <pre><code>lode switch main
@@ -416,6 +435,26 @@ lode commit -m "Merge feature-inventory"</code></pre>
 <p>To take a single revision from another branch:</p>
 <pre><code>lode merge release-1 -r 231</code></pre>
 <p>To abandon a merge before committing, run <code>lode revert --merge</code>.</p>
+<p>Merges follow renames made with <code>lode mv</code>. If the other branch renamed a file you edited, your edits move to the new name; if you renamed a file the other branch edited, the edit arrives under your name. When both sides renamed the same file to different names, the other name is offered as a conflict: <code>lode resolve NAME --mine</code> drops it, <code>--theirs</code> keeps both.</p>
+<h3>JSON files</h3>
+<p>When two people change the same JSON file, Lode first merges it line by line. If that conflicts, files matching <code>[merge] json</code> in <code>.lodeconfig</code> (by default <code>*.json</code>, <code>*.uproject</code> and <code>*.uplugin</code>) are merged key by key: different keys added or changed on each side combine without a conflict, and only the same value changed differently on both sides stays a conflict. Your key order and indentation are kept.</p>
+
+<h3>Merge tools</h3>
+<p>For formats Lode cannot merge, such as Unreal assets, a depot can name a merge tool per file type, and each person says which program that name starts on their machine:</p>
+<pre><code># .lodeconfig in the depot
+[merge.tools]
+"**/*.uasset" = "unreal"
+
+# settings.toml in your Lode configuration folder (next to your sign-in details)
+[merge_tools.unreal]
+command = ["C:/UE/Engine/Binaries/Win64/UnrealEditor.exe", "-diff", "{base}", "{mine}", "{theirs}", "{merged}"]
+trust_exit_code = true</code></pre>
+<p>Other tools work the same way, for example KDiff3 (<code>["kdiff3", "{base}", "{mine}", "{theirs}", "-o", "{merged}"]</code>) or Beyond Compare (<code>["bcomp", "{mine}", "{theirs}", "{base}", "{merged}"]</code>). Then:</p>
+<pre><code>lode resolve --tool                  # every conflict that has a tool
+lode resolve Content/Hero.uasset --tool kdiff3
+lode merge-tool list                 # tools the depot names, and which ones you have set up</code></pre>
+<p>Lode never starts a tool during a merge or an update, and a depot can only name a tool, never say what it runs.</p>
+
 <div class="note"><strong>Known limit in version 1.</strong> After picking a single revision, a later full merge of the same branch applies that change again. Usually this merges cleanly as a no-op; occasionally it produces a conflict you resolve by keeping your version.</div>
 
 <h1>13. Partial workspaces</h1>

@@ -75,17 +75,66 @@ pub fn branch_rows(
             .then_with(|| archived(a).cmp(&archived(b)))
             .then_with(|| name(a).cmp(&name(b)))
     });
+    let depth = stream_order(&mut shown, f.is_empty());
     shown
         .into_iter()
-        .map(|b| BranchRow {
+        .zip(depth)
+        .map(|(b, depth)| BranchRow {
             name: name(b).into(),
             current: name(b) == current,
             archived: archived(b),
             head: format!("r{}", b["head_rev"].as_u64().unwrap_or(0)).into(),
             origin: origin(b).into(),
             selected: name(b) == selected,
+            stream: b["stream"].as_str().unwrap_or("").into(),
+            depth,
         })
         .collect()
+}
+
+/// Puts streams first, as a tree (each stream under its parent, siblings by name), and returns
+/// each row's depth. Without streams, or while filtering, the order stays and every depth is 0.
+fn stream_order(shown: &mut Vec<&Value>, whole: bool) -> Vec<i32> {
+    let typed = |b: &Value| b["stream"].as_str().is_some_and(|s| !s.is_empty());
+    if !whole || !shown.iter().any(|b| typed(b)) {
+        return vec![0; shown.len()];
+    }
+    let name = |b: &Value| b["name"].as_str().unwrap_or("").to_owned();
+    let parent = |b: &Value| b["parent"]["branch"].as_str().map(str::to_owned);
+    let streams: Vec<&Value> = shown.iter().copied().filter(|b| typed(b)).collect();
+    let mut order: Vec<(&Value, i32)> = Vec::new();
+    fn walk<'a>(
+        at: Option<String>,
+        depth: i32,
+        streams: &[&'a Value],
+        order: &mut Vec<(&'a Value, i32)>,
+        name: &dyn Fn(&Value) -> String,
+        parent: &dyn Fn(&Value) -> Option<String>,
+    ) {
+        let mut kids: Vec<&Value> = streams
+            .iter()
+            .copied()
+            .filter(|b| match &at {
+                // Roots: no parent, or a parent that is not a shown stream.
+                None => parent(b).is_none_or(|p| !streams.iter().any(|s| name(s) == p)),
+                Some(a) => parent(b).as_deref() == Some(a.as_str()),
+            })
+            .collect();
+        kids.sort_by_key(|b| name(b));
+        for k in kids {
+            if order.iter().any(|(o, _)| std::ptr::eq(*o, k)) {
+                continue;
+            }
+            order.push((k, depth));
+            walk(Some(name(k)), depth + 1, streams, order, name, parent);
+        }
+    }
+    walk(None, 0, &streams, &mut order, &name, &parent);
+    let rest: Vec<&Value> = shown.iter().copied().filter(|b| !typed(b)).collect();
+    let mut depth: Vec<i32> = order.iter().map(|(_, d)| *d).collect();
+    depth.extend(std::iter::repeat_n(0, rest.len()));
+    *shown = order.into_iter().map(|(b, _)| b).chain(rest).collect();
+    depth
 }
 
 /// `n` `one`s, with an `s` unless it is one.
@@ -272,6 +321,46 @@ mod tests {
         assert_eq!(rows[2].origin, "first branch");
         assert_eq!(rows[0].origin, "from main@r3");
         assert_eq!(branch_rows(&branches, "zeta", "AL", "").len(), 1);
+    }
+
+    #[test]
+    fn streams_as_a_tree() {
+        let b = |name: &str, stream: Value, parent: Value| json!({"name": name, "state": "active", "head_rev": 3, "stream": stream, "parent": parent});
+        let branches = [
+            b("tools", Value::Null, json!({"branch": "main", "rev": 1})),
+            b(
+                "rel/1.0",
+                json!("release"),
+                json!({"branch": "main", "rev": 2}),
+            ),
+            b(
+                "dev/ui",
+                json!("development"),
+                json!({"branch": "main", "rev": 1}),
+            ),
+            b("main", json!("mainline"), Value::Null),
+            b(
+                "dev/ui-fix",
+                json!("development"),
+                json!({"branch": "dev/ui", "rev": 2}),
+            ),
+        ];
+        let rows = branch_rows(&branches, "tools", "", "");
+        let shown: Vec<(&str, i32)> = rows.iter().map(|r| (r.name.as_str(), r.depth)).collect();
+        assert_eq!(
+            shown,
+            [
+                ("main", 0),
+                ("dev/ui", 1),
+                ("dev/ui-fix", 2),
+                ("rel/1.0", 1),
+                ("tools", 0)
+            ]
+        );
+        assert_eq!(rows[3].stream, "release");
+        // Filtering shows a flat list.
+        let rows = branch_rows(&branches, "tools", "dev", "");
+        assert!(rows.iter().all(|r| r.depth == 0) && rows.len() == 2);
     }
 
     #[test]

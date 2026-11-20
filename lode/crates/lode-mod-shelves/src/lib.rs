@@ -594,7 +594,15 @@ pub async fn submit_shelf(
         changes: shelf.changes.clone().unwrap_or_default(),
         merged_from,
         provenance: Some(provenance),
-        extensions: BTreeMap::new(),
+        extensions: if req.force_flow {
+            [(
+                lode_proto::commit::EXT_FORCE_FLOW.to_owned(),
+                serde_json::Value::Bool(true),
+            )]
+            .into()
+        } else {
+            BTreeMap::new()
+        },
     };
     let attrs: BTreeMap<String, String> = [
         (ATTR_ID.to_owned(), id.to_string()),

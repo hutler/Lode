@@ -113,7 +113,7 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
   secret. Scripts that read the token from setup's output need `--print-admin-token`.
   Without a terminal and without `--admin-password-file`, setup now generates a first
   password (`--generate-admin-password`) instead of failing.
-- The database gains `principal.password_change_by` (core schema 7), added on the first
+- The database gains `principal.password_change_by` (core schema 8), added on the first
   start. A generated first password is good only for choosing a new one (`POST
   /auth/password`, `lode passwd`, or the admin web sign-in), and for 24 hours. Logins with it
   are `unauthenticated` with `details.reason` `password_change_required` (or

@@ -261,7 +261,12 @@ them); `--all` reverts everything and forgets the merge as well.
 
 ### `lode commit`
 
-`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool }`
+`{ "rev", "branch", "files", "uploaded", "bytes_uploaded", "bytes_reused", "replayed": bool, "resumed": bool, "forced_flow": bool }`
+
+`forced_flow` (0.4) is true when the commit asked the server to skip the stream rules
+(`--force-flow`, or a `lode merge --force-flow` before it). The server refuses that with
+`permission_denied` unless you are a depot admin, and refuses a merge the rules do not allow
+with `conflict` (`details.reason = "stream_flow"`).
 
 `uploaded` counts the blobs the server lacked; `bytes_uploaded` is the content sent and
 `bytes_reused` what the server already had, which for a large file is every chunk that did
@@ -382,7 +387,8 @@ most recently reported first. `state` is `pending`, `success`, `failure`, `error
 ```
 
 Outcomes: `applied`, `merged`, `conflicted`, `unchanged` (already as on the shelf), `skipped`
-(outside the view). A shelf that carries a merge makes it pending again here, and is refused
+(outside the view), `rename_conflict`; renames are followed as `lode merge` follows them, with
+`from` on the files concerned. A shelf that carries a merge makes it pending again here, and is refused
 (`merge_pending`) while another merge is pending. A conflict is settled with `lode resolve`; `--theirs` takes the shelf's
 side. A binary conflict leaves the shelf's content in `<file>.theirs-shelf`.
 
@@ -404,12 +410,22 @@ at that revision was obliterated on the server: left out, and listed in `obliter
 older tracked copy is removed). `full` is true when the access epoch changed and the whole
 manifest was compared. `checkout` and `view` changes list obliterated files the same way.
 
-### `lode branch list [--all]` / `create <name> [--from B[@REV]] [--switch]` / `archive <name>`
+### `lode branch list [--all]` / `create <name> [--from B[@REV]] [--switch] [--type T]` / `archive <name>` / `set-type <name> <type>` / `tree [--all]`
 
 A branch is `{ "name", "head_rev", "created_rev", "parent": { "branch", "rev" } | null,
-"state": "active"|"archived" }`. `list` prints `{ "current", "branches": [branch] }`;
-`create` prints the branch (from this workspace's branch at its revision by default), plus
-`"switch"` with the switch result when `--switch`; `archive` prints the branch.
+"state": "active"|"archived", "stream": "mainline"|"development"|"release"|null }` (`stream`
+since 0.4). `list` prints `{ "current", "branches": [branch] }`; `create` prints the branch
+(from this workspace's branch at its revision by default), plus `"switch"` with the switch
+result when `--switch`; `archive` and `set-type` print the branch.
+
+`--type` is `development` or `release` and needs a stream as source; `set-type` takes
+`mainline` (a branch without a parent), `development`, `release` or `none`. A broken rule is
+`invalid_request` with `details.reason = "stream_parent"`.
+
+`tree` prints `{ "current", "tree": [node] }`, node = `{ "name", "stream", "head_rev", "down",
+"up", "children": [node] }`: `down` counts the parent's revisions not merged into the branch,
+`up` the branch's revisions not merged into the parent (the revision that created the branch
+is one of them); both are null for a branch without a listed parent.
 
 ### `lode switch <branch> [-r REV]`
 
@@ -430,12 +446,15 @@ of that revision are downloaded.
 {
   "source": "feat", "from_rev": 8, "to_rev": 11, "base": 7, "nothing_to_do": false,
   "files": [ { "path": "a.txt", "outcome": "merged" } ],
-  "counts": { "merged": 1 }
+  "counts": { "merged": 1 },
+  "flow": { "direction": "merge_down", "allowed": true, "pick_allowed": true }
 }
 ```
 
 Applies the source branch's changes from the merge base (`base`, SPEC §5.4) to its head, as
-`unshelve` applies a shelf: outcomes `applied`, `merged`, `conflicted`, `unchanged`, `skipped`.
+`unshelve` applies a shelf: outcomes `applied`, `merged`, `conflicted`, `unchanged`, `skipped`,
+and (0.4) `rename_conflict`. Renames on either side are followed (ARCHITECTURE §10.5); a file
+whose change was made under another name carries `"from": "<that path>"`.
 A binary conflict leaves the source's content in `<file>.theirs-r<to_rev>`; conflict markers
 name it `<branch> r<to_rev>`. The range `from_rev..to_rev` is kept until the next commit
 records it (see `lode status`, `lode revert --merge`). With nothing new on the source,
@@ -445,13 +464,35 @@ change (`parent → REV`) and records `REV..REV`.
 Refused with `conflicted` while conflicts remain, `merge_pending` while a merge is not yet
 committed, and `pending_commit`/`update_incomplete` like `update`.
 
+`flow` (0.4; null against older servers) is the stream rules' verdict (ARCHITECTURE §5.4):
+`direction` is `merge_down`, `merge_up`, `copy_up`, `sideways` or `untyped`, with `reason`
+and, for `copy_up`, `behind` when refused. A refused merge stops before any file is written
+with `conflict` and `details: { "reason": "stream_flow", "direction", "source", "target",
+"behind"? }`. `--force-flow` merges anyway and makes the next commit (or `shelf submit
+--force-flow`) ask the server to skip the rules, which only a depot admin may.
+
 Known limit: after a single-revision pick a later full merge starts from the base before the
 gap and applies the picked change again. Usually that is `unchanged`; if the file changed
 since, it can conflict.
 
-### `lode resolve <paths> --mine|--theirs|--merged`
+### `lode resolve <paths> --mine|--theirs|--merged` / `lode resolve [paths] --tool [NAME]`
 
-`{ "resolved": [paths], "using": "mine"|"theirs"|"merged" }`
+`{ "resolved": [paths], "using": "mine"|"theirs"|"merged"|"tool" }`
+
+`--tool` (0.4) also prints `"failed": [ { "path", "tool", "reason" } ]` and `"skipped":
+[paths]` (conflicts without a tool, when no paths were named). It runs, per conflicted file,
+the tool the depot's `[merge.tools]` names (or `NAME`) with the command from
+`[merge_tools.NAME]` in `settings.toml`, on copies of base, mine and theirs under
+`.lode/tmp/merge/`; the file counts as merged when the tool exits 0 (or, with
+`trust_exit_code = false`, when it changed the merged file). A name without a command is
+`merge_tool_unknown` with `details: { "tool", "settings", "snippet" }`; named paths with no
+tool are `no_merge_tool`. Merges, updates and unshelves never start a tool; their `files`
+entries carry `"tool"` for conflicts that have one.
+
+### `lode merge-tool list`
+
+`{ "tools": [ { "name", "patterns": [..], "configured": bool, "command": [..]|null } ] }`:
+every tool named by this workspace's `.lodeconfig` or set up in `settings.toml`.
 
 For a conflict left by `unshelve`, `--theirs` writes the shelf's content (or deletes the file)
 over the workspace's base, so the file shows as modified (or deleted).

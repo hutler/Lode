@@ -16,7 +16,9 @@ use lode_meta::{
     BranchRow, BranchState, ChangeRow, DepotRow, MergeRow, MetaError, PrincipalRow, Reads,
     RevisionRow,
 };
-use lode_proto::commit::{CommitRequest, CommitResponse, MergedFrom, Provenance, Via};
+use lode_proto::commit::{
+    CommitRequest, CommitResponse, MergedFrom, Provenance, Via, EXT_FORCE_FLOW,
+};
 use lode_proto::consts::MAX_PROVENANCE_BYTES;
 use lode_store::{PutOptions, StoreError};
 use serde_json::json;
@@ -248,6 +250,7 @@ pub async fn commit(
     check_copy_from(state, caller, d, &req.changes).await?;
 
     let merges = merge_rows(state, d, &req.merged_from).await?;
+    let forced_flow = check_stream_flow(state, caller, &branch_row, &req).await?;
 
     state
         .failpoints()
@@ -383,6 +386,7 @@ pub async fn commit(
                 &author,
                 &submitter,
                 origin.label(),
+                forced_flow,
             );
             tx.append_outbox(Some(d), "revision.created", &data, now)?;
             Ok(TxOutcome::Done(num))
@@ -653,6 +657,48 @@ async fn check_copy_from(
         }
     }
     Ok(())
+}
+
+/// SPEC §5.3a: the stream rules for every `merged_from` range. Returns whether a depot admin
+/// skipped them with [`EXT_FORCE_FLOW`] (only then, and only when they would have refused).
+async fn check_stream_flow(
+    state: &AppState,
+    caller: &Caller,
+    target: &BranchRow,
+    req: &CommitRequest,
+) -> ApiResult<bool> {
+    if req.merged_from.is_empty() {
+        return Ok(false);
+    }
+    let force = req
+        .extensions
+        .get(EXT_FORCE_FLOW)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let t = target.clone();
+    let merged = req.merged_from.clone();
+    let verdict = state
+        .meta()
+        .read(move |tx| crate::branches::check_flow(tx, &t, &merged))
+        .await?;
+    let Err(refused) = verdict else {
+        return Ok(false);
+    };
+    if !force {
+        return Err(refused);
+    }
+    let admin = caller.has_scope(crate::auth::SCOPE_ADMIN)
+        && state
+            .permissions()
+            .depot(caller, target.depot_id)
+            .is_depot_admin();
+    if !admin {
+        return Err(ApiError::new(
+            ErrorCode::PermissionDenied,
+            "skipping the stream rules needs admin on the depot",
+        ));
+    }
+    Ok(true)
 }
 
 /// merged_from: the source branch exists and the range lies in its history.

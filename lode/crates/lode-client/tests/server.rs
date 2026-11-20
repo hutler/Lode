@@ -130,6 +130,7 @@ async fn round_trip_through_a_real_server() {
             name: "release/1.0".into(),
             from_branch: "main".into(),
             from_rev: None,
+            stream: None,
         },
     )
     .await
@@ -181,6 +182,7 @@ async fn round_trip_through_a_real_server() {
             "release/1.0",
             &PatchBranchRequest {
                 state: Some(BranchState::Archived),
+                stream: None,
             },
         )
         .await

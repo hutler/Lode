@@ -176,6 +176,11 @@ merge** commits everything together; **Abandon merge…** forgets the merge and 
 
 ![The result of a merge](desk-guide/merge-result-light.png)
 
+When the depot uses streams, Branches lists them as a tree, each stream under its parent with
+its type (mainline, development, release), and ordinary branches after them. **New branch**
+has a **Type** picker. A merge the stream rules refuse, such as a copy up from a development
+stream that is behind its parent, stops before any file changes and says what to merge first.
+
 ## Conflicts
 
 A file changed on both sides that did not merge is in conflict (C). Commit stays off until no
@@ -188,6 +193,11 @@ whole file at once. **Save and mark resolved** saves the result once no conflict
 
 For a file that is not text, such as an image, choose **Keep mine** or **Take theirs**. Theirs
 is also saved beside the file (`name.theirs-r<rev>`) so you can open it in its own tool first.
+
+When the depot names a merge tool for the file and your `settings.toml` says what it runs,
+the conflict view has **Open in <tool>**. Lode Desk starts the tool with the base, yours,
+theirs and a result file, and marks the file resolved when the tool succeeds. See "Merge
+tools" in the user guide for the settings.
 
 ## The workspace view
 

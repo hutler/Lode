@@ -549,6 +549,7 @@ async fn submit(
     let req = SubmitShelfRequest {
         expected_version,
         message: Some(message.clone()).filter(|m| !m.trim().is_empty()),
+        force_flow: false,
     };
     let path = api_path(paths::SHELF_SUBMIT, &[&d, &id.to_string()]);
     match ctx

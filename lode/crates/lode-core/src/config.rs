@@ -16,6 +16,24 @@ pub struct CheckRequirement {
     pub reporter: String,
 }
 
+/// Patterns merged as JSON when `[merge].json` is not set.
+pub const DEFAULT_JSON_MERGE: &[&str] = &["**/*.json", "**/*.uproject", "**/*.uplugin"];
+
+/// One `[merge.tools]` entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergeToolRule {
+    /// The pattern, as written.
+    pub pattern: String,
+    /// Compiled.
+    pub glob: PathGlobSet,
+    /// Tool name, looked up in the person's settings.
+    pub tool: String,
+}
+
+fn default_json_merge() -> PathGlobSet {
+    PathGlobSet::new(DEFAULT_JSON_MERGE.iter().copied()).unwrap_or_else(|_| PathGlobSet::empty())
+}
+
 /// Parsed `.lodeconfig`. Unknown sections and keys are ignored so that newer files still
 /// parse on older servers.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,6 +48,12 @@ pub struct LodeConfig {
     pub checks_branches: PathGlobSet,
     /// `[checks].required`: checks that must be `success`.
     pub checks_required: Vec<CheckRequirement>,
+    /// `[merge].json`: files merged key by key when a line merge conflicts (0.4). Defaults to
+    /// [`DEFAULT_JSON_MERGE`] when the key is absent.
+    pub merge_json: PathGlobSet,
+    /// `[merge.tools]`: pattern → merge tool name, sorted by pattern (0.4). The command a name
+    /// runs comes from the person's own settings, never from the depot.
+    pub merge_tools: Vec<MergeToolRule>,
     /// Every other top-level table, by name, for modules that define their own section.
     pub sections: BTreeMap<String, toml::Table>,
 }
@@ -42,6 +66,8 @@ impl Default for LodeConfig {
             text: PathGlobSet::empty(),
             checks_branches: PathGlobSet::empty(),
             checks_required: Vec::new(),
+            merge_json: default_json_merge(),
+            merge_tools: Vec::new(),
             sections: BTreeMap::new(),
         }
     }
@@ -72,6 +98,8 @@ struct Raw {
     files: RawFiles,
     #[serde(default)]
     checks: RawChecks,
+    #[serde(default)]
+    merge: RawMerge,
     #[serde(flatten)]
     rest: toml::Table,
 }
@@ -96,6 +124,13 @@ struct RawChecks {
     branches: Vec<String>,
     #[serde(default)]
     required: Vec<RawCheck>,
+}
+
+#[derive(Deserialize, Default)]
+struct RawMerge {
+    json: Option<Vec<String>>,
+    #[serde(default)]
+    tools: toml::Table,
 }
 
 #[derive(Deserialize)]
@@ -135,12 +170,35 @@ impl LodeConfig {
                 }
             })
             .collect::<Result<_, _>>()?;
+        let merge_json = match raw.merge.json {
+            Some(p) => PathGlobSet::new(p)?,
+            None => default_json_merge(),
+        };
+        let merge_tools = raw
+            .merge
+            .tools
+            .into_iter()
+            .map(|(pattern, tool)| {
+                let toml::Value::String(tool) = tool else {
+                    return Err(ConfigError::Toml(format!(
+                        "[merge.tools] \"{pattern}\" must name a tool as a string"
+                    )));
+                };
+                Ok(MergeToolRule {
+                    glob: PathGlobSet::new([pattern.clone()])?,
+                    pattern,
+                    tool,
+                })
+            })
+            .collect::<Result<_, ConfigError>>()?;
         Ok(Self {
             lock_required: PathGlobSet::new(raw.locks.required)?,
             binary: PathGlobSet::new(raw.files.binary)?,
             text: PathGlobSet::new(raw.files.text)?,
             checks_branches: PathGlobSet::new(raw.checks.branches)?,
             checks_required,
+            merge_json,
+            merge_tools,
             sections: raw
                 .rest
                 .into_iter()
@@ -150,6 +208,15 @@ impl LodeConfig {
                 })
                 .collect(),
         })
+    }
+
+    /// The merge tool named for `path`: of the `[merge.tools]` patterns that match, the
+    /// longest (the most specific, usually).
+    pub fn merge_tool(&self, path: &DepotPath) -> Option<&MergeToolRule> {
+        self.merge_tools
+            .iter()
+            .filter(|r| r.glob.matches(path))
+            .max_by_key(|r| r.pattern.len())
     }
 
     /// A module's own section, such as `[example]`, if the file has one.
@@ -227,6 +294,28 @@ required = [{ name = "ci/build", reporter = "ci" }]
             LodeConfig::parse(b"[checks]\nrequired = [{ name = \"ci\", reporter = \"\" }]\n"),
             Err(ConfigError::CheckEntry)
         );
+    }
+
+    #[test]
+    fn merge_section() {
+        let d = LodeConfig::parse(b"").unwrap();
+        assert!(d.merge_json.matches(&p("Game.uproject")));
+        assert!(d.merge_json.matches(&p("a/b.json")));
+        assert!(d.merge_tools.is_empty());
+        let c = LodeConfig::parse(
+            b"[merge]\njson = [\"cfg/**/*.json\"]\n[merge.tools]\n\"**/*.uasset\" = \"unreal\"\n\"Maps/**/*.uasset\" = \"maps\"\n",
+        )
+        .unwrap();
+        assert!(c.merge_json.matches(&p("cfg/x/a.json")));
+        assert!(!c.merge_json.matches(&p("a.json")));
+        assert_eq!(c.merge_tool(&p("A/b.uasset")).unwrap().tool, "unreal");
+        assert_eq!(c.merge_tool(&p("Maps/m.uasset")).unwrap().tool, "maps");
+        assert!(c.merge_tool(&p("a.txt")).is_none());
+        assert!(c.section("merge").is_none());
+        assert!(matches!(
+            LodeConfig::parse(b"[merge.tools]\n\"*.x\" = 3\n"),
+            Err(ConfigError::Toml(_))
+        ));
     }
 
     #[test]

@@ -118,6 +118,8 @@ pub enum Using {
     Theirs,
     /// The file as it is now.
     Merged,
+    /// The result of the merge tool the depot names for the file (T164).
+    Tool,
 }
 
 /// One side of a conflict for the window: its size, and its text for a text merge.
@@ -142,6 +144,7 @@ pub fn conflict_json(s: conflict::ConflictSides) -> Value {
         "theirs": side_json(s.theirs, s.text),
         "result": side_json(s.result, s.text),
         "theirs_file": s.theirs_file,
+        "tool": s.tool,
     })
 }
 
@@ -826,8 +829,15 @@ impl Desk {
         message: Option<String>,
     ) -> Result<Value, ErrorView> {
         let spec = format!("{id}@{version}");
-        self.shelf_command(workspace, shelve::ShelfCommand::Submit { spec, message })
-            .await
+        self.shelf_command(
+            workspace,
+            shelve::ShelfCommand::Submit {
+                spec,
+                message,
+                force_flow: false,
+            },
+        )
+        .await
     }
 
     /// Deletes shelf `id`.
@@ -900,10 +910,19 @@ impl Desk {
         name: String,
         from: Option<String>,
         switch: bool,
+        stream: Option<lode_ops::cmd::branch::StreamType>,
     ) -> Result<Value, ErrorView> {
         let from = from.filter(|f| !f.trim().is_empty());
-        self.branch_command(workspace, branch::BranchCmd::Create { name, from, switch })
-            .await
+        self.branch_command(
+            workspace,
+            branch::BranchCmd::Create {
+                name,
+                from,
+                switch,
+                stream,
+            },
+        )
+        .await
     }
 
     /// Archives a branch: hidden from lists and closed to commits (depot admin).
@@ -972,8 +991,18 @@ impl Desk {
         rev: Option<u64>,
     ) -> Result<Value, ErrorView> {
         let ctx = self.ctx(Path::new(&workspace), None)?;
-        run_op(move || async move { merge::merge(&ctx, merge::MergeArgs { source, rev }).await })
+        run_op(move || async move {
+            merge::merge(
+                &ctx,
+                merge::MergeArgs {
+                    source,
+                    rev,
+                    force_flow: false,
+                },
+            )
             .await
+        })
+        .await
     }
 
     /// `lode revert --merge`: the next commit no longer records the pending merge; files stay.
@@ -1019,6 +1048,7 @@ impl Desk {
                     mine: using == Using::Mine,
                     theirs: using == Using::Theirs,
                     merged: using == Using::Merged,
+                    tool: (using == Using::Tool).then(String::new),
                 },
             )
             .await

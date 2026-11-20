@@ -2,7 +2,7 @@
 
 pub use lode_ops::cmd::{
     admin, branch, changelist, checkout, checks, commit, diff, doctor, files, history, import,
-    init, link, locks, login, merge, proxy, revert, shelve, status, update, view,
+    init, link, locks, login, merge, mergetool, proxy, revert, shelve, status, update, view,
 };
 
 pub mod mcp;

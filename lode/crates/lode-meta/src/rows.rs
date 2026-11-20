@@ -201,6 +201,38 @@ pub enum BranchState {
     Archived,
 }
 
+/// A branch's stream type (SPEC §5.3a). A branch without one follows the v1 merge rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StreamType {
+    /// The trunk: no parent.
+    Mainline,
+    /// Less stable than its parent: merges down freely, copies up when up to date.
+    Development,
+    /// More stable than its parent: takes only picked fixes from it, merges up freely.
+    Release,
+}
+
+impl StreamType {
+    /// The stored and wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StreamType::Mainline => "mainline",
+            StreamType::Development => "development",
+            StreamType::Release => "release",
+        }
+    }
+
+    /// Parses a stored name.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "mainline" => Some(StreamType::Mainline),
+            "development" => Some(StreamType::Development),
+            "release" => Some(StreamType::Release),
+            _ => None,
+        }
+    }
+}
+
 /// A branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BranchRow {
@@ -220,6 +252,8 @@ pub struct BranchRow {
     pub parent_rev: Option<u64>,
     /// Active or archived.
     pub state: BranchState,
+    /// Stream type, if the branch is a stream.
+    pub stream_type: Option<StreamType>,
 }
 
 /// A revision.

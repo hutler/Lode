@@ -132,6 +132,7 @@ async fn main() {
                 name: "release/1.0".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

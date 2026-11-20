@@ -225,10 +225,15 @@ async fn depot_page(ctx: &Ctx, admin: &Admin, d: &str, top: Html) -> Response {
                 BranchState::Active => html!("<span class=\"badge ok\">active</span>"),
                 BranchState::Archived => html!("<span class=\"badge\">archived</span>"),
             };
+            let stream = match b.stream {
+                Some(t) => html!(" <span class=\"badge\">{} stream</span>", t.as_str()),
+                None => html!(""),
+            };
             html!(
-                "<tr><td data-label=\"Branch\">{}</td><td class=\"num\" data-label=\"Head\">r{}</td>\
+                "<tr><td data-label=\"Branch\">{}{}</td><td class=\"num\" data-label=\"Head\">r{}</td>\
                  <td data-label=\"Created from\">{}</td><td data-label=\"State\">{}</td></tr>",
                 b.name,
+                stream,
                 b.head_rev,
                 from,
                 state

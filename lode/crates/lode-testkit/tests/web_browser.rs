@@ -240,6 +240,7 @@ async fn branches_are_picked_and_administrators_get_a_link_to_the_admin_pages() 
                 name: "dev".into(),
                 from_branch: "main".into(),
                 from_rev: None,
+                stream: None,
             },
         )
         .await

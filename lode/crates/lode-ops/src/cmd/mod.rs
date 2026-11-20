@@ -20,6 +20,7 @@ pub mod link;
 pub mod locks;
 pub mod login;
 pub mod merge;
+pub mod mergetool;
 pub mod proxy;
 pub mod revert;
 pub mod shelve;

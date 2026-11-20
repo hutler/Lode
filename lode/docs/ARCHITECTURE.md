@@ -275,7 +275,7 @@ principal  (id INTEGER PK, kind TEXT CHECK(kind IN ('user','agent')), name TEXT 
             sso_id TEXT NULL,   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
             deleted_at NULL,    -- deleted: row kept for history, name stays taken (schema 6)
             password_change_by NULL) -- set: a first password, good only for choosing a new
-                                     -- one, and only until this time (schema 7)
+                                     -- one, and only until this time (schema 8)
 grp        (id INTEGER PK, name TEXT UNIQUE)
 grp_member (grp_id, principal_id, PRIMARY KEY (grp_id, principal_id))
 token      (id INTEGER PK, principal_id, name, hash BLOB UNIQUE, scopes TEXT,
@@ -368,7 +368,9 @@ Inside one write transaction:
    `out_of_date` with the list of paths. Also enforce case-insensitive uniqueness per directory.
 4. Check `write` permission for every path.
 5. Resolve `copy_from` (source revision must exist and contain that path; caller needs `read`
-   on it) and `merged_from` (branch must exist; range must lie in its history).
+   on it) and `merged_from` (branch must exist; range must lie in its history). Between
+   streams, every `merged_from` range must also pass the flow rules (§5.4), inside the branch
+   lock so the copy-up check sees the parent's current head.
 6. Run every module's `pre_commit` check. Any rejection aborts with the module's error code.
 7. Build new tree objects bottom-up for changed directories only; put them in the blob store.
    (Object writes are not transactional; unreferenced trees left by an aborted commit are
@@ -396,6 +398,34 @@ case. Every `/`-separated segment is non-empty and not `.` or `..`, which rules 
 trailing or doubled `/`. Creating needs scope `write`, a `write` allow rule on the new name and
 read access to the source; archiving (`PATCH {"state":"archived"}`) needs scope `admin` and
 admin on the depot. `GET …/branches` leaves archived branches out unless `all=true`.
+
+### 5.4 Streams (0.4)
+
+A branch may carry a stream type in `branch.stream_type` (migration 7): `mainline`,
+`development` or `release`; NULL is an ordinary branch. The stream parent is the branch's
+`parent_branch_id`. `POST …/branches` takes `stream` (`development` or `release`; the source
+must be a stream); `PATCH …/branches/{b}` takes `stream` (`mainline` only on a branch without
+a parent, `none` clears it and is refused while a child is a stream). Breaking these is
+`invalid_request` with `details.reason = "stream_parent"`. Setting or clearing the type
+appends `branch.stream_changed`.
+
+Flow rules, for a range of `merged_from` whose source and target are both streams (a range of
+one revision counts as a pick):
+
+| Direction | When | Full merge | Pick |
+| --- | --- | --- | --- |
+| `merge_down` | source is the target's parent, target is development | yes | yes |
+| `merge_down` | source is the target's parent, target is release | no | yes |
+| `merge_up` | source is a release child of the target | yes | yes |
+| `copy_up` | source is a development child of the target | only when the merge base of parent→child is the parent's head (`behind = 0`) | yes |
+| `sideways` | anything else | no | no |
+| `untyped` | either side is an ordinary branch | yes | yes |
+
+A refusal is `conflict` with `details: {reason: "stream_flow", direction, source, target,
+behind?}`. `CommitRequest.extensions.force_flow = true` (and `force_flow` on a shelf submit)
+skips the rules for a caller with scope `admin` who is admin on the depot, and is otherwise
+`permission_denied`; a forced revision has `forced_flow: true` in its `revision.created` data.
+`GET …/merge-info` adds `flow: {direction, allowed, pick_allowed, reason?, behind?}`.
 
 ## 6. HTTP API
 
@@ -687,9 +717,10 @@ receiver may not read. Receivers fetch details through the API with their own pe
 
 | Event | Written by | `data` |
 | --- | --- | --- |
-| `revision.created` | core | `rev, branch, author, author_kind, submitter, origin` |
-| `branch.created` | core | `branch, rev, from_branch, from_rev` |
+| `revision.created` | core | `rev, branch, author, author_kind, submitter, origin`, and `forced_flow: true` when a depot admin skipped the stream rules (0.4) |
+| `branch.created` | core | `branch, rev, from_branch, from_rev`, and `stream` for a stream (0.4) |
 | `branch.archived` | core | `branch` |
+| `branch.stream_changed` | core | `branch, stream` (0.4; `null` when cleared) |
 | `lock.acquired`, `lock.released` | locks | `branch, owner, count` |
 | `shelf.created`, `shelf.updated`, `shelf.deleted` | shelves | `shelf_id, version, branch, base_rev, owner, owner_kind` |
 | `shelf.submitted` | shelves | as above, plus `rev` |
@@ -1141,6 +1172,45 @@ it into the shelf and `unshelve` brings it back. `-r N` uses the diff `parent(N)
 records `N..N`. Only ranges whose source is the merged branch count toward the base; content
 that reached the source through other merges is merged again, which three-way merging mostly
 absorbs.
+
+Before applying, `lode merge` reads `flow` from `merge-info` and stops when the stream rules
+refuse the merge (§5.4), unless `--force-flow`, which it keeps in `pending_force_flow` for the
+commit to send as `extensions.force_flow`.
+
+**Renames (0.4).** A rename is an add with `copy_from` whose source the same revision deletes.
+`lode merge` lists the source range's revisions with their changes and composes the renames
+(`a→b` then `b→c` is `a→c`; a renamed file deleted later drops out). In the manifest diff a
+rename is a delete of the old path and an add of the new one; the add gets `copy_from = old @
+synced revision`, so committing the merge records a rename. Renames on this side are those
+committed on the target after the branch point plus the workspace's uncommitted ones (an
+added row copied from a path whose row is deleted), kept only when the new name is in the
+workspace. Then, per file (shared with `unshelve`, whose change sets carry `copy_from`):
+
+| There | Here | Result |
+| --- | --- | --- |
+| renamed `a→b` (maybe edited) | `a` unchanged | rename applied: `a` deleted, `b` added as a copy |
+| renamed `a→b` (maybe edited) | `a` edited | the local file moves to `b`, then a three-way merge with `a`'s base as ancestor |
+| edited `a` | renamed `a→b` | the change lands on `b` |
+| renamed `a→b` | renamed `a→b` | as an ordinary change of `b`, `a`'s base as ancestor |
+| renamed `a→c` | renamed `a→b` | edits merged into `b`; `c` is a conflict with no local file (`rename_conflict`): `resolve --mine` drops it, `--theirs` keeps it too |
+
+Each file in the JSON result names the path the change was made to in `from` when that
+differs. Renames inferred from content alone (no `copy_from`) are not followed.
+
+**JSON (0.4).** Every three-way text merge (update, switch, merge, unshelve) goes through
+`lode_ops::structured::merge3`: by lines first; when that conflicts and the path matches
+`[merge].json` (default `**/*.json`, `**/*.uproject`, `**/*.uplugin`), the three sides are
+parsed and objects merged key by key (a key changed on one side takes that side; the same
+change on both is fine; anything else, arrays included, is a conflict). The result keeps
+mine's key order, puts keys new on the other side after their neighbour there, and is
+written with mine's indentation, line endings and final newline. Any side that does not
+parse, or a structural conflict, leaves the line merge's markers.
+
+**Merge tools (0.4).** `.lodeconfig` `[merge.tools]` maps patterns to tool names (the longest
+matching pattern wins); `settings.toml` `[merge_tools.NAME]` holds `command` (argv with
+`{base}`, `{mine}`, `{theirs}`, `{merged}`) and `trust_exit_code`. Only `lode resolve --tool`
+runs one, on copies under `.lode/tmp/merge/`, then resolves the file as `--merged` with the
+tool's result.
 
 ### 10.6 Large files (T151)
 

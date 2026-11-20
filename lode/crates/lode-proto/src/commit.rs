@@ -70,6 +70,10 @@ pub struct ImportedFrom {
     pub date: Option<String>,
 }
 
+/// `CommitRequest.extensions` key: `true` asks the server to skip the stream flow rules
+/// (SPEC §5.3a). Honoured only for a caller with the `admin` scope and depot admin rights.
+pub const EXT_FORCE_FLOW: &str = "force_flow";
+
 /// `POST /depots/{d}/branches/{b}/commits`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CommitRequest {
