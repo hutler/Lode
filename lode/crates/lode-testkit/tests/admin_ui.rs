@@ -1549,3 +1549,40 @@ async fn a_depot_goes_to_the_trash_and_comes_back_or_is_erased() {
     assert!(s.admin().trash().await.unwrap().depots.is_empty());
     assert!(s.admin().depots().await.unwrap().depots.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rule_for_every_agent_is_added_and_removed() {
+    let s = server().await;
+    s.create_depot("game").await;
+    let mut b = signed_in(&s).await;
+    let page = b.get("/admin/access").await;
+    assert!(page
+        .body
+        .contains("<option value=\"agents\">Every agent</option>"));
+    add(
+        &mut b,
+        page,
+        vec![
+            ("depot", "game"),
+            ("subject", "agents"),
+            ("name", ""),
+            ("branch", "main"),
+            ("path", "**"),
+            ("effect", "deny"),
+            ("level", "write"),
+        ],
+    )
+    .await;
+    let rules = s.admin().acl().await.unwrap().rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].subject, AclSubject::Agents);
+    let id = rules[0].id.unwrap();
+    let page = b.get("/admin/access").await;
+    let row = page.doc().by_id(&format!("rule-{id}")).unwrap().text();
+    assert!(row.contains("game every agent main ** deny write"), "{row}");
+    let r = b
+        .submit(&page, &format!("/admin/access/rules/{id}/remove"), &[])
+        .await;
+    assert_eq!(r.status, 303);
+    assert!(s.admin().acl().await.unwrap().rules.is_empty());
+}

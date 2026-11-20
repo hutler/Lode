@@ -80,6 +80,12 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             sql: include_str!("../migrations/core/0007_streams.sql"),
             postgres: include_str!("../migrations/core/0007_streams.postgres.sql"),
         },
+        Migration {
+            version: 8,
+            name: "acl_agents",
+            sql: include_str!("../migrations/core/0008_acl_agents.sql"),
+            postgres: include_str!("../migrations/core/0008_acl_agents.postgres.sql"),
+        },
     ],
 };
 

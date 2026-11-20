@@ -118,7 +118,7 @@ Only files and symlinks are versioned. Directories exist implicitly while they c
 - Tokens carry scopes. The core defines `read`, `write` and `admin`; modules add their own
   (`lock`, `shelve`, `checks`). A scope belonging to a module that is switched off has no effect.
 - Access rules grant `read`, `write` or `admin` on `depot / branch pattern / path pattern` to a
-  user, group, or everyone. Default is no access. Rules are `allow` or `deny`. A matching `deny`
+  user, group, every agent (`agents`, 0.4), or everyone. Default is no access. Rules are `allow` or `deny`. A matching `deny`
   at level L refuses L and every higher level, whatever other rules say (`deny write` still
   permits `read`). Otherwise the highest matching `allow` applies.
 - Known limit in v1: blob download is authorized per depot, not per path. A principal with any
@@ -299,8 +299,14 @@ Two MCP servers, both speaking the standard Model Context Protocol:
   `diff`, `blame`, `search_history`, `list_locks`, `list_shelves`, `get_shelf`, `create_shelf`,
   `update_shelf`, `list_checks` (with the checks module), and `submit_shelf` for tokens with
   `write`.
-- **Local endpoint** (`lode mcp`, stdio). Operates on a workspace. Tools: `status`, `diff`,
-  `add`, `remove`, `move`, `revert`, `update`, `lock`, `unlock`, `shelve`, `unshelve`, `commit`.
+- **Local endpoint** (`lode mcp`, stdio). Operates on a workspace. Tools: `status` (with
+  `remote` and a `summary`), `diff`, `add`, `remove`, `move`, `revert`, `update`, `lock`,
+  `unlock`, `shelve`, `unshelve`, `log`, `read_file_at_revision`, `commit`, and (0.4)
+  `branches`, `locks`, `conflicts`, `switch`, `merge`, `resolve`, `changelist` and
+  `wait_for_events`. An agent can do through it what a person does in Lode Desk: see what
+  changed locally and on the server, switch and merge, settle conflicts and shelve the
+  result for review.
+- With the feed module (§6.7) both endpoints offer `wait_for_events`.
 
 Every tool returns structured JSON. Tools that write are only listed when the token allows them.
 Each module supplies its own tools (the lock tools come from the locks module, the shelf tools
@@ -334,6 +340,21 @@ from the shelves module); the MCP module hosts them and adds the tools that read
 - Direct commits are not gated. Lode stores and enforces results; it does not run builds and
   has no review workflow.
 
+### 6.7 Event feed (0.4, on by default)
+
+- The server keeps every event of §6.5 for 7 days, at most 100 000 per depot, so a client can
+  see what happened in a depot since it last looked without polling every list.
+- `GET /depots/{d}/events?after=<id>&kinds=<k,…>&wait=<s>` answers
+  `{ "events": [envelope…], "next": <id>, "truncated": bool }`, at most 500 events, oldest
+  first. Envelopes carry identifiers only, as for webhooks. Without `after` it answers no
+  events and the current cursor. `wait` (at most 55 seconds) holds the request until an event
+  arrives. `truncated` says events after the cursor were dropped: read the history again.
+- Needs scope `read` and read access to the depot; events naming a branch the caller can read
+  nothing on are left out.
+- `lode events [--depot D] [--after ID] [--kinds K,…] [--wait S]` and the MCP tool
+  `wait_for_events` read it. Lode does not run agents: the loop that waits lives in the agent
+  runtime.
+
 ## 7. AI support
 
 ### 7.1 Agent identities
@@ -342,6 +363,10 @@ from the shelves module); the MCP module hosts them and adds the tools that read
 - Default agent scopes are `read`, `shelve`, `lock`. `write` (direct commit) must be granted
   explicitly.
 - Access rules apply to agents exactly as to users. An agent never inherits its owner's access.
+- One rule can cover every agent (0.4): `lode admin acl add deny write agents --depot game
+  --branch main` keeps agents' work on shelves for `main` even when a token has `write`.
+  A deny at `write` also refuses locks there, since a lock needs write access; agents still
+  read and shelve, and a person submits.
 
 ### 7.2 Workspace-free operation
 

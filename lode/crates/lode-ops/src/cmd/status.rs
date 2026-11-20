@@ -36,9 +36,11 @@ locks, which files in scope have a newer version and who holds their locks.
 
 With --json: {\"ok\":true,\"branch\",\"rev\",\"merges\":[{\"branch\",\"from_rev\",\"to_rev\"}],\"files\":[{\"path\",\"status\",\"copy_from\":{\"path\",\"rev\"}|null,
 \"moved\":bool,\"changelist\":name|null,\"locked\":bool,\"needs_lock\":bool,\"lock_required\":bool}],
-\"invalid\":[{\"local\",\"reason\"}]}, plus with --remote \"remote\":{\"head_rev\",\"proxy\",\"files\":[{\"path\",
+\"invalid\":[{\"local\",\"reason\"}],\"summary\":{\"changed\",\"needs_lock\",\"conflicted\",\"untracked\",
+\"pending_merge\":bool}}, plus with --remote \"remote\":{\"head_rev\",\"proxy\",\"files\":[{\"path\",
 \"newer\":bool,\"deleted_at_head\":bool,\"locked_by\":{\"name\",\"kind\"}|null,\"lock_workspace\"|null,\"mine\":bool}]}
-(only files with a newer version or a lock).
+(only files with a newer version or a lock), and \"summary\" gains \"newer_at_head\",
+\"locked_by_others\" and \"head_rev\".
 `status` is one of modified, added, deleted, missing, conflicted, untracked, and unchanged with
 --unchanged.")]
 pub struct StatusArgs {
@@ -186,7 +188,40 @@ pub async fn status(ctx: &Ctx, args: StatusArgs) -> OpResult<Value> {
     if args.remote {
         out["remote"] = remote(ctx, &ws, &paths).await?;
     }
+    out["summary"] = summary(&out);
     Ok(out)
+}
+
+/// Counts over a status answer, so an agent sees at a glance what needs doing: changed files,
+/// those that need a lock first, conflicts, untracked files, a pending merge, and with
+/// `remote` what is newer at the head and locked by others.
+fn summary(out: &Value) -> Value {
+    let files = out["files"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let count = |f: &dyn Fn(&Value) -> bool| files.iter().filter(|v| f(v)).count();
+    let changed = count(&|v| !matches!(v["status"].as_str(), Some("unchanged" | "untracked")));
+    let mut s = json!({
+        "changed": changed,
+        "needs_lock": count(&|v| v["needs_lock"] == true),
+        "conflicted": count(&|v| v["status"] == "conflicted"),
+        "untracked": count(&|v| v["status"] == "untracked"),
+        "pending_merge": out["merges"].as_array().is_some_and(|m| !m.is_empty()),
+    });
+    if let Some(remote) = out.get("remote").filter(|r| r.is_object()) {
+        let rfiles = remote["files"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        s["newer_at_head"] = json!(rfiles.iter().filter(|f| f["newer"] == true).count());
+        s["locked_by_others"] = json!(rfiles
+            .iter()
+            .filter(|f| !f["locked_by"].is_null() && f["mine"] != true)
+            .count());
+        s["head_rev"] = remote["head_rev"].clone();
+    }
+    s
 }
 
 /// What the server knows about the files in `scope` (all when empty): a newer version on the

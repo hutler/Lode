@@ -152,3 +152,19 @@ so take a backup first.
   `lode resolve --tool` and only as set up in your own `settings.toml`.
 - Backups can be copied to an S3-compatible bucket and restored from it
   (`[backup.copy_to]`, `loded restore`; see the user guide, "Copies on another machine").
+
+#### Also in 0.4.0: the agent as a desktop client (M18)
+
+The database also widens the access-rule subject check (core schema 8) and gains the feed
+module's tables, on the same first start.
+
+- `lode mcp` gains `branches`, `locks`, `conflicts`, `switch`, `merge`, `resolve`,
+  `changelist` and `wait_for_events` (T190, T191, T193); `status` takes `remote` and, like
+  `lode status --json`, answers a `summary` of counts.
+- New module `feed`, on by default (`[modules] feed = false` turns it off; T192): `GET
+  /depots/{d}/events` with long-poll, `lode events`, and `wait_for_events` on `/mcp`. Events
+  are kept 7 days (at most 100 000 per depot). A reverse proxy in front of `loded` must allow
+  requests to take up to 60 seconds; most do by default.
+- Access rules take the subject `agents` (T194). A bare `agents` on the command line now means
+  this subject; a user named `agents` is written `user:agents`. A 0.3 client cannot list
+  rules once one exists.

@@ -12,6 +12,7 @@ members = [
     "crates/lode-mod-mcp",
     "crates/lode-mod-webhooks",
     "crates/lode-mod-checks",
+    "crates/lode-mod-feed",
     "crates/lode-client",
     "crates/lode-proxy",
     "crates/lode-workspace",
@@ -43,6 +44,7 @@ lode-mod-shelves = { path = "crates/lode-mod-shelves" }
 lode-mod-mcp = { path = "crates/lode-mod-mcp" }
 lode-mod-webhooks = { path = "crates/lode-mod-webhooks" }
 lode-mod-checks = { path = "crates/lode-mod-checks" }
+lode-mod-feed = { path = "crates/lode-mod-feed" }
 lode-client = { path = "crates/lode-client" }
 lode-proxy = { path = "crates/lode-proxy" }
 lode-workspace = { path = "crates/lode-workspace" }

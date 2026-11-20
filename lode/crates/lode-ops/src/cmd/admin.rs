@@ -366,7 +366,7 @@ pub enum AclCmd {
         /// `read`, `write` or `admin`. A deny refuses this level and every higher one.
         #[arg(value_parser = ["read", "write", "admin"])]
         level: String,
-        /// `user:NAME` (or just NAME), `group:NAME`, or `all`.
+        /// `user:NAME` (or just NAME), `group:NAME`, `all`, or `agents` (every agent).
         subject: String,
         /// Only this depot (default: every depot).
         #[arg(long)]
@@ -578,11 +578,12 @@ fn token_line(t: &TokenView) -> String {
 fn parse_subject(s: &str) -> OpResult<AclSubject> {
     match s.split_once(':') {
         None if s == "all" || s == "*" => Ok(AclSubject::All),
+        None if s == "agents" => Ok(AclSubject::Agents),
         None => Ok(AclSubject::User(s.to_owned())),
         Some(("user", n)) if !n.is_empty() => Ok(AclSubject::User(n.to_owned())),
         Some(("group", n)) if !n.is_empty() => Ok(AclSubject::Group(n.to_owned())),
         _ => Err(OpError::usage(format!(
-            "`{s}` is not a subject: use user:NAME, group:NAME or all"
+            "`{s}` is not a subject: use user:NAME, group:NAME, all or agents"
         ))),
     }
 }
@@ -590,6 +591,7 @@ fn parse_subject(s: &str) -> OpResult<AclSubject> {
 fn subject_text(s: &AclSubject) -> String {
     match s {
         AclSubject::All => "all".to_owned(),
+        AclSubject::Agents => "agents".to_owned(),
         AclSubject::User(n) => format!("user:{n}"),
         AclSubject::Group(n) => format!("group:{n}"),
     }

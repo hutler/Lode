@@ -27,6 +27,7 @@ Task format: **Goal**, **Depends on**, **Scope** (crates touched), **Requirement
 | [M14.md](M14.md) | Server admin web UI | T140–T143 |
 | [M15.md](M15.md) | Lode 0.3: chunked large files, Postgres, caching proxy | T150–T155 |
 | [M16.md](M16.md) | Lode 0.4: streams and smarter merge | T160–T166 |
+| [M18.md](M18.md) | The agent as a desktop client | T190–T194 |
 
 ## Dependency graph
 
@@ -117,6 +118,9 @@ M16  T160  T162  T163  T164           (independent of each other)
      T161                             (after T160)
      T165                             (after T161 T164)
      T166                             (after T160-T165)
+M18  T190  T192  T194                 (independent of each other)
+     T191                             (after T190)
+     T193                             (after T192)
 ```
 
 ## Status
@@ -224,3 +228,8 @@ Keep this table current. One row per task; states: `todo`, `in progress`, `revie
 | T164 | done | main (PR #20) | `[merge.tools]` in `.lodeconfig` (longest matching pattern wins; TOML tables are unordered), `[merge_tools.NAME] command/trust_exit_code` in `settings.toml`; `lode resolve [paths] --tool [NAME]` (`failed`, `skipped`; `merge_tool_unknown`, `no_merge_tool`), `lode merge-tool list`; conflicts in merge/unshelve JSON carry `tool`. Test `lode-cli/tests/merge_tools.rs` (shell or cmd script as the tool). Update output does not name tools yet. |
 | T165 | done | main (PR #20) | Branches dialog lists streams as a tree (indented under their parent, type badge), ordinary branches after; new branch dialog has a type picker (none, development, release); conflict view has "Open in <tool>" when the depot names a merge tool for the path (runs `lode resolve --tool`). Unit test `branches::streams_as_a_tree`. Deferred: pending merge-down/up counts in the sidebar and "Merge from parent" / "Copy up" buttons gated by `flow` (a refused merge already shows the `stream_flow` error and its hint); manual Windows check not recorded in `desk-acceptance.md` yet. |
 | T166 | done | main | Version 0.4.0 (workspace and Lode Desk), UPGRADING 0.4.0, SPEC §8, user guide and PDF. The tag `lode-v0.4.0` is the person's step (the cloud cannot push tags), then the after-tag checklist in `docs/release.md`. |
+| T190 | done | main (PR #19) | `lode mcp`: `status` takes `remote`; every status (also `lode status --json`) answers `summary` {changed, needs_lock, conflicted, untracked, pending_merge, and with remote newer_at_head, locked_by_others, head_rev}; new tools `branches`, `locks` (one path at most), `conflicts` (list, or one file's base/mine/theirs/result; text cut at 256 KiB, binary sides give size only). Tests `lode-cli/tests/mcp_client.rs`. New dependency of `lode-cli`: `base64` (was a dev-dependency) |
+| T191 | done | main (PR #19) | `lode mcp`: `switch`, `merge`, `resolve` (`take` mine/theirs/as_is, or `text`/`base64` up to 16 MiB through `resolve_with`), `changelist` (new/list/move/delete). End-to-end test: merge with a text and a binary conflict, resolve, shelve, person submits, revision has `merged_from`, author bot, submitter admin. Deviation: bad input is `usage`, as for every `lode mcp` tool, not `invalid_request`. MCP.md gains the tool table, "A working day", "Merging and conflicts" |
+| T192 | done | main (PR #19) | New crate `lode-mod-feed` (module `feed`, on by default): `mod_feed_event` keyed by outbox id, `mod_feed_depot.pruned_through`; `GET /depots/{d}/events?after=&kinds=&wait=` (500 events, wait at most 55 s, at most 256 waiting, woken after the row is stored), events naming an unreadable branch left out, `truncated` after pruning; worker prunes on start and hourly. `lode-proto::feed`, `Client::events`, `lode events [--depot] [--after] [--kinds] [--wait]`. SPEC §6.7, ARCHITECTURE §9.6, CLI-JSON. Tests `lode-cli/tests/feed.rs` (also pass with Postgres). Deviations: retention and the waiting cap are constants, not `[feed]` settings; no `--follow` (one JSON document per run, as every command) |
+| T193 | done | main (PR #19) | `wait_for_events` on `/mcp` (from the feed module, scope `read`, default 25 s, at most 50 s) and in `lode mcp` on a worker of its own, so other tools answer while it waits. MCP.md "Watching a depot". Tests `lode-mod-mcp/tests/feed.rs`, `lode-cli/tests/feed.rs` |
+| T194 | done | main (PR #19) | Access-rule subject `agents` (every agent): core schema 8 (after M16's 7) rebuilds `acl` with the wider CHECK (SQLite) or swaps the constraint (Postgres); CLI `agents`, admin web UI "Every agent". Found while testing: a deny at `write` also refuses locks, since a lock needs write access; documented. Deviation: no fallback for unknown subjects in `lode-proto`, so a 0.3 client cannot list rules once an `agents` rule exists (UPGRADING). Tests `lode-cli/tests/acl_agents.rs`, `lode-testkit/tests/admin_ui.rs` |
