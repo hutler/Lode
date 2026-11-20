@@ -98,7 +98,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let count = Arc::new(AtomicUsize::new(0));
         let c = Arc::clone(&count);
-        let _w = Watcher::new(dir.path(), Duration::from_millis(200), move || {
+        // The quiet time is long enough that a slow CI machine (Windows runners have paused
+        // for over 200 ms between two of these writes) still sees the writes as one burst.
+        let _w = Watcher::new(dir.path(), Duration::from_millis(1000), move || {
             c.fetch_add(1, Ordering::SeqCst);
         })
         .unwrap();
@@ -106,13 +108,13 @@ mod tests {
             std::fs::write(dir.path().join(format!("f{i}.txt")), "x").unwrap();
         }
         wait_for(&count, 1);
-        std::thread::sleep(Duration::from_millis(600));
+        std::thread::sleep(Duration::from_millis(1500));
         assert_eq!(count.load(Ordering::SeqCst), 1);
 
         // A later change is a second burst.
         std::fs::write(dir.path().join("f0.txt"), "y").unwrap();
         wait_for(&count, 2);
-        std::thread::sleep(Duration::from_millis(400));
+        std::thread::sleep(Duration::from_millis(1500));
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 
