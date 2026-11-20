@@ -176,8 +176,14 @@ async fn own_password_change_and_must_change_passwords() {
     let r = change("ana", "correct horse", "battery staple").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(r.body["name"], "ana");
-    assert_eq!(h.login("ana", "correct horse", ADDR).await.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(h.login("ana", "battery staple", ADDR).await.status, StatusCode::OK);
+    assert_eq!(
+        h.login("ana", "correct horse", ADDR).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        h.login("ana", "battery staple", ADDR).await.status,
+        StatusCode::OK
+    );
 
     // A must-change password signs in only through a change, until its deadline.
     let mark = |by: i64| {
@@ -192,12 +198,19 @@ async fn own_password_change_and_must_change_passwords() {
     assert_eq!(r.body["details"]["reason"], "password_change_required");
     let r = change("ana", "battery staple", "staple battery").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
-    assert_eq!(h.login("ana", "staple battery", ADDR).await.status, StatusCode::OK);
+    assert_eq!(
+        h.login("ana", "staple battery", ADDR).await.status,
+        StatusCode::OK
+    );
 
     mark(T0 + 60_000).await.unwrap();
     h.clock.advance_ms(61_000);
     let r = h.login("ana", "staple battery", ADDR).await;
-    assert_eq!(r.body["details"]["reason"], "password_expired", "{}", r.text);
+    assert_eq!(
+        r.body["details"]["reason"], "password_expired",
+        "{}",
+        r.text
+    );
     let r = change("ana", "staple battery", "too late now").await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     assert_eq!(r.body["details"]["reason"], "password_expired");

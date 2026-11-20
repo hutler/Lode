@@ -1,7 +1,9 @@
 //! `lode login`, `lode logout`, `lode whoami`.
 
 use lode_client::ServerUrl;
-use lode_proto::auth::{ChangePasswordRequest, Info, LoginRequest, REASON_PASSWORD_CHANGE_REQUIRED};
+use lode_proto::auth::{
+    ChangePasswordRequest, Info, LoginRequest, REASON_PASSWORD_CHANGE_REQUIRED,
+};
 use serde_json::{json, Value};
 
 use crate::context::Ctx;
@@ -242,7 +244,10 @@ pub async fn passwd(ctx: &Ctx, args: PasswdArgs) -> OpResult<Value> {
                 "passwords needed but stdin is not a terminal; use --password-stdin",
             ));
         }
-        (ui.prompt("Current password: ", true)?, ask_new_password(ui)?)
+        (
+            ui.prompt("Current password: ", true)?,
+            ask_new_password(ui)?,
+        )
     };
     let resp = anon
         .change_password(&ChangePasswordRequest {
@@ -251,8 +256,10 @@ pub async fn passwd(ctx: &Ctx, args: PasswdArgs) -> OpResult<Value> {
             new_password,
         })
         .await?;
-    ctx.out
-        .line(format!("Changed the password of {} on {server}.", resp.name));
+    ctx.out.line(format!(
+        "Changed the password of {} on {server}.",
+        resp.name
+    ));
     Ok(json!({ "server": server.as_str(), "name": resp.name }))
 }
 

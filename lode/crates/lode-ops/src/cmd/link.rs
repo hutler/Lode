@@ -21,7 +21,12 @@ pub struct LinkArgs {
     #[arg(conflicts_with_all = ["rev", "shelf"])]
     pub path: Option<String>,
     /// A revision: `lode link -r 42`.
-    #[arg(short = 'r', long = "rev", value_name = "REV", conflicts_with = "shelf")]
+    #[arg(
+        short = 'r',
+        long = "rev",
+        value_name = "REV",
+        conflicts_with = "shelf"
+    )]
     pub rev: Option<u64>,
     /// A shelf: `lode link --shelf 7`.
     #[arg(long, value_name = "ID")]

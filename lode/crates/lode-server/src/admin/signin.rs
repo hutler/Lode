@@ -11,12 +11,12 @@ use lode_meta::{PrincipalRow, Reads};
 use serde::Deserialize;
 
 use super::html;
+use super::session::ViewerPost;
 use super::session::{cookie, set_cookie, SESSION_COOKIE, SESSION_HOURS, SIGN_IN_COOKIE};
-use super::session::{ViewerPost};
 use super::{html_response, Ctx, Nav, Page, Viewer};
 use crate::auth::{
-    change_own_password, check_password_sign_in, ct_eq, finish_admin, issue_token, random_verifier, start_admin,
-    would_be_server_admin, ClientAddr,
+    change_own_password, check_password_sign_in, ct_eq, finish_admin, issue_token, random_verifier,
+    start_admin, would_be_server_admin, ClientAddr,
 };
 
 /// The sign-in page.
@@ -275,8 +275,7 @@ pub(crate) async fn submit(
     let principal = match check_password_sign_in(ctx.state(), addr, &name, password).await {
         Ok(p) => p,
         Err(e)
-            if e.body().details["reason"]
-                == lode_proto::auth::REASON_PASSWORD_CHANGE_REQUIRED =>
+            if e.body().details["reason"] == lode_proto::auth::REASON_PASSWORD_CHANGE_REQUIRED =>
         {
             return change_page(&ctx, StatusCode::OK, &expected, &next, &name, None);
         }
@@ -317,7 +316,14 @@ pub(crate) async fn change_password(
     if new || !ct_eq(sent.as_bytes(), expected.as_bytes()) {
         let message =
             html!("<p class=\"error\" role=\"alert\">The sign-in form expired. Try again.</p>");
-        let r = sign_in_page(&ctx, StatusCode::FORBIDDEN, &expected, &next, "", Some(message));
+        let r = sign_in_page(
+            &ctx,
+            StatusCode::FORBIDDEN,
+            &expected,
+            &next,
+            "",
+            Some(message),
+        );
         return with_sign_in_cookie(&ctx, r, &expected, new);
     }
     let name = fields.text("name");
@@ -333,14 +339,14 @@ pub(crate) async fn change_password(
         return again(StatusCode::BAD_REQUEST, "The new passwords differ.");
     }
     let current = fields.get("password").unwrap_or("").to_owned();
-    let principal =
-        match change_own_password(ctx.state(), addr, &name, current, new_password).await {
-            Ok(p) => p,
-            Err(e) if e.body().code == "invalid_request" => {
-                return again(StatusCode::BAD_REQUEST, &e.body().message)
-            }
-            Err(e) => return again(StatusCode::UNAUTHORIZED, &e.body().message),
-        };
+    let principal = match change_own_password(ctx.state(), addr, &name, current, new_password).await
+    {
+        Ok(p) => p,
+        Err(e) if e.body().code == "invalid_request" => {
+            return again(StatusCode::BAD_REQUEST, &e.body().message)
+        }
+        Err(e) => return again(StatusCode::UNAUTHORIZED, &e.body().message),
+    };
     let refuse = |status, text: &str| {
         let message = html!(
             "<p class=\"error\" role=\"alert\">{}</p>",

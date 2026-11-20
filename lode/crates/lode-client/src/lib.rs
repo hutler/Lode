@@ -445,8 +445,13 @@ impl Client {
         &self,
         req: &lode_proto::auth::ChangePasswordRequest,
     ) -> Result<lode_proto::auth::ChangePasswordResponse> {
-        self.json_body(Retry::No, Method::POST, self.url(&["auth", "password"])?, req)
-            .await
+        self.json_body(
+            Retry::No,
+            Method::POST,
+            self.url(&["auth", "password"])?,
+            req,
+        )
+        .await
     }
 
     /// `GET /auth/whoami`.
@@ -979,7 +984,11 @@ impl Client {
 
     /// `GET /admin/acl?depot=&subject=`: the rules that can apply in `depot` (its own and the
     /// server-wide ones), and only `subject`'s (`user:NAME`, `group:NAME` or `all`).
-    pub async fn acl_filtered(&self, depot: Option<&str>, subject: Option<&str>) -> Result<AclList> {
+    pub async fn acl_filtered(
+        &self,
+        depot: Option<&str>,
+        subject: Option<&str>,
+    ) -> Result<AclList> {
         let mut url = self.url(&["admin", "acl"])?;
         if depot.is_some() || subject.is_some() {
             let mut q = url.query_pairs_mut();

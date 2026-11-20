@@ -128,6 +128,10 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 - `GET /depots` gives server administrators `revisions`, `last_commit_at` and `size_bytes`
   per depot; `lode admin depot list` prints them as a table. Older clients ignore the fields.
 - `lode admin agent create` takes `--grant DEPOT=LEVEL` and `--with-token`.
+- Every user can sign in to the web pages now (T173): server administrators land on
+  `/admin/`, everyone else on the read-only depot browser at `/web/`. The session cookie's
+  path is `/` instead of `/admin`; sessions from before the upgrade keep working until they
+  expire. A TLS proxy in front of the server must pass `/web/` through as well.
 
 ### 0.3.0: chunked large files, Postgres, caching proxy (M15)
 

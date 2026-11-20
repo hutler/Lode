@@ -993,9 +993,9 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 <p>The server has web pages for administrators at <code>/admin/</code>, for example <code>https://lode.example.com/admin/</code>. They show how the server is doing and do the everyday administration that the <code>lode admin</code> commands do: depots, maintenance, people, tokens, access rules and webhooks. Every page works without JavaScript and at phone width, and follows the system's light or dark setting.</p>
 <figure><img src="admin-guide/overview-light.png" alt="The overview page: server facts, counts, backups, maintenance per depot and recent commits"><figcaption>The overview refreshes itself every 30 seconds while it is open.</figcaption></figure>
 <h3>Signing in</h3>
-<p>Only server administrators get in: <code>admin</code>, and anyone with an access rule that allows <code>admin</code> on every depot. Sign in with a name and password, or with single sign-on when <code>[oidc]</code> is configured. A session lasts 8 hours, ends when you sign out, and ends at once when the account is disabled or its rights are taken away.</p>
-<p>A session is an ordinary token named <code>web admin</code>, listed with the account's other tokens and revocable like them. Its cookie cannot be read by scripts, is sent only to <code>/admin/</code> on this server, and is sent only over HTTPS when the server itself speaks TLS. Every form carries a token tied to the session, so another site cannot submit forms on your behalf.</p>
-<div class="warn">Use the pages over HTTPS only. Behind a TLS proxy, make sure the proxy passes <code>/admin/</code> through; served over plain HTTP, passwords and the session cookie cross the network readable.</div>
+<p>Every user signs in at <code>/admin/sign-in</code>, with a name and password or with single sign-on when <code>[oidc]</code> is configured. Server administrators (<code>admin</code>, and anyone with an access rule that allows <code>admin</code> on every depot) land on the admin pages; everyone else lands on the depot browser (below). A session lasts 8 hours, ends when you sign out, and ends at once when the account is disabled or its rights are taken away.</p>
+<p>A session is an ordinary token, named <code>web admin</code> for an administrator and <code>web</code> for anyone else, listed with the account's other tokens and revocable like them. Its cookie cannot be read by scripts, is sent only to this server's web pages (the API never reads it), and is sent only over HTTPS when the server itself speaks TLS. Every form carries a token tied to the session, so another site cannot submit forms on your behalf.</p>
+<div class="warn">Use the pages over HTTPS only. Behind a TLS proxy, make sure the proxy passes <code>/admin/</code> and <code>/web/</code> through; served over plain HTTP, passwords and the session cookie cross the network readable.</div>
 <h3>What the pages do</h3>
 <table>
   <tr><th style="width:18%">Page</th><th>Shows and does</th></tr>
@@ -1009,8 +1009,19 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 <figure><img src="admin-guide/depot-light.png" alt="A depot's page with branches, revisions, locks, maintenance and obliterate"><figcaption>A depot. Garbage collection and obliterate always start with a dry run; the report holds the button that does the work.</figcaption></figure>
 <figure><img src="admin-guide/access-check-light.png" alt="The access page with a check result and the deciding rule highlighted"><figcaption>Checking access: the rule that decided is highlighted, and other rules that apply are shaded.</figcaption></figure>
 <p>The pages act through the same API as <code>lode admin</code>, so the same checks and error messages apply, and every change is recorded the same way.</p>
+<h3>The depot browser</h3>
+<p>At <code>/web/</code>, for example <code>https://lode.example.com/web/</code>, every signed-in user browses the depots they can read, without installing anything: a reviewer, a producer or someone checking a file from a phone. It only reads; nothing on these pages changes a depot.</p>
+<table>
+  <tr><th style="width:18%">Page</th><th>Shows</th></tr>
+  <tr><td>Depots</td><td>The depots you can read, with their last commit.</td></tr>
+  <tr><td>A depot</td><td>The files of a directory at a branch's head (pick the branch) or at a revision, with sizes, and the recent revisions that touched it. Paths your access rules hide are not listed.</td></tr>
+  <tr><td>A file</td><td>Text with line numbers (up to 2 MiB), images inline, anything else as a download, and the file's history. Content removed with obliterate is reported as such.</td></tr>
+  <tr><td>A revision</td><td>Author, time, message and merges, and a diff of each changed text file.</td></tr>
+  <tr><td>Account</td><td>Your tokens, with Revoke, and a form to change your password.</td></tr>
+</table>
+<p>Each depot, file and revision page shows its <code>lode://</code> link with a Copy button and an "Open in Lode Desk" button, so a link pasted in chat opens the same place in the app. Administrators get an Admin link at the top, and the admin pages a Browse link.</p>
 <h3>Turning it off</h3>
-<p>When nobody uses the pages, turn them off; <code>/admin/</code> then answers 404 like any unknown address:</p>
+<p>When nobody uses the pages, turn them off; <code>/admin/</code> and <code>/web/</code> then answer 404 like any unknown address:</p>
 <pre><code>[admin_ui]
 enabled = false</code></pre>
 

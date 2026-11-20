@@ -478,10 +478,23 @@ them out, so `/admin/…` falls through to the API's 404.
 - **Sessions.** Signing in (password through the API's own check and rate limit, or single
   sign-on with a `Back::Admin` flow whose result is a one-time code redeemed only by
   `/admin/sign-in/sso-done`) creates a token named `web admin` with every registered scope
-  and an 8-hour expiry. The cookie `lode_admin` holds that token: `HttpOnly`,
-  `SameSite=Strict`, `Path=/admin`, `Secure` when `[tls]` is set. Each request resolves it
-  like a bearer token and requires server-admin standing, so disabling the user, revoking
-  the token or removing the rule ends the session. Sign-out deletes the token.
+  and an 8-hour expiry (named `web` for a user who is not a server administrator, T173).
+  The cookie `lode_admin` holds that token: `HttpOnly`, `SameSite=Strict`, `Path=/` (since
+  T173; the API reads only `Authorization`, never cookies), `Secure` when `[tls]` is set.
+  Each request resolves it like a bearer token; admin pages (`Admin` extractor) also require
+  server-admin standing, so disabling the user, revoking the token or removing the rule ends
+  the session. Sign-out deletes the token. A browser that still holds a cookie from before
+  T173 (`Path=/admin`) sends both; each is tried, and the old one is cleared at sign-in.
+- **Depot browser (T173).** `admin/web.rs` serves `/web/` to any session (`Viewer`
+  extractor): depots, a directory at a branch head or revision (`GET …/tree`), a file
+  (`GET …/files` streamed through `Api::raw`, text up to 2 MiB, images inline from
+  `/web/depots/{d}/raw`, other files as an attachment), a revision with unified diffs
+  (`diffy`, each side read through `…/files` at the parent revision or copy source, at most
+  50 files and 1 MiB per side) and the account (`GET/DELETE /tokens`, password change through
+  the same function as `POST /auth/password`). Everything is read with the session's token,
+  so access rules and path visibility apply as for any client. `lode://` links are built
+  with `lode_proto::links` from the request's `Host` (https with `[tls]` or
+  `X-Forwarded-Proto: https`).
 - **CSRF.** Every signed-in form carries `csrf`, the first 16 bytes of
   SHA-256(`"lode admin csrf\n"` + token) in hex, compared in constant time before the handler
   runs. The sign-in form uses a double-submit value in a short-lived `lode_admin_signin`

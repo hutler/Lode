@@ -41,23 +41,26 @@ const HISTORY_PAGE: u32 = 50;
 
 /// The browser's routes, merged into the admin UI's router.
 pub(crate) fn routes(r: axum::Router<Ctx>) -> axum::Router<Ctx> {
-    r.route("/web", axum::routing::get(|| async { Redirect::permanent(WEB_HOME) }))
-        .route(WEB_HOME, axum::routing::get(depots))
-        .route(ACCOUNT, axum::routing::get(account))
-        .route("/web/account/password", axum::routing::post(password))
-        .route(
-            "/web/account/tokens/{id}/revoke",
-            axum::routing::post(revoke_token),
-        )
-        .route("/web/depots/{d}", axum::routing::get(tree))
-        .route("/web/depots/{d}/file", axum::routing::get(file))
-        .route("/web/depots/{d}/raw", axum::routing::get(raw))
-        .route("/web/depots/{d}/history", axum::routing::get(history))
-        .route("/web/depots/{d}/r/{n}", axum::routing::get(revision))
-        .route(
-            "/web/{*rest}",
-            axum::routing::get(not_found).post(not_found),
-        )
+    r.route(
+        "/web",
+        axum::routing::get(|| async { Redirect::permanent(WEB_HOME) }),
+    )
+    .route(WEB_HOME, axum::routing::get(depots))
+    .route(ACCOUNT, axum::routing::get(account))
+    .route("/web/account/password", axum::routing::post(password))
+    .route(
+        "/web/account/tokens/{id}/revoke",
+        axum::routing::post(revoke_token),
+    )
+    .route("/web/depots/{d}", axum::routing::get(tree))
+    .route("/web/depots/{d}/file", axum::routing::get(file))
+    .route("/web/depots/{d}/raw", axum::routing::get(raw))
+    .route("/web/depots/{d}/history", axum::routing::get(history))
+    .route("/web/depots/{d}/r/{n}", axum::routing::get(revision))
+    .route(
+        "/web/{*rest}",
+        axum::routing::get(not_found).post(not_found),
+    )
 }
 
 /// The page of depot `d`.
@@ -552,11 +555,7 @@ async fn file(
         Err(e) => return failure(&ctx, &viewer, &d, &e),
     };
     let base = depot_href(&d);
-    let raw_href = format!(
-        "{base}/raw?rev={}&path={}",
-        place.rev,
-        encode(&path)
-    );
+    let raw_href = format!("{base}/raw?rev={}&path={}", place.rev, encode(&path));
     let content = if let Some(_mime) = image_type(&path) {
         html!(
             "<p class=\"image\"><img src=\"{}\" alt=\"{}\"/></p>",
@@ -565,17 +564,14 @@ async fn file(
         )
     } else {
         match read_file(&ctx, &viewer, &d, place.rev, &path, MAX_TEXT).await {
-            Ok((Content::Text(t), true)) => html!(
-                "<p>A symbolic link to <code>{}</code>.</p>",
-                t
-            ),
+            Ok((Content::Text(t), true)) => html!("<p>A symbolic link to <code>{}</code>.</p>", t),
             Ok((Content::Text(t), false)) if t.is_empty() => {
                 html!("<p class=\"muted\">This file is empty.</p>")
             }
             Ok((Content::Text(t), false)) => code_block(&t),
-            Ok((Content::Binary, _)) => html!(
-                "<p class=\"muted\">This file is not text. Download it to open it.</p>"
-            ),
+            Ok((Content::Binary, _)) => {
+                html!("<p class=\"muted\">This file is not text. Download it to open it.</p>")
+            }
             Ok((Content::TooLarge, _)) => html!(
                 "<p class=\"muted\">This file is too large to show here ({} at most). \
                  Download it to open it.</p>",
@@ -637,7 +633,12 @@ async fn raw(
 ) -> Response {
     let at = At::from(q);
     let (Some(path), Some(rev)) = (at.path.clone(), at.rev) else {
-        return failure(&ctx, &viewer, &d, &invalid("a file and a revision must be named"));
+        return failure(
+            &ctx,
+            &viewer,
+            &d,
+            &invalid("a file and a revision must be named"),
+        );
     };
     let resp = match ctx.api(&viewer.0).raw(&files_query(&d, rev, &path)).await {
         Ok(r) => r,
@@ -651,7 +652,9 @@ async fn raw(
     }
     let name = path.rsplit('/').next().unwrap_or("file");
     let inline = at.download.is_none() && image_type(&path).is_some();
-    let mime = image_type(&path).filter(|_| inline).unwrap_or("application/octet-stream");
+    let mime = image_type(&path)
+        .filter(|_| inline)
+        .unwrap_or("application/octet-stream");
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     let disposition = if inline {
         "inline".to_owned()
@@ -762,7 +765,9 @@ async fn change_diff(
         (None, _, Some(p)) => Some((p, path.to_owned())),
     };
     let side = |r: u64, p: String| async move {
-        read_file(ctx, viewer, d, r, &p, MAX_DIFF_FILE).await.map(|(c, _)| c)
+        read_file(ctx, viewer, d, r, &p, MAX_DIFF_FILE)
+            .await
+            .map(|(c, _)| c)
     };
     let old = match &old_from {
         Some((r, p)) => Some(side(*r, p.clone()).await),
@@ -777,9 +782,9 @@ async fn change_diff(
             None => Ok(String::new()),
             Some(Ok(Content::Text(t))) => Ok(t),
             Some(Ok(Content::Binary)) => Err(html!("<p class=\"muted\">Not text.</p>")),
-            Some(Ok(Content::TooLarge)) => Err(html!(
-                "<p class=\"muted\">Too large to compare here.</p>"
-            )),
+            Some(Ok(Content::TooLarge)) => {
+                Err(html!("<p class=\"muted\">Too large to compare here.</p>"))
+            }
             Some(Err(e)) if e.code == "obliterated" => Err(html!(
                 "<p class=\"muted\">A version of this file was obliterated.</p>"
             )),
@@ -881,7 +886,14 @@ async fn revision(
     let merged: Html = r
         .merged_from
         .iter()
-        .map(|m| html!("<dt>Merged</dt><dd>{} r{}–r{}</dd>", m.branch, m.from_rev, m.to_rev))
+        .map(|m| {
+            html!(
+                "<dt>Merged</dt><dd>{} r{}–r{}</dd>",
+                m.branch,
+                m.from_rev,
+                m.to_rev
+            )
+        })
         .collect();
     let submitter = if r.submitter.name != r.author.name {
         html!("<dt>Submitted by</dt><dd>{}</dd>", r.submitter.name)
@@ -1006,11 +1018,7 @@ async fn password(
     }
 }
 
-async fn revoke_token(
-    State(ctx): State<Ctx>,
-    Path(id): Path<i64>,
-    post: ViewerPost,
-) -> Response {
+async fn revoke_token(State(ctx): State<Ctx>, Path(id): Path<i64>, post: ViewerPost) -> Response {
     let path = api_path(paths::TOKEN, &[&id.to_string()]);
     match ctx.api(&post.viewer.0).delete(&path).await {
         Ok(()) => redirect_with_note(&ctx, ACCOUNT, "Token revoked."),
@@ -1029,7 +1037,10 @@ mod tests {
             rev: Some(7),
             ..At::default()
         };
-        assert_eq!(at.query("main", Some("a b/c")), "?branch=main&rev=7&path=a%20b%2Fc");
+        assert_eq!(
+            at.query("main", Some("a b/c")),
+            "?branch=main&rev=7&path=a%20b%2Fc"
+        );
         assert_eq!(At::default().query("dev", None), "?branch=dev");
     }
 

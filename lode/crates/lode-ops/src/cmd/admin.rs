@@ -629,7 +629,13 @@ fn grants_text(rules: &[AclRule]) -> String {
     }
     let parts: Vec<String> = rules
         .iter()
-        .map(|r| format!("{} in {}", level_name(r.level), r.depot.as_deref().unwrap_or("every depot")))
+        .map(|r| {
+            format!(
+                "{} in {}",
+                level_name(r.level),
+                r.depot.as_deref().unwrap_or("every depot")
+            )
+        })
         .collect();
     format!(", allowed {}", parts.join(", "))
 }
@@ -936,7 +942,13 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         AdminCmd::Depot(DepotCmd::List) => {
             let list = c.depots().await?;
             if list.depots.iter().any(|d| d.revisions.is_some()) {
-                let width = list.depots.iter().map(|d| d.name.len()).max().unwrap_or(0).max(5);
+                let width = list
+                    .depots
+                    .iter()
+                    .map(|d| d.name.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
                 ctx.out.line(format!(
                     "{:<width$}  {:>9}  {:>9}  LAST COMMIT",
                     "DEPOT", "REVISIONS", "SIZE"
@@ -946,7 +958,9 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
                         "{:<width$}  {:>9}  {:>9}  {}",
                         d.name,
                         d.revisions.unwrap_or(0),
-                        d.size_bytes.map(crate::output::human_bytes).unwrap_or_else(|| "-".into()),
+                        d.size_bytes
+                            .map(crate::output::human_bytes)
+                            .unwrap_or_else(|| "-".into()),
                         d.last_commit_at
                             .map(crate::cmd::history::format_time)
                             .unwrap_or_else(|| "-".into())
@@ -1157,10 +1171,16 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             let mut v = to_json(&p)?;
             if let Value::Object(m) = &mut v {
                 if !rules.is_empty() {
-                    m.insert("rules".into(), serde_json::to_value(&rules).unwrap_or(Value::Null));
+                    m.insert(
+                        "rules".into(),
+                        serde_json::to_value(&rules).unwrap_or(Value::Null),
+                    );
                 }
                 if let Some(t) = &token {
-                    m.insert("token".into(), serde_json::to_value(t).unwrap_or(Value::Null));
+                    m.insert(
+                        "token".into(),
+                        serde_json::to_value(t).unwrap_or(Value::Null),
+                    );
                 }
             }
             Ok(v)
@@ -1243,7 +1263,10 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         AdminCmd::Acl(AclCmd::List { depot, subject }) => {
             let subject = subject.as_deref().map(parse_subject).transpose()?;
             let list = c
-                .acl_filtered(depot.as_deref(), subject.as_ref().map(subject_text).as_deref())
+                .acl_filtered(
+                    depot.as_deref(),
+                    subject.as_ref().map(subject_text).as_deref(),
+                )
                 .await?;
             for r in &list.rules {
                 ctx.out.line(rule_line(r));

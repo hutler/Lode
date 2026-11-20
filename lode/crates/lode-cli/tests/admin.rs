@@ -145,7 +145,15 @@ async fn scripted_setup_then_behaviour() {
             .len(),
         4
     );
-    let filtered = admin.json(&["admin", "acl", "list", "--depot", "game", "--subject", "bob"]);
+    let filtered = admin.json(&[
+        "admin",
+        "acl",
+        "list",
+        "--depot",
+        "game",
+        "--subject",
+        "bob",
+    ]);
     assert_eq!(filtered["rules"].as_array().unwrap().len(), 2, "{filtered}");
     let (code, err) = admin.json_status(&["admin", "acl", "list", "--depot", "nope"]);
     assert_ne!(code, 0);
@@ -396,15 +404,30 @@ async fn depot_list_shows_revisions_size_and_last_commit_to_admins() {
     let empty = depots.iter().find(|d| d["name"] == "empty").unwrap();
     assert_eq!(empty["revisions"], 1, "{list}");
 
-    let out = admin.cmd().args(["admin", "depot", "list"]).output().unwrap();
+    let out = admin
+        .cmd()
+        .args(["admin", "depot", "list"])
+        .output()
+        .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("DEPOT"), "{text}");
-    assert!(text.lines().any(|l| l.starts_with("game") && l.contains(&rev.to_string())), "{text}");
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("game") && l.contains(&rev.to_string())),
+        "{text}"
+    );
 
     // Someone who only reads sees the depot but not the figures.
     let ana = server.create_user("ana", &["read"]).await;
     server
-        .acl("game", "ana", "*", "**", AclEffect::Allow, AccessLevel::Read)
+        .acl(
+            "game",
+            "ana",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Read,
+        )
         .await;
     let list = as_user(&server, &ana).json(&["admin", "depot", "list"]);
     assert_eq!(list["depots"][0]["name"], "game", "{list}");
@@ -422,9 +445,19 @@ async fn agent_create_with_token_and_grant_is_ready_in_one_command() {
     let admin = as_user(&server, server.admin_token());
 
     let (code, err) = admin.json_status(&[
-        "admin", "agent", "create", "bot", "--owner", "ana", "--grant", "game:write",
+        "admin",
+        "agent",
+        "create",
+        "bot",
+        "--owner",
+        "ana",
+        "--grant",
+        "game:write",
     ]);
-    assert_eq!(code, 2, "a bad grant is refused before anything is made: {err}");
+    assert_eq!(
+        code, 2,
+        "a bad grant is refused before anything is made: {err}"
+    );
     let v = admin.json(&[
         "admin",
         "agent",
@@ -460,11 +493,21 @@ async fn agent_create_with_token_and_grant_is_ready_in_one_command() {
 
     // A failure after the agent exists says what was done.
     let (code, err) = admin.json_status(&[
-        "admin", "agent", "create", "bot2", "--owner", "ana", "--grant", "nope=read",
+        "admin",
+        "agent",
+        "create",
+        "bot2",
+        "--owner",
+        "ana",
+        "--grant",
+        "nope=read",
     ]);
     assert_ne!(code, 0);
     assert!(
-        err["error"]["message"].as_str().unwrap().contains("agent bot2 was created"),
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("agent bot2 was created"),
         "{err}"
     );
 }

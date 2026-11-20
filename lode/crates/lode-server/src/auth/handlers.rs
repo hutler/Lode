@@ -16,8 +16,7 @@ use lode_proto::admin::{
 };
 use lode_proto::auth::{
     ChangePasswordRequest, ChangePasswordResponse, CreateTokenRequest, CreateTokenResponse,
-    LoginRequest, LoginResponse, PrincipalView, TokenList,
-    TokenView, WhoAmI,
+    LoginRequest, LoginResponse, PrincipalView, TokenList, TokenView, WhoAmI,
 };
 use lode_proto::consts::paths;
 

@@ -64,7 +64,6 @@ fn dir_size(dir: &Path) -> Option<u64> {
     Some(total)
 }
 
-
 /// The size of a depot's stored content, when it is kept in files (`None` with S3 storage).
 pub(crate) async fn depot_size(state: &AppState, id: DepotId) -> Option<u64> {
     if state.config().storage.s3_in_use().is_some() {

@@ -203,7 +203,14 @@ fn generated_admin_password_works_only_to_choose_a_new_one() {
     // No terminal and no password file: setup generates one instead of failing.
     let out = Command::cargo_bin("loded")
         .unwrap()
-        .args(["setup", "--yes", "--local", "--listen", "127.0.0.1:0", "--data-dir"])
+        .args([
+            "setup",
+            "--yes",
+            "--local",
+            "--listen",
+            "127.0.0.1:0",
+            "--data-dir",
+        ])
         .arg(&data)
         .stdin(Stdio::null())
         .output()

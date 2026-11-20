@@ -13,18 +13,34 @@ async fn link_prints_file_revision_and_shelf_links() {
     let rev = server
         .commit_files("game", "main", &[("Content/hero one.txt", b"hi\n")])
         .await;
-    let ana = server.create_user("ana", &["read", "write", "shelve"]).await;
+    let ana = server
+        .create_user("ana", &["read", "write", "shelve"])
+        .await;
     server
-        .acl("game", "ana", "*", "**", AclEffect::Allow, AccessLevel::Write)
+        .acl(
+            "game",
+            "ana",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Write,
+        )
         .await;
     let ws = TestWorkspace::new(&server).with_token(&ana);
     ws.json(&["checkout", &format!("{}/game", server.url()), "."]);
     // The test server is plain http on loopback: links say so with `http=1`.
-    let host = server.url().trim_start_matches("http://").trim_end_matches('/').to_owned();
+    let host = server
+        .url()
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_owned();
 
     let v = ws.json(&["link", "Content/hero one.txt"]);
     let text = v["link"].as_str().unwrap();
-    assert_eq!(text, format!("lode://{host}/game/Content/hero%20one.txt@{rev}?http=1"));
+    assert_eq!(
+        text,
+        format!("lode://{host}/game/Content/hero%20one.txt@{rev}?http=1")
+    );
     assert_eq!(v["kind"], "file");
     assert!(matches!(links::parse(text).unwrap(), Link::File { rev: Some(r), .. } if r == rev));
 
@@ -55,7 +71,10 @@ async fn link_prints_file_revision_and_shelf_links() {
         "game",
         "Content/a.txt@3",
     ]);
-    assert_eq!(v["link"], format!("lode://{host}/game/Content/a.txt@3?http=1"));
+    assert_eq!(
+        v["link"],
+        format!("lode://{host}/game/Content/a.txt@3?http=1")
+    );
     let (code, err) = ws.json_status(&["link"]);
     assert_eq!(code, 2, "{err}");
 

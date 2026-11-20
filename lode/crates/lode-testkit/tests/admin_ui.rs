@@ -5,8 +5,8 @@ use lode_proto::admin::{
     AccessLevel, AclEffect, AclRule, AclSubject, CreatePrincipalRequest, PatchPrincipalRequest,
 };
 use lode_proto::PrincipalKind;
-use lode_testkit::web::{Browser, Page};
 use lode_server::Clock as _;
+use lode_testkit::web::{Browser, Page};
 use lode_testkit::{TestServer, TestServerOptions};
 
 const PASSWORD: &str = "correct horse battery";
@@ -141,7 +141,7 @@ async fn sign_in_and_out() {
     assert!(cookie.contains("HttpOnly"), "{cookie}");
     assert!(cookie.contains("SameSite=Strict"), "{cookie}");
     assert!(cookie.contains("Max-Age=28800"), "{cookie}");
-    assert!(cookie.contains("Path=/admin"), "{cookie}");
+    assert!(cookie.contains("Path=/;"), "{cookie}");
     assert!(!cookie.contains("Secure"), "no TLS, no Secure: {cookie}");
 
     // The session is an ordinary token named "web admin" that expires in eight hours.
@@ -185,28 +185,43 @@ async fn sign_in_and_out() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn only_server_administrators_get_in() {
+async fn only_server_administrators_get_the_admin_pages() {
     let s = server().await;
     add_user(&s, "ana").await;
 
+    // Any user signs in (T173), and lands on the depot browser instead of the admin pages.
     let mut b = Browser::new(s.url());
     let r = sign_in_as(&mut b, "ana", PASSWORD).await;
+    assert_eq!(r.status, 303, "{}", r.body);
+    assert_eq!(r.location(), Some("/web/"));
+    let tokens = s.admin().tokens_for("ana").await.unwrap().tokens;
+    assert_eq!(tokens.len(), 1, "{tokens:?}");
+    assert_eq!(tokens[0].name, "web");
+    let r = b.get("/admin/").await;
     assert_eq!(r.status, 403);
     assert_eq!(
         error_text(&r),
         "This account is not a server administrator."
     );
-    assert!(
-        r.cookie("lode_admin").is_none(),
-        "no session for a non-administrator"
-    );
-    let tokens = s.admin().tokens_for("ana").await.unwrap().tokens;
-    assert!(tokens.is_empty(), "no token was issued: {tokens:?}");
+    assert!(r.doc().containing("a", "Browse your depots").len() == 1);
+    // Asked for an admin page, a user who is not an administrator still lands on /web/.
+    let mut b2 = Browser::new(s.url());
+    let form = b2.get("/admin/sign-in?next=%2Fadmin%2Fpeople").await;
+    let r = b2
+        .submit(
+            &form,
+            "/admin/sign-in",
+            &[("name", "ana"), ("password", PASSWORD)],
+        )
+        .await;
+    assert_eq!(r.location(), Some("/web/"));
 
     // An administrator by an access rule gets in, and is out again once the rule goes.
     let rule = make_admin(&s, "ana").await;
+    let mut b = Browser::new(s.url());
     let r = sign_in_as(&mut b, "ana", PASSWORD).await;
     assert_eq!(r.status, 303, "{}", r.body);
+    assert_eq!(r.location(), Some("/admin/"));
     assert_eq!(b.get("/admin/").await.status, 200);
     s.admin().delete_acl_rule(rule).await.unwrap();
     let r = b.get("/admin/").await;
@@ -489,16 +504,14 @@ async fn single_sign_on_signs_administrators_in() {
     assert!(cookie.contains("SameSite=Strict") && cookie.contains("HttpOnly"));
     assert_eq!(b.get("/admin/").await.status, 200);
 
-    // A user who is not an administrator gets no session.
+    // A user who is not an administrator signs in too, and lands on the depot browser.
     let mut b = Browser::new(s.url());
     email("ana@example.com");
     let r = b.follow("/admin/sign-in/sso").await;
-    assert_eq!(r.status, 403, "{}", r.body);
-    assert_eq!(
-        error_text(&r),
-        "This account is not a server administrator."
-    );
-    assert!(!b.cookies.contains_key("lode_admin"));
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert!(r.body.contains("url=/web/"), "{}", r.body);
+    assert_eq!(b.get("/web/").await.status, 200);
+    assert_eq!(b.get("/admin/").await.status, 403);
 
     // The one-time code only works in the browser that started the sign-in.
     let mut first = Browser::new(s.url());
@@ -1608,5 +1621,10 @@ async fn a_must_change_password_leads_to_the_change_page() {
     assert_eq!(ok.location(), Some("/admin/"));
     assert!(ok.cookie("lode_admin").is_some());
     let mut again = Browser::new(s.url());
-    assert_eq!(sign_in_as(&mut again, "admin", "my new password").await.status, 303);
+    assert_eq!(
+        sign_in_as(&mut again, "admin", "my new password")
+            .await
+            .status,
+        303
+    );
 }

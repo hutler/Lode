@@ -44,7 +44,7 @@ pub use perm::{BranchAccess, DepotAccess, Level, Permissions};
 pub use routes::{core_routes, finish, router, REQUEST_ID_HEADER};
 pub use server::{
     generate_admin_password, init, open_blob_store, open_state, reset_admin, revoke_admin_tokens,
-    set_admin_password, shutdown_signal, GENERATED_PASSWORD_VALID,
-    BoundServer, ClientInfo, InitReport, ServerError,
+    set_admin_password, shutdown_signal, BoundServer, ClientInfo, InitReport, ServerError,
+    GENERATED_PASSWORD_VALID,
 };
 pub use state::{AppState, BackupRun};

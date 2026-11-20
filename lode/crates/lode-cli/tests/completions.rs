@@ -16,7 +16,16 @@ fn every_shell_gets_a_script_naming_the_subcommands() {
             .unwrap();
         assert!(out.status.success(), "{shell}: {out:?}");
         let script = String::from_utf8(out.stdout).unwrap();
-        for sub in ["login", "passwd", "link", "checkout", "commit", "shelve", "admin", "completions"] {
+        for sub in [
+            "login",
+            "passwd",
+            "link",
+            "checkout",
+            "commit",
+            "shelve",
+            "admin",
+            "completions",
+        ] {
             assert!(script.contains(sub), "{shell} script lacks {sub}");
         }
     }

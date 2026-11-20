@@ -90,9 +90,8 @@ fn cookies(headers: &HeaderMap, name: &str) -> Vec<String> {
 /// Removes the session cookie of releases before T173, which lived under `/admin` only.
 pub(crate) fn clear_legacy_session(secure: bool) -> HeaderValue {
     let secure = if secure { "; Secure" } else { "" };
-    let text = format!(
-        "{SESSION_COOKIE}=; Path=/admin; Max-Age=0; HttpOnly; SameSite=Strict{secure}"
-    );
+    let text =
+        format!("{SESSION_COOKIE}=; Path=/admin; Max-Age=0; HttpOnly; SameSite=Strict{secure}");
     HeaderValue::from_str(&text).unwrap_or_else(|_| HeaderValue::from_static(""))
 }
 

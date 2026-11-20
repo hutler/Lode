@@ -1,7 +1,6 @@
 //! Times, durations and sizes as the admin pages show them, and directory sizes measured
 //! now and then.
 
-
 use time::macros::format_description;
 
 use super::html::Html;

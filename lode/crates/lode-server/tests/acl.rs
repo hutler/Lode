@@ -304,7 +304,9 @@ async fn rules_can_be_listed_for_one_depot_or_subject() {
         add(Some("art"), json!({ "kind": "user", "name": "ana" })),
         add(Some("docs"), json!({ "kind": "all" })),
     ] {
-        let (s, b) = h.send("POST", "/api/v1/admin/acl", &h.admin, Some(rule)).await;
+        let (s, b) = h
+            .send("POST", "/api/v1/admin/acl", &h.admin, Some(rule))
+            .await;
         assert_eq!(s, StatusCode::CREATED, "{b}");
     }
     let depots = |v: &Value| -> Vec<String> {
@@ -318,16 +320,33 @@ async fn rules_can_be_listed_for_one_depot_or_subject() {
     let (s, all) = h.send("GET", "/api/v1/admin/acl", &h.admin, None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(depots(&all), ["game", "*", "art", "docs"]);
-    let (_, art) = h.send("GET", "/api/v1/admin/acl?depot=art", &h.admin, None).await;
-    assert_eq!(depots(&art), ["*", "art"], "its own and the server-wide, in order");
-    let (_, ana) = h.send("GET", "/api/v1/admin/acl?subject=user:ana", &h.admin, None).await;
+    let (_, art) = h
+        .send("GET", "/api/v1/admin/acl?depot=art", &h.admin, None)
+        .await;
+    assert_eq!(
+        depots(&art),
+        ["*", "art"],
+        "its own and the server-wide, in order"
+    );
+    let (_, ana) = h
+        .send("GET", "/api/v1/admin/acl?subject=user:ana", &h.admin, None)
+        .await;
     assert_eq!(depots(&ana), ["game", "art"]);
     let (_, both) = h
-        .send("GET", "/api/v1/admin/acl?depot=docs&subject=all", &h.admin, None)
+        .send(
+            "GET",
+            "/api/v1/admin/acl?depot=docs&subject=all",
+            &h.admin,
+            None,
+        )
         .await;
     assert_eq!(depots(&both), ["*", "docs"]);
-    let (s, _) = h.send("GET", "/api/v1/admin/acl?depot=nope", &h.admin, None).await;
+    let (s, _) = h
+        .send("GET", "/api/v1/admin/acl?depot=nope", &h.admin, None)
+        .await;
     assert_eq!(s, StatusCode::NOT_FOUND);
-    let (s, _) = h.send("GET", "/api/v1/admin/acl?subject=team:x", &h.admin, None).await;
+    let (s, _) = h
+        .send("GET", "/api/v1/admin/acl?subject=team:x", &h.admin, None)
+        .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }

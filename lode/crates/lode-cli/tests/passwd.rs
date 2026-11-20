@@ -54,7 +54,11 @@ async fn passwd_changes_own_password_and_login_reports_a_must_change_one() {
     assert!(ok, "{v}");
 
     // Signed in: `passwd` finds the name by itself.
-    let (ok, v) = run(&ws, &["passwd", &url, "--password-stdin"], "second password\nthird password\n");
+    let (ok, v) = run(
+        &ws,
+        &["passwd", &url, "--password-stdin"],
+        "second password\nthird password\n",
+    );
     assert!(ok, "{v}");
     assert_eq!(v["name"], "ana");
 
@@ -75,6 +79,12 @@ async fn passwd_changes_own_password_and_login_reports_a_must_change_one() {
         "third password\n",
     );
     assert!(!ok);
-    assert_eq!(v["error"]["details"]["reason"], "password_change_required", "{v}");
-    assert!(v["error"]["message"].as_str().unwrap().contains("lode passwd"));
+    assert_eq!(
+        v["error"]["details"]["reason"], "password_change_required",
+        "{v}"
+    );
+    assert!(v["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("lode passwd"));
 }
