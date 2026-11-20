@@ -46,6 +46,8 @@ pub struct DepotRow {
     pub next_rev: u64,
     /// Creation time.
     pub created_at: Millis,
+    /// When it was moved to the trash; `None` for a live depot.
+    pub deleted_at: Option<Millis>,
 }
 
 /// Human or agent.
@@ -87,6 +89,9 @@ pub struct PrincipalRow {
     pub created_at: Millis,
     /// The single sign-on identity linked to this user, in lower case.
     pub sso_id: Option<String>,
+    /// When it was deleted. A deleted principal cannot authenticate, is left out of lists
+    /// and lookups by name, and keeps its name for history.
+    pub deleted_at: Option<Millis>,
 }
 
 /// Fields for a new principal.

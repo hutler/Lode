@@ -256,6 +256,35 @@ fn locked_error(held: &[LockView], mine: &[bool]) -> ApiError {
     .with_details(json!({ "paths": paths, "locks": held }))
 }
 
+/// Releases every lock `owner` holds, with one `lock.released` event per branch.
+fn release_all_of(tx: &WriteTx<'_>, owner: PrincipalId, now: Millis) -> Result<(), MetaError> {
+    let held: Vec<(i64, i64, i64)> = tx.conn().query(
+        "SELECT depot_id, branch_id, count(*) FROM mod_locks_lock WHERE owner_id = ?1 \
+         GROUP BY depot_id, branch_id",
+        vals![owner.0],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    if held.is_empty() {
+        return Ok(());
+    }
+    let name = tx
+        .principal(owner)?
+        .map(|p| p.name)
+        .unwrap_or_else(|| format!("#{}", owner.0));
+    tx.conn().execute(
+        "DELETE FROM mod_locks_lock WHERE owner_id = ?1",
+        vals![owner.0],
+    )?;
+    for (depot, branch, count) in held {
+        let Some(b) = tx.branch_by_id(BranchId(branch))? else {
+            continue;
+        };
+        let data = event_data(&b.name, &name, usize::try_from(count).unwrap_or(0));
+        tx.append_outbox(Some(DepotId(depot)), "lock.released", &data, now)?;
+    }
+    Ok(())
+}
+
 fn event_data(branch: &str, owner: &str, count: usize) -> String {
     json!({ "branch": branch, "owner": owner, "count": count }).to_string()
 }
@@ -670,6 +699,24 @@ struct ListLocksInput {
 impl Module for Locks {
     fn name(&self) -> &'static str {
         NAME
+    }
+
+    fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
+        tx.conn().execute(
+            "DELETE FROM mod_locks_lock WHERE depot_id = ?1",
+            vals![depot.0],
+        )?;
+        Ok(())
+    }
+
+    /// A deleted principal's locks would block everyone else for good, so they go with it.
+    fn principal_deleted(
+        &self,
+        tx: &WriteTx<'_>,
+        principal: PrincipalId,
+        now: Millis,
+    ) -> Result<(), MetaError> {
+        release_all_of(tx, principal, now)
     }
 
     fn scopes(&self) -> &'static [ScopeDef] {

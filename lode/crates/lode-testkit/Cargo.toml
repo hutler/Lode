@@ -33,6 +33,7 @@ tempfile.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+lode-meta.workspace = true
 futures.workspace = true
 rcgen.workspace = true
 zstd.workspace = true

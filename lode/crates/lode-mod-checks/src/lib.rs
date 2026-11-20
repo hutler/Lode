@@ -13,7 +13,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use lode_core::{DepotId, ErrorCode};
 use lode_meta::{vals, Row, Sql};
-use lode_meta::{MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads};
+use lode_meta::{MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads, WriteTx};
 use lode_proto::checks::{
     CheckList, CheckState, CheckTarget, CheckTargetKind, CheckView, ChecksQuery,
     ReportCheckRequest, MAX_NAME_LEN, MAX_SUMMARY_LEN, MAX_URL_LEN,
@@ -468,6 +468,14 @@ fn gate(tx: &dyn Reads, ctx: &CommitCtx<'_>) -> Result<(), ApiError> {
 impl Module for Checks {
     fn name(&self) -> &'static str {
         NAME
+    }
+
+    fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
+        tx.conn().execute(
+            "DELETE FROM mod_checks_check WHERE depot_id = ?1",
+            vals![depot.0],
+        )?;
+        Ok(())
     }
 
     fn scopes(&self) -> &'static [ScopeDef] {

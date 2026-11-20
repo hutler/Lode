@@ -5,7 +5,8 @@ use axum::extract::{Path, State};
 use axum::response::Response;
 use lode_meta::Reads;
 use lode_proto::admin::{
-    MaintenanceReport, ObliterateReport, ObliterateRequest, ObliterateTarget, ObliterationList,
+    DeleteDepotRequest, DeleteDepotResponse, MaintenanceReport, ObliterateReport,
+    ObliterateRequest, ObliterateTarget, ObliterationList, TrashList,
 };
 use lode_proto::consts::paths;
 use lode_proto::depot::{BranchList, BranchState, CreateDepotRequest, DepotList};
@@ -123,13 +124,64 @@ async fn list_page(ctx: &Ctx, admin: &Admin, error: Option<&ErrorBody>, name: &s
             rows
         )
     };
+    let trash = trash_section(ctx, admin).await;
     let body = html!(
-        "<h1>Depots</h1><section>{}</section><section><h2>Create a depot</h2>{}{}</section>",
+        "<h1>Depots</h1><section>{}</section><section><h2>Create a depot</h2>{}{}</section>{}",
         table,
         error.map(error_text),
-        create_form(admin, name)
+        create_form(admin, name),
+        trash
     );
     Page::new("Depots", Nav::Depots).render(ctx, Some(admin), body)
+}
+
+/// The trash: deleted depots, with restore and erase-now forms. Empty when nothing is there.
+async fn trash_section(ctx: &Ctx, admin: &Admin) -> Html {
+    let list = match ctx.api(admin).get::<TrashList>(paths::ADMIN_TRASH).await {
+        Ok(l) => l.depots,
+        Err(e) => {
+            return html!(
+                "<section><h2 id=\"trash\">Trash</h2>{}</section>",
+                error_text(&e)
+            )
+        }
+    };
+    if list.is_empty() {
+        return Html::new();
+    }
+    let csrf = admin.csrf_field();
+    let rows: Html = list
+        .iter()
+        .map(|d| {
+            let enc = encode(&d.name);
+            html!(
+                "<tr><td data-label=\"Depot\">{}</td><td data-label=\"Deleted\">{}</td>\
+                 <td data-label=\"Erased after\">{}</td><td><div class=\"actions\">\
+                 <form method=\"post\" action=\"/admin/trash/{}/restore\">{}\
+                 <button type=\"submit\">Restore</button></form>\
+                 <form class=\"row\" method=\"post\" action=\"/admin/trash/{}/erase\">{}\
+                 <label>Type <code>{}</code> to erase now<input type=\"text\" name=\"confirm_name\" \
+                 required=\"required\" autocomplete=\"off\"/></label>\
+                 <button type=\"submit\" class=\"danger\">Erase now</button></form></div></td></tr>",
+                d.name,
+                at(d.deleted_at),
+                at(d.purge_after),
+                enc.clone(),
+                csrf.clone(),
+                enc,
+                csrf.clone(),
+                d.name
+            )
+        })
+        .collect();
+    html!(
+        "<section><h2 id=\"trash\">Trash</h2><p class=\"muted\">Deleted depots are kept here \
+         for {} days and can be restored; then they are erased with their history and content.</p>\
+         <table class=\"wide\"><thead><tr><th>Depot</th><th>Deleted</th><th>Erased after</th>\
+         <th></th></tr></thead><tbody>{}</tbody></table></section>",
+        crate::trash::TRASH_DAYS,
+        rows
+    )
 }
 
 pub(crate) async fn list(State(ctx): State<Ctx>, admin: Admin) -> Response {
@@ -323,7 +375,17 @@ async fn depot_page(ctx: &Ctx, admin: &Admin, d: &str, top: Html) -> Response {
          placeholder=\"Content/secret.txt&#10;Builds/old@42\"></textarea></label>\
          <label>Reason<input type=\"text\" name=\"reason\" placeholder=\"Leaked credentials\"/></label>\
          <button type=\"submit\">Dry run</button></form></section>\
-         <section><h2 id=\"obliterated\">Obliterated content</h2>{}</section>",
+         <section><h2 id=\"obliterated\">Obliterated content</h2>{}</section>\
+         <section><h2 id=\"delete\">Delete this depot</h2>\
+         <p class=\"muted\">The depot goes to the trash: it disappears for everyone and is erased \
+         after {} days, until then it can be restored from the Depots page. Erasing now removes \
+         its history and content at once and cannot be undone.</p>\
+         <form class=\"stack\" method=\"post\" action=\"{}/delete\">{}\
+         <label>Type <code>{}</code> to confirm<input type=\"text\" name=\"confirm_name\" \
+         required=\"required\" autocomplete=\"off\"/></label>\
+         <label class=\"check\"><input type=\"checkbox\" name=\"force\" value=\"1\"/>\
+         Erase now instead of moving to the trash</label>\
+         <button type=\"submit\" class=\"danger\">Delete depot</button></form></section>",
         d,
         top,
         revisions_count(&branches),
@@ -336,8 +398,12 @@ async fn depot_page(ctx: &Ctx, admin: &Admin, d: &str, top: Html) -> Response {
         href,
         csrf.clone(),
         href,
+        csrf.clone(),
+        obliterated,
+        crate::trash::TRASH_DAYS,
+        href,
         csrf,
-        obliterated
+        d
     );
     Page::new(d, Nav::Depots).render(ctx, Some(admin), body)
 }
@@ -592,6 +658,70 @@ fn obliterate_report(
         table,
         next
     )
+}
+
+async fn delete_request(
+    ctx: &Ctx,
+    post: &Post,
+    d: &str,
+    force: bool,
+) -> Result<DeleteDepotResponse, Html> {
+    let confirm = post.fields.text("confirm_name");
+    if confirm != d {
+        return Err(html!(
+            "<p class=\"error\" role=\"alert\">Type the depot's name {} exactly to delete it.</p>",
+            d
+        ));
+    }
+    let req = DeleteDepotRequest { confirm, force };
+    ctx.api(&post.admin)
+        .delete_with::<_, DeleteDepotResponse>(&path(paths::ADMIN_DEPOT, &[d]), &req)
+        .await
+        .map_err(|e| error_text(&e))
+}
+
+fn deleted_note(r: &DeleteDepotResponse) -> String {
+    if r.purged {
+        format!("Depot {} erased.", r.name)
+    } else {
+        format!(
+            "Depot {} moved to the trash. It can be restored for {} days.",
+            r.name,
+            crate::trash::TRASH_DAYS
+        )
+    }
+}
+
+pub(crate) async fn delete(State(ctx): State<Ctx>, Path(d): Path<String>, post: Post) -> Response {
+    let force = post.fields.flag("force");
+    match delete_request(&ctx, &post, &d, force).await {
+        Ok(r) => redirect_with_note(&ctx, "/admin/depots", &deleted_note(&r)),
+        Err(top) => depot_page(&ctx, &post.admin, &d, top).await,
+    }
+}
+
+pub(crate) async fn erase(State(ctx): State<Ctx>, Path(d): Path<String>, post: Post) -> Response {
+    match delete_request(&ctx, &post, &d, true).await {
+        Ok(r) => redirect_with_note(&ctx, "/admin/depots#trash", &deleted_note(&r)),
+        Err(top) => trash_error(&ctx, &post.admin, top).await,
+    }
+}
+
+pub(crate) async fn restore(State(ctx): State<Ctx>, Path(d): Path<String>, post: Post) -> Response {
+    let url = path(paths::ADMIN_DEPOT_RESTORE, &[&d]);
+    match ctx.api(&post.admin).post_ok(&url, &()).await {
+        Ok(()) => redirect_with_note(&ctx, &depot_href(&d), &format!("Depot {d} restored.")),
+        Err(e) => trash_error(&ctx, &post.admin, error_text(&e)).await,
+    }
+}
+
+/// The depots page with an error above the trash.
+async fn trash_error(ctx: &Ctx, admin: &Admin, top: Html) -> Response {
+    let body = html!(
+        "<h1>Depots</h1>{}<p><a href=\"/admin/depots#trash\">Back to the trash</a></p>",
+        top
+    );
+    Page::new("Depots", Nav::Depots).render(ctx, Some(admin), body)
 }
 
 pub(crate) async fn break_lock(

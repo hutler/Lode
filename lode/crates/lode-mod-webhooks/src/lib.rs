@@ -799,6 +799,19 @@ impl Module for Webhooks {
         NAME
     }
 
+    fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
+        tx.conn().execute(
+            "DELETE FROM mod_webhooks_delivery WHERE hook_id IN \
+             (SELECT id FROM mod_webhooks_hook WHERE depot_id = ?1)",
+            vals![depot.0],
+        )?;
+        tx.conn().execute(
+            "DELETE FROM mod_webhooks_hook WHERE depot_id = ?1",
+            vals![depot.0],
+        )?;
+        Ok(())
+    }
+
     fn migrations(&self) -> &'static [Migration] {
         MIGRATIONS
     }

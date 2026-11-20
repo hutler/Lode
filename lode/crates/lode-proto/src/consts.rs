@@ -116,6 +116,12 @@ pub mod paths {
     pub const ADMIN_ACL_CHECK: &str = "/api/v1/admin/acl/check";
     /// `DELETE` one access rule.
     pub const ADMIN_ACL_RULE: &str = "/api/v1/admin/acl/{id}";
+    /// Admin: delete a depot (`DELETE`), to the trash or for good.
+    pub const ADMIN_DEPOT: &str = "/api/v1/admin/depots/{d}";
+    /// Takes a depot out of the trash (`POST`).
+    pub const ADMIN_DEPOT_RESTORE: &str = "/api/v1/admin/depots/{d}/restore";
+    /// Depots in the trash.
+    pub const ADMIN_TRASH: &str = "/api/v1/admin/trash";
     /// Admin: garbage collection of a depot.
     pub const ADMIN_GC: &str = "/api/v1/admin/depots/{d}/gc";
     /// Admin: consistency check of a depot.

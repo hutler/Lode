@@ -6,17 +6,17 @@ Re-read this file just before you edit it, change only your own row, and save at
 
 | ID | Task | Needs | Status | Owner | Notes |
 | --- | --- | --- | --- | --- | --- |
-| T01 | [Plugin scaffold](#t01-plugin-scaffold) | none | todo | | |
-| T02 | [Lode command runner](#t02-lode-command-runner) | T01 | todo | | |
-| T03 | [Provider, connection and settings](#t03-provider-connection-and-settings) | T02 | todo | | |
-| T04 | [File states and cache](#t04-file-states-and-cache) | T03 | todo | | |
-| T05 | [Add, delete, revert, sync, submit](#t05-add-delete-revert-sync-submit) | T04 | todo | | |
-| T06 | [Locks as check out](#t06-locks-as-check-out) | T04 | todo | | |
-| T07 | [History and diff](#t07-history-and-diff) | T05 | todo | | |
-| T08 | [Rename, copy and resolve](#t08-rename-copy-and-resolve) | T05 | todo | | |
-| T09 | [Changelists and shelves](#t09-changelists-and-shelves) | T06, T08 | todo | | |
-| T10 | [End-to-end tests with real Lode](#t10-end-to-end-tests-with-real-lode) | T09, and lode M3 | todo | | |
-| T11 | [Packaging and guide](#t11-packaging-and-guide) | T10 | todo | | |
+| T01 | [Plugin scaffold](#t01-plugin-scaffold) | none | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T02 | [Lode command runner](#t02-lode-command-runner) | T01 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T03 | [Provider, connection and settings](#t03-provider-connection-and-settings) | T02 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T04 | [File states and cache](#t04-file-states-and-cache) | T03 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T05 | [Add, delete, revert, sync, submit](#t05-add-delete-revert-sync-submit) | T04 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T06 | [Locks as check out](#t06-locks-as-check-out) | T04 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T07 | [History and diff](#t07-history-and-diff) | T05 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T08 | [Rename, copy and resolve](#t08-rename-copy-and-resolve) | T05 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T09 | [Changelists and shelves](#t09-changelists-and-shelves) | T06, T08 | in progress | Claude | Code and tests written; not yet built (needs Unreal Engine on the PC) |
+| T10 | [End-to-end tests with real Lode](#t10-end-to-end-tests-with-real-lode) | T09, and lode M3 | in progress | Claude | Tests and server script written; three Windows runs pending |
+| T11 | [Packaging and guide](#t11-packaging-and-guide) | T10 | in progress | Claude | Guide, troubleshooting and build scripts written; zips wait for a build |
 
 ## Order
 

@@ -4,7 +4,8 @@
 use axum::extract::{Path, State};
 use axum::response::Response;
 use lode_proto::admin::{
-    CreateGroupRequest, CreatePrincipalRequest, GroupList, PatchPrincipalRequest, PrincipalList,
+    CreateGroupRequest, CreatePrincipalRequest, DeletePrincipalResponse, GroupList,
+    PatchPrincipalRequest, PrincipalList,
 };
 use lode_proto::auth::{CreateTokenRequest, CreateTokenResponse, PrincipalView, TokenList};
 use lode_proto::consts::paths;
@@ -410,6 +411,36 @@ async fn person_page(ctx: &Ctx, admin: &Admin, name: &str, top: Html) -> Respons
         }
         Err(e) => error_text(&e),
     };
+    let delete = if name == crate::auth::ADMIN_USER {
+        Html::new()
+    } else {
+        let owned: Vec<&str> = principals
+            .iter()
+            .filter(|a| a.kind == PrincipalKind::Agent && a.owner.as_deref() == Some(name))
+            .map(|a| a.name.as_str())
+            .collect();
+        let agents_note = if owned.is_empty() {
+            Html::new()
+        } else {
+            html!(" Their agents are deleted with them: {}.", owned.join(", "))
+        };
+        html!(
+            "<section><h2 id=\"delete\">Delete</h2>\
+             <p class=\"muted\">{} can no longer sign in and disappears from lists; tokens, group \
+             memberships, access rules and locks go.{} The name stays in history and cannot be \
+             given to anyone else. To only stop access for a while, disable instead.</p>\
+             <form class=\"row\" method=\"post\" action=\"{}/delete\">{}\
+             <label>Type <code>{}</code> to confirm<input type=\"text\" name=\"confirm_name\" \
+             required=\"required\" autocomplete=\"off\"/></label>\
+             <button type=\"submit\" class=\"danger\">Delete {}</button></form></section>",
+            name,
+            agents_note,
+            href,
+            csrf.clone(),
+            name,
+            name
+        )
+    };
     let defaults = if user {
         vec!["read".to_owned(), "write".to_owned()]
     } else {
@@ -444,7 +475,7 @@ async fn person_page(ctx: &Ctx, admin: &Admin, name: &str, top: Html) -> Respons
          <label>Name<input type=\"text\" name=\"name\" required=\"required\" placeholder=\"ci\"/></label>\
          <fieldset><legend>Scopes</legend>{}</fieldset>\
          <label>Expires after (days; empty for never)<input type=\"text\" name=\"days\" inputmode=\"numeric\" placeholder=\"90\"/></label>\
-         <button type=\"submit\" class=\"primary\">Create token</button></form></section>",
+         <button type=\"submit\" class=\"primary\">Create token</button></form></section>{}",
         name,
         top,
         facts,
@@ -453,7 +484,8 @@ async fn person_page(ctx: &Ctx, admin: &Admin, name: &str, top: Html) -> Respons
         tokens,
         href,
         csrf,
-        scopes
+        scopes,
+        delete
     );
     Page::new(name, Nav::People).render(ctx, Some(admin), body)
 }
@@ -496,6 +528,36 @@ pub(crate) async fn set_state(
         ..Default::default()
     };
     patch(&ctx, &post, &name, req, note).await
+}
+
+pub(crate) async fn delete(
+    State(ctx): State<Ctx>,
+    Path(name): Path<String>,
+    post: Post,
+) -> Response {
+    if post.fields.text("confirm_name") != name {
+        let top = html!(
+            "<p class=\"error\" role=\"alert\">Type the name {} exactly to delete it.</p>",
+            name
+        );
+        return person_page(&ctx, &post.admin, &name, top).await;
+    }
+    let url = path(paths::ADMIN_PRINCIPAL, &[&name]);
+    match ctx
+        .api(&post.admin)
+        .delete_json::<DeletePrincipalResponse>(&url)
+        .await
+    {
+        Ok(r) => {
+            let note = if r.agents.is_empty() {
+                format!("{} deleted.", r.name)
+            } else {
+                format!("{} deleted, with agents {}.", r.name, r.agents.join(", "))
+            };
+            redirect_with_note(&ctx, "/admin/people", &note)
+        }
+        Err(e) => person_page(&ctx, &post.admin, &name, error_text(&e)).await,
+    }
 }
 
 pub(crate) async fn set_password(

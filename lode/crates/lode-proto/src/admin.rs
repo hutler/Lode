@@ -276,3 +276,63 @@ pub struct ObliterationList {
     /// Oldest first.
     pub obliterated: Vec<Obliteration>,
 }
+
+/// `DELETE /admin/principals/{name}`: what was deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeletePrincipalResponse {
+    /// The deleted user or agent.
+    pub name: String,
+    /// Agents deleted with their owner.
+    #[serde(default)]
+    pub agents: Vec<String>,
+}
+
+/// `DELETE /admin/depots/{d}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteDepotRequest {
+    /// The depot's name again, typed by the person, as confirmation.
+    pub confirm: String,
+    /// Erase the depot now instead of moving it to the trash. Also erases a depot that is
+    /// already in the trash.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Answer to `DELETE /admin/depots/{d}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteDepotResponse {
+    /// The depot.
+    pub name: String,
+    /// True when it was erased for good; false when it went to the trash.
+    pub purged: bool,
+    /// When a depot in the trash will be erased.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::rfc3339::option"
+    )]
+    pub purge_after: Option<crate::Timestamp>,
+}
+
+/// A depot in the trash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrashedDepot {
+    /// Name; it stays taken until the depot is erased.
+    pub name: String,
+    /// Creation time.
+    #[serde(with = "crate::rfc3339")]
+    pub created_at: crate::Timestamp,
+    /// When it was deleted.
+    #[serde(with = "crate::rfc3339")]
+    pub deleted_at: crate::Timestamp,
+    /// When it will be erased.
+    #[serde(with = "crate::rfc3339")]
+    pub purge_after: crate::Timestamp,
+}
+
+/// `GET /admin/trash`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrashList {
+    /// Depots in the trash, oldest deletion first.
+    pub depots: Vec<TrashedDepot>,
+}

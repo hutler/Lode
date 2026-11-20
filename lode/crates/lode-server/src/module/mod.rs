@@ -203,6 +203,24 @@ pub trait Module: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Removes the module's rows for `depot`, which is being purged for good. Runs in the
+    /// purge transaction, before the core rows go; an error rolls the purge back and it is
+    /// tried again later.
+    fn purge_depot(&self, _tx: &WriteTx<'_>, _depot: DepotId) -> Result<(), MetaError> {
+        Ok(())
+    }
+
+    /// Tidies up after a principal was deleted, such as releasing its locks. Runs in the
+    /// transaction that deletes it.
+    fn principal_deleted(
+        &self,
+        _tx: &WriteTx<'_>,
+        _principal: lode_meta::PrincipalId,
+        _now: lode_meta::Millis,
+    ) -> Result<(), MetaError> {
+        Ok(())
+    }
+
     /// Tools this module offers to agents.
     fn mcp_tools(&self, _ctx: ModuleCtx) -> Vec<ToolDef> {
         Vec::new()

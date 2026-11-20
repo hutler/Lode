@@ -68,6 +68,12 @@ pub const CORE_MIGRATIONS: MigrationSet = MigrationSet {
             sql: include_str!("../migrations/core/0005_maintenance_runs.sql"),
             postgres: include_str!("../migrations/core/0005_maintenance_runs.postgres.sql"),
         },
+        Migration {
+            version: 6,
+            name: "deleted",
+            sql: include_str!("../migrations/core/0006_deleted.sql"),
+            postgres: include_str!("../migrations/core/0006_deleted.postgres.sql"),
+        },
     ],
 };
 

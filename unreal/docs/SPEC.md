@@ -52,21 +52,21 @@ Unreal Editor
 
 | Editor action | Lode command | Notes |
 | --- | --- | --- |
-| Connect | `lode --version --json`, `lode status --json` | Checks the client version, finds the workspace, shows server, depot, branch and user |
-| Refresh state | `lode status --json <paths>`, `lode locks --json` | See section 6 for how often |
+| Connect | `lode --version`, `lode status`, `lode whoami`, `lode log -n 1` (all `--json`) | Checks the client version, finds the workspace, shows server and user (`whoami`), depot (`log`), branch and revision (`status`). Items 13 and 14 below would make this one call |
+| Refresh state | `lode status --unchanged --paths-from <file>`; with `--remote` for server information | `--unchanged` is needed: without it a locked but unchanged file is not listed. Paths outside the workspace make lode refuse the whole call, so the plugin leaves them out. See section 6 for how often |
 | Check out | `lode lock <paths>` | In Lode, checking out means taking the lock. Files that need no lock are simply edited |
 | Mark for add | `lode add <paths>` | |
-| Delete | `lode rm <paths>` | |
-| Rename or move | `lode mv <from> <to>` | The editor leaves a redirector at the old path; the plugin adds it, so history follows the asset |
-| Duplicate | `lode cp <from> <to>` | |
-| Revert | `lode revert <paths>` | Releases locks held on those files |
-| Sync | `lode update` | Assets changed on both sides become conflicts; binaries are never merged |
-| Submit | `lode commit -m <text> <paths>` | Optional "keep locks" maps to `--keep-locks` |
+| Delete | `lode lock` (when the file needs a lock), then `lode rm --force <paths>` | Deleting a lock-required file needs its lock |
+| Rename or move | `lode cp --after <from> <to>` (with a redirector) or `lode mv --after` | The editor has already moved the file and leaves a redirector at the old path, so the source still exists and `mv` refuses; the plugin records a copy, which history follows through `copy_from` |
+| Duplicate | `lode cp --after <from> <to>` | |
+| Revert | `lode revert <paths>`, then `lode unlock <paths>` | `lode revert` does not release locks, so the plugin unlocks afterwards. A revert of an added file leaves it on disk as untracked; the editor's "delete new files" option removes it |
+| Sync | `lode update` (`-r <rev>` for a revision) | Assets changed on both sides become conflicts; binaries are never merged and leave `<file>.theirs-r<N>` beside the file. `update` exits 0 even with conflicts, so the plugin reads each file's `outcome` |
+| Submit | `lode commit -F <file> --paths-from <file>` | The message goes through a file, never the command line (quotes and line breaks survive on every platform). Commit releases locks; "keep locks" maps to `--keep-locks` |
 | Resolve | `lode resolve <path> --mine` or `--theirs` | For binary assets the choice is one side or the other |
-| History | `lode log <path> --json` | Revision, author, submitter, time, message |
-| Diff against a revision | `lode cat <path>@<rev>` into a temporary file | The editor's own asset diff then compares the two files |
+| History | `lode log <path> -v --follow -n 200` | Revision, author, submitter, time, message; the plugin picks the file's own change from each revision and follows `copy_from` across renames |
+| Diff against a revision | `lode cat <path>@<rev> -o <file>` | The editor's own asset diff then compares the two files |
 | Changelists | `lode changelist new, list, move, delete` | Shown in the editor's View Changes window |
-| Shelve and unshelve | `lode shelve -c <changelist>`, `lode unshelve <id>` | A shelf is how work goes to review, and how agent work arrives |
+| Shelve and unshelve | `lode shelve -c <changelist> --keep [--update <id>]`, `lode unshelve <id>`, `lode shelves --state open`, `lode shelf show <id>` | A shelf is how work goes to review, and how agent work arrives. Shelves have no link to a changelist in Lode, so the plugin remembers which shelf came from which changelist in `Saved/LodeSourceControl/Shelves.json`. A shelf from the default changelist first moves the files into a new changelist named after the description |
 
 **File states shown in the editor**
 
@@ -77,7 +77,7 @@ Unreal Editor
 | Added, deleted, modified | Pending local change | `status` |
 | Conflicted | Needs resolve | `status` |
 | Locked by me | The lock is held in this workspace | `status` |
-| Locked by someone else | Shows the holder's name; the editor refuses the edit | `locks` |
+| Locked by someone else | Shows the holder's name; the editor refuses the edit | `status --remote` (`locked_by`), `locks` |
 | Lock required | Matches `[locks].required` in `.lodeconfig` and is read-only on disk | `status` |
 | Not at head | A newer revision exists on the branch | `status` with server information |
 
@@ -101,8 +101,12 @@ This section is the contract between the two subprojects. Lode stays generic: no
 | 10 | Readers (`status`, `locks`, `log`) may run while another `lode` process is working in the same workspace | The editor refreshes state in the background | Present (task T021: readers may run in parallel) |
 | 11 | Changes to a file's read-only attribute happen only through `lock`, `unlock`, `revert`, `commit` and `update` | The editor caches writability | Present (task T031) |
 | 12 | `lode login --token-stdin` and `LODE_TOKEN_FILE` | Sign-in dialog without storing a token in the plugin | Present |
+| 13 | Proposed: `status --json` prints the server URL and depot name | Connect needs `whoami` and `log -n 1` today only to learn them | Not present (found while writing T03) |
+| 14 | Proposed: `-F <file>` for `shelve` and `changelist new` descriptions | A description with quotes or line breaks cannot pass safely on the Unix command line, which the engine splits on spaces without escapes | Not present (found while writing T09) |
+| 15 | Proposed: a way to change a changelist's description, such as `changelist edit <name> -m` | The editor's "edit changelist" action; today the plugin keeps the new text only in the editor | Not present (found while writing T09) |
+| 16 | Proposed: a lock-aware revert, such as `revert --unlock` | Revert and unlock are two calls today, and a failure between them leaves a lock behind | Not present; `revert` does not release locks, unlike what this section first assumed |
 
-**Lode task.** Items 3, 4, 7, 8 and 9 were done in Lode task T071 ("Command-line support for editor integrations", milestone M7). The JSON shapes are in `lode/docs/CLI-JSON.md`.
+**Lode task.** Items 3, 4, 7, 8 and 9 were done in Lode task T071 ("Command-line support for editor integrations", milestone M7), and are in lode 0.2.0. The JSON shapes are in `lode/docs/CLI-JSON.md`. Items 13 to 16 are proposals from writing the plugin; the plugin works without them.
 
 **Version check.** On connect the plugin reads `lode --version --json` and refuses a client whose `api` value is older than the plugin supports, with a message naming the version needed.
 
@@ -122,11 +126,11 @@ If measurements in task T04 show that process start time dominates, the fallback
 
 - **Project setup.** Install `lode`, check out the depot so the `.uproject` is inside the workspace, copy the plugin to `Plugins/LodeSourceControl`, choose Lode in the editor's revision control dialog.
 - **Settings.** Path to the `lode` program (default: found on `PATH`), refresh interval for server information, "keep locks after submit" default. Server, depot, branch and user are shown read-only, taken from the workspace.
-- **Templates.** The plugin ships a `.lodeignore` for Unreal projects (`Binaries/`, `Intermediate/`, `Saved/`, `DerivedDataCache/`) and a `.lodeconfig` that requires locks for `Content/**/*.uasset` and `Content/**/*.umap`.
+- **Templates.** Lode itself ships them: `lode init <server>/<depot> --template unreal` writes a `.lodeignore` for Unreal projects (`Binaries/`, `Intermediate/`, `Saved/`, `DerivedDataCache/` and more) and a `.lodeconfig` that requires locks for `**/*.uasset` and `**/*.umap`. The plugin does not copy them; the guide points to the template.
 
 ## 8. Engine versions and platforms
 
-- **Engine.** Unreal Engine 5.4 and later, one source tree, with version checks only where the engine's interface differs. The revision control interface changes between engine releases, so every interface name in this document must be checked against the headers of each supported engine (`Engine/Source/Developer/SourceControl/Public/`) before it is used.
+- **Engine.** Unreal Engine 5.8 only (the current release); no compatibility code for older engines. The revision control interface changes between engine releases, so every interface name in this document must be checked against the 5.8 headers (`Engine/Source/Developer/SourceControl/Public/`) before it is used.
 - **Platforms.** Windows first, since that is where most Unreal work happens. The code must also compile for the Linux and macOS editors.
 - **Distribution.** A zip per engine version with the built plugin, attached to SimpleDevOps releases. A listing on Fab can follow.
 
@@ -150,7 +154,8 @@ If measurements in task T04 show that process start time dominates, the fallback
 
 ## 11. Open questions
 
-- [ ] **Which engine versions?** Proposed: 5.4 and later. Supporting older 5.x releases costs extra version checks.
-- [ ] **Accept the proposed Lode task** for items 4, 7, 8 and 9 of section 5?
-- [ ] **Who may break a lock from the editor?** Proposed: nobody in version 1; admins use `lode unlock --force`.
-- [ ] **Show checks on shelves in the editor?** Proposed for a later version, once the UmpaLumpa integration is running.
+- [x] **Which engine versions?** 5.8 only, the current release. Moving to a newer engine means checking the interface again against its headers.
+- [x] **Accept the proposed Lode task** for items 4, 7, 8 and 9 of section 5? Done in Lode T071, released in 0.2.0.
+- [x] **Who may break a lock from the editor?** Nobody in version 1; admins use `lode unlock --force`.
+- [x] **Show checks on shelves in the editor?** Not in version 1; later, once the UmpaLumpa integration runs.
+- [ ] **Items 13 to 16 of section 5.** Proposed to Lode; the plugin has workarounds for each.

@@ -39,7 +39,7 @@ pub struct AdminArgs {
 /// `lode admin` subcommands.
 #[derive(Debug, clap::Subcommand)]
 pub enum AdminCmd {
-    /// Create or list depots.
+    /// Create, list, delete or restore depots.
     #[command(subcommand)]
     Depot(DepotCmd),
     /// Manage users.
@@ -169,6 +169,27 @@ pub enum DepotCmd {
     },
     /// List depots.
     List,
+    /// Delete a depot. It goes to the trash, where it is kept for 30 days and can be
+    /// restored; then it is erased. With --force it is erased now, history and content,
+    /// which cannot be undone.
+    Delete {
+        /// Name.
+        name: String,
+        /// Erase it now instead of moving it to the trash; also erases a depot already in
+        /// the trash.
+        #[arg(long)]
+        force: bool,
+        /// Do not ask to type the name; needed when stdin is not a terminal.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Take a depot out of the trash.
+    Restore {
+        /// Name.
+        name: String,
+    },
+    /// List depots in the trash and when each will be erased.
+    Trash,
 }
 
 /// How a password is given.
@@ -205,6 +226,16 @@ pub enum UserCmd {
         /// Enable instead.
         #[arg(long)]
         enable: bool,
+    },
+    /// Delete a user and the agents they own. They can no longer sign in and disappear
+    /// from lists; their tokens, group memberships, access rules and locks go. Their name
+    /// stays in history and cannot be given to someone else.
+    Delete {
+        /// Login name.
+        name: String,
+        /// Do not ask; needed when stdin is not a terminal.
+        #[arg(long)]
+        yes: bool,
     },
     /// Set a user's password.
     Passwd {
@@ -250,6 +281,14 @@ pub enum AgentCmd {
         /// Enable instead.
         #[arg(long)]
         enable: bool,
+    },
+    /// Delete an agent: its tokens stop working and its name stays in history.
+    Delete {
+        /// Name.
+        name: String,
+        /// Do not ask; needed when stdin is not a terminal.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -447,6 +486,76 @@ async fn set_disabled(ctx: &Ctx, c: &Client, name: &str, enable: bool) -> OpResu
         p.name
     ));
     to_json(&p)
+}
+
+async fn delete_principal(ctx: &Ctx, c: &Client, name: &str, yes: bool) -> OpResult<Value> {
+    if !yes {
+        if ctx.g.json || !ctx.out.ui().interactive() {
+            return Err(OpError::usage(
+                "deleting cannot be undone; pass --yes to confirm",
+            ));
+        }
+        let q = format!(
+            "Delete {name}? They can no longer sign in, and their agents are deleted too. \
+             This cannot be undone."
+        );
+        if !ctx.out.ui().confirm(&q)? {
+            return Err(OpError::failed("aborted", "nothing was deleted"));
+        }
+    }
+    let r = c.delete_principal(name).await?;
+    ctx.out.line(format!("Deleted {}", r.name));
+    for a in &r.agents {
+        ctx.out
+            .line(format!("Deleted agent {a} (owned by {})", r.name));
+    }
+    to_json(&r)
+}
+
+async fn delete_depot(
+    ctx: &Ctx,
+    c: &Client,
+    name: &str,
+    force: bool,
+    yes: bool,
+) -> OpResult<Value> {
+    if !yes {
+        if ctx.g.json || !ctx.out.ui().interactive() {
+            return Err(OpError::usage(
+                "pass --yes to confirm deleting a depot when stdin is not a terminal",
+            ));
+        }
+        let what = if force {
+            "This erases its history and content now and cannot be undone."
+        } else {
+            "It goes to the trash for 30 days and can be restored until then."
+        };
+        ctx.out.line(format!("Deleting depot {name}. {what}"));
+        let typed = ctx
+            .out
+            .ui()
+            .prompt("Type the depot's name to confirm: ", false)?;
+        if typed.trim() != name {
+            return Err(OpError::failed(
+                "aborted",
+                "the name did not match; nothing was deleted",
+            ));
+        }
+    }
+    let r = c.delete_depot(name, name, force).await?;
+    if r.purged {
+        ctx.out.line(format!("Erased depot {}", r.name));
+    } else {
+        let when = r
+            .purge_after
+            .map(format_time)
+            .unwrap_or_else(|| "later".to_owned());
+        ctx.out.line(format!(
+            "Moved depot {} to the trash; it will be erased after {when}. Undo with `lode admin depot restore {}`",
+            r.name, r.name
+        ));
+    }
+    to_json(&r)
 }
 
 fn token_line(t: &TokenView) -> String {
@@ -784,6 +893,29 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
             }
             to_json(&list)
         }
+        AdminCmd::Depot(DepotCmd::Delete { name, force, yes }) => {
+            delete_depot(ctx, &c, &name, force, yes).await
+        }
+        AdminCmd::Depot(DepotCmd::Restore { name }) => {
+            let d = c.restore_depot(&name).await?;
+            ctx.out.line(format!("Restored depot {}", d.name));
+            to_json(&d)
+        }
+        AdminCmd::Depot(DepotCmd::Trash) => {
+            let list = c.trash().await?;
+            if list.depots.is_empty() {
+                ctx.out.line("The trash is empty");
+            }
+            for d in &list.depots {
+                ctx.out.line(format!(
+                    "{}  deleted {}, erased after {}",
+                    d.name,
+                    format_time(d.deleted_at),
+                    format_time(d.purge_after)
+                ));
+            }
+            to_json(&list)
+        }
         AdminCmd::User(UserCmd::Create {
             name,
             display_name,
@@ -847,6 +979,9 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         AdminCmd::User(UserCmd::Disable { name, enable }) => {
             set_disabled(ctx, &c, &name, enable).await
         }
+        AdminCmd::User(UserCmd::Delete { name, yes }) => {
+            delete_principal(ctx, &c, &name, yes).await
+        }
         AdminCmd::User(UserCmd::Passwd { name, password: pw }) => {
             let password = password(ctx, &pw)?;
             let p = c
@@ -888,6 +1023,9 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         AdminCmd::Agent(AgentCmd::List) => principals_of(ctx, &c, PrincipalKind::Agent).await,
         AdminCmd::Agent(AgentCmd::Disable { name, enable }) => {
             set_disabled(ctx, &c, &name, enable).await
+        }
+        AdminCmd::Agent(AgentCmd::Delete { name, yes }) => {
+            delete_principal(ctx, &c, &name, yes).await
         }
         AdminCmd::Group(GroupCmd::Create { name }) => {
             let g = c.create_group(&name).await?;

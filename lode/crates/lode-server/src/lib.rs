@@ -28,6 +28,7 @@ mod serve;
 pub mod server;
 pub mod state;
 pub mod tls;
+pub mod trash;
 
 pub use auth::Caller;
 pub use clock::{Clock, ManualClock, SharedClock, SystemClock};

@@ -27,9 +27,10 @@ use std::time::Duration;
 use futures::StreamExt;
 use lode_core::{DepotPath, ObjectId};
 use lode_proto::admin::{
-    AccessCheck, AclList, AclRule, CreateGroupRequest, CreatePrincipalRequest, GroupList,
-    GroupView, MaintenanceReport, ObliterateReport, ObliterateRequest, ObliterationList,
-    PatchPrincipalRequest, PrincipalList,
+    AccessCheck, AclList, AclRule, CreateGroupRequest, CreatePrincipalRequest, DeleteDepotRequest,
+    DeleteDepotResponse, DeletePrincipalResponse, GroupList, GroupView, MaintenanceReport,
+    ObliterateReport, ObliterateRequest, ObliterationList, PatchPrincipalRequest, PrincipalList,
+    TrashList,
 };
 use lode_proto::auth::{
     CreateTokenRequest, CreateTokenResponse, Info, LoginRequest, LoginResponse, PrincipalView,
@@ -879,6 +880,16 @@ impl Client {
         .await
     }
 
+    /// `DELETE /admin/principals/{name}`: deletes a user (with their agents) or an agent.
+    pub async fn delete_principal(&self, name: &str) -> Result<DeletePrincipalResponse> {
+        self.json(
+            Retry::No,
+            Method::DELETE,
+            self.url(&["admin", "principals", name])?,
+        )
+        .await
+    }
+
     /// `POST /admin/principals/{name}/tokens`: a token for another principal, such as an
     /// agent.
     pub async fn create_token_for(
@@ -1111,6 +1122,34 @@ impl Client {
         let url = self.url(&["admin", "depots", depot, "obliterate"])?;
         // A dry run changes nothing; a real one repeated finds nothing left to remove.
         self.json_body(Retry::Yes, Method::POST, url, req).await
+    }
+
+    /// `DELETE /admin/depots/{d}`: moves a depot to the trash, or erases it with `force`.
+    /// `confirm` must repeat the depot's name.
+    pub async fn delete_depot(
+        &self,
+        depot: &str,
+        confirm: &str,
+        force: bool,
+    ) -> Result<DeleteDepotResponse> {
+        let req = DeleteDepotRequest {
+            confirm: confirm.to_owned(),
+            force,
+        };
+        let url = self.url(&["admin", "depots", depot])?;
+        self.json_body(Retry::No, Method::DELETE, url, &req).await
+    }
+
+    /// `POST /admin/depots/{d}/restore`: takes a depot out of the trash.
+    pub async fn restore_depot(&self, depot: &str) -> Result<DepotView> {
+        let url = self.url(&["admin", "depots", depot, "restore"])?;
+        self.json(Retry::No, Method::POST, url).await
+    }
+
+    /// `GET /admin/trash`: depots in the trash.
+    pub async fn trash(&self) -> Result<TrashList> {
+        self.json(Retry::Yes, Method::GET, self.url(&["admin", "trash"])?)
+            .await
     }
 
     /// `GET /admin/depots/{d}/obliterated`: what was obliterated from a depot.

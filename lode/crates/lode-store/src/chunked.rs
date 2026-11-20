@@ -219,6 +219,10 @@ impl BlobStore for ChunkedStore {
     fn list(&self, depot: DepotId) -> BoxStream<'_, Result<(ObjectId, SystemTime)>> {
         self.inner.list(depot)
     }
+
+    async fn delete_depot(&self, depot: DepotId) -> Result<()> {
+        self.inner.delete_depot(depot).await
+    }
 }
 
 /// Streams a chunked file's chunks in order, starting at an offset.
