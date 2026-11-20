@@ -185,6 +185,8 @@ pub async fn checkout(ctx: &Ctx, args: CheckoutArgs) -> OpResult<Value> {
         "files": count,
         "fetched": fetched.files,
         "downloaded": fetched.downloaded,
+        "bytes_downloaded": fetched.bytes_downloaded,
+        "bytes_reused": fetched.bytes_reused,
         "obliterated": fetched.obliterated,
         "resumed": resuming,
     }))

@@ -18,6 +18,56 @@ pub struct Info {
     /// Single sign-on, when the server offers it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sso: Option<SsoInfo>,
+    /// How large files are cut into chunks, when the server stores chunked files
+    /// (ARCHITECTURE §3.5). Absent on servers before 0.3: send files whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunking: Option<ChunkingInfo>,
+    /// Set when the answer comes from a caching proxy (T154) in front of the server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyInfo>,
+}
+
+/// What a caching proxy adds to the upstream server's `GET /info`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxyInfo {
+    /// The server the proxy fetches from.
+    pub upstream: String,
+    /// The proxy's version.
+    pub version: String,
+}
+
+/// The chunking parameters `GET /info` reports. A client that cuts files the same way
+/// shares chunks with other clients' uploads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChunkingInfo {
+    /// Name of the scheme, `fastcdc-2020-lode-v1`.
+    pub algorithm: String,
+    /// Smallest chunk but the last, in bytes.
+    pub min: u32,
+    /// Average chunk size.
+    pub avg: u32,
+    /// Largest chunk.
+    pub max: u32,
+    /// Files smaller than this are sent whole.
+    pub threshold: u64,
+}
+
+impl ChunkingInfo {
+    /// The parameters of this build.
+    pub fn current() -> Self {
+        Self {
+            algorithm: lode_core::CHUNK_ALGORITHM.to_owned(),
+            min: lode_core::CHUNK_MIN,
+            avg: lode_core::CHUNK_AVG,
+            max: lode_core::CHUNK_MAX,
+            threshold: lode_core::CHUNK_THRESHOLD,
+        }
+    }
+
+    /// Whether this build cuts files the way the server describes.
+    pub fn is_current(&self) -> bool {
+        *self == Self::current()
+    }
 }
 
 /// Single sign-on as `GET /info` describes it.

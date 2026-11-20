@@ -17,7 +17,6 @@ lode-core.workspace = true
 lode-meta.workspace = true
 lode-proto.workspace = true
 lode-server.workspace = true
-rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 time.workspace = true

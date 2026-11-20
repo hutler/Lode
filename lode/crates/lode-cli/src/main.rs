@@ -60,6 +60,9 @@ enum Command {
     Logout,
     /// Show who you are signed in as.
     Whoami,
+    /// Download file content through a caching proxy in your office.
+    #[command(subcommand)]
+    Proxy(cmd::proxy::ProxyCmd),
     /// Create a workspace from a depot.
     Checkout(cmd::checkout::CheckoutArgs),
     /// Turn the current folder into a new depot and its workspace, and commit its files.
@@ -161,6 +164,7 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Login(a)) => cmd::login::login(&ctx, a).await,
         Some(Command::Logout) => cmd::login::logout(&ctx).await,
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
+        Some(Command::Proxy(c)) => cmd::proxy::proxy(&ctx, c).await,
         Some(Command::Admin(a)) => cmd::admin::admin(&ctx, a).await,
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
         Some(Command::Init(a)) => cmd::init::init(&ctx, a).await,

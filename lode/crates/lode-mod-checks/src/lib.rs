@@ -12,6 +12,7 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use lode_core::{DepotId, ErrorCode};
+use lode_meta::{vals, Row, Sql};
 use lode_meta::{MetaError, Migration, Millis, PrincipalId, PrincipalKind, Reads, WriteTx};
 use lode_proto::checks::{
     CheckList, CheckState, CheckTarget, CheckTargetKind, CheckView, ChecksQuery,
@@ -23,7 +24,6 @@ use lode_server::auth::{ms_to_time, SCOPE_READ};
 use lode_server::commit::{CommitCtx, Origin};
 use lode_server::module::{Module, ModuleCtx, ScopeDef, ToolDef};
 use lode_server::{ApiError, ApiJson, ApiPath, ApiQuery, ApiResult, Caller};
-use rusqlite::params;
 use serde_json::json;
 
 /// Module name, as in `[modules]`.
@@ -52,6 +52,19 @@ const MIGRATIONS: &[Migration] = &[Migration {
               updated_at     INTEGER NOT NULL,
               PRIMARY KEY (depot_id, target_kind, target_id, target_version, name)
           ) WITHOUT ROWID;",
+    postgres: "CREATE TABLE mod_checks_check (
+              depot_id       BIGINT NOT NULL,
+              target_kind    TEXT COLLATE \"C\" NOT NULL,
+              target_id      BIGINT NOT NULL,
+              target_version BIGINT NOT NULL,
+              name           TEXT COLLATE \"C\" NOT NULL,
+              state          TEXT COLLATE \"C\" NOT NULL,
+              summary        TEXT COLLATE \"C\",
+              url            TEXT COLLATE \"C\",
+              reporter_id    BIGINT NOT NULL,
+              updated_at     BIGINT NOT NULL,
+              PRIMARY KEY (depot_id, target_kind, target_id, target_version, name)
+          );",
 }];
 
 /// The checks module.
@@ -82,7 +95,7 @@ pub(crate) struct CheckRow {
 const COLUMNS: &str =
     "target_kind, target_id, target_version, name, state, summary, url, reporter_id, updated_at";
 
-fn check_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CheckRow> {
+fn check_row(r: &Row) -> Result<CheckRow, MetaError> {
     Ok(CheckRow {
         kind: r.get(0)?,
         target_id: r.get(1)?,
@@ -98,22 +111,21 @@ fn check_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CheckRow> {
 
 /// The checks of one target, most recently reported first.
 pub(crate) fn target_checks(
-    db: &rusqlite::Connection,
+    db: &dyn Sql,
     depot: DepotId,
     kind: CheckTargetKind,
     id: u64,
     version: u64,
 ) -> Result<Vec<CheckRow>, MetaError> {
-    let mut st = db.prepare_cached(&format!(
-        "SELECT {COLUMNS} FROM mod_checks_check
-         WHERE depot_id = ?1 AND target_kind = ?2 AND target_id = ?3 AND target_version = ?4
-         ORDER BY updated_at DESC, name"
-    ))?;
-    let rows = st.query_map(
-        params![depot.0, kind.as_str(), to_i64(id), to_i64(version)],
+    db.query(
+        &format!(
+            "SELECT {COLUMNS} FROM mod_checks_check
+             WHERE depot_id = ?1 AND target_kind = ?2 AND target_id = ?3 AND target_version = ?4
+             ORDER BY updated_at DESC, name"
+        ),
+        vals![depot.0, kind.as_str(), to_i64(id), to_i64(version)],
         check_row,
-    )?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    )
 }
 
 fn to_i64(n: u64) -> i64 {
@@ -284,15 +296,15 @@ pub async fn report_check(
                                    url = excluded.url, reporter_id = excluded.reporter_id,
                                    updated_at = excluded.updated_at"
                 ),
-                params![
+                vals![
                     depot_id.0,
                     kind.as_str(),
                     to_i64(id),
                     to_i64(version),
-                    req.name,
+                    &req.name,
                     req.state.as_str(),
-                    req.summary,
-                    req.url,
+                    &req.summary,
+                    &req.url,
                     me,
                     now
                 ],
@@ -461,7 +473,7 @@ impl Module for Checks {
     fn purge_depot(&self, tx: &WriteTx<'_>, depot: DepotId) -> Result<(), MetaError> {
         tx.conn().execute(
             "DELETE FROM mod_checks_check WHERE depot_id = ?1",
-            [depot.0],
+            vals![depot.0],
         )?;
         Ok(())
     }

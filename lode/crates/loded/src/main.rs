@@ -94,14 +94,42 @@ enum Command {
         #[arg(long)]
         copy_only: bool,
     },
+    /// Copy the metadata from meta.db into an empty Postgres database, check it, then switch
+    /// loded.toml to it (the old file is kept as loded.toml.before-postgres). Stop the server
+    /// first.
+    MigrateDb {
+        /// Path to loded.toml.
+        #[arg(long)]
+        config: PathBuf,
+        /// Where to move the metadata.
+        #[arg(long, value_enum)]
+        to: DatabaseTarget,
+        /// A file whose first line is the postgres:// URL.
+        #[arg(long)]
+        url_file: PathBuf,
+    },
     /// Run the server.
     Serve {
         /// Path to loded.toml.
         #[arg(long)]
         config: PathBuf,
+        /// With the metadata in Postgres: if another server is active on the database, wait
+        /// and take over when it stops, instead of refusing to start.
+        #[arg(long)]
+        wait_for_lock: bool,
         /// Run under the Windows service manager (set by `loded service install`).
         #[arg(long, hide = true)]
         service: bool,
+    },
+    /// Run a caching proxy for a remote office: file content is fetched from the main server
+    /// once and served from a local cache (see proxy.toml in the operator guide).
+    Proxy {
+        /// Path to proxy.toml.
+        #[arg(long, required_unless_present = "example")]
+        config: Option<PathBuf>,
+        /// Print an example proxy.toml and exit.
+        #[arg(long, conflicts_with = "config")]
+        example: bool,
     },
     /// First run: ask a few questions, write a checked loded.toml, initialize the data
     /// directory and set the admin password. Every answer can be given as a flag.
@@ -109,6 +137,13 @@ enum Command {
     /// Register loded as a system service (Windows service, or systemd on Linux).
     #[command(subcommand)]
     Service(service::ServiceCommand),
+}
+
+/// A database `loded migrate-db` moves to.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum DatabaseTarget {
+    /// A Postgres database.
+    Postgres,
 }
 
 /// A storage `loded migrate-storage` moves to.
@@ -123,6 +158,7 @@ fn main() -> anyhow::Result<()> {
     if let Command::Serve {
         config,
         service: true,
+        ..
     } = &cli.command
     {
         #[cfg(windows)]
@@ -283,6 +319,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let cfg = ServerConfig::load(&config)?;
             let state = lode_server::open_state(cfg, Arc::new(SystemClock), Vec::new()).await?;
             let report = lode_server::maintenance::backup(&state, &dest).await?;
+            if report.database_external {
+                println!(
+                    "The metadata is in Postgres and is not in this backup: back it up with \
+                     pg_dump (see {} in the backup).",
+                    lode_server::maintenance::DATABASE_NOTE_FILE
+                );
+            }
             if report.content_in_bucket {
                 println!("Backed up the database to {}", dest.display());
                 println!(
@@ -331,9 +374,58 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Serve { config, .. } => {
+        Command::MigrateDb {
+            config,
+            to: DatabaseTarget::Postgres,
+            url_file,
+        } => {
+            let report = lode_server::maintenance::migrate_db_to_postgres(
+                &config,
+                &url_file,
+                available_modules(),
+            )
+            .await?;
+            for (table, rows) in &report.copy.tables {
+                println!("{table:24} {rows:>10} rows");
+            }
+            println!(
+                "Copied {} rows into Postgres and switched {} to it (the old file is kept as \
+                 {}.before-postgres). meta.db is left in place; remove it once the server runs \
+                 well on Postgres.",
+                report.copy.rows(),
+                report.switched.display(),
+                report
+                    .switched
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("loded.toml"),
+            );
+            Ok(())
+        }
+        Command::Serve {
+            config,
+            wait_for_lock,
+            ..
+        } => {
             let cfg = ServerConfig::load(&config)?;
-            serve(cfg, lode_server::shutdown_signal()).await
+            serve(cfg, wait_for_lock, lode_server::shutdown_signal()).await
+        }
+        Command::Proxy { config, example } => {
+            if example {
+                print!("{}", lode_proxy::EXAMPLE_CONFIG);
+                return Ok(());
+            }
+            let config = config.context("--config is required")?;
+            let cfg = lode_proxy::ProxyConfig::load(&config)?;
+            let proxy = lode_proxy::BoundProxy::bind_default(&cfg).await?;
+            tracing::info!(
+                address = %proxy.local_addr(),
+                scheme = proxy.scheme(),
+                upstream = %cfg.upstream,
+                "caching proxy listening"
+            );
+            proxy.run(lode_server::shutdown_signal()).await?;
+            Ok(())
         }
         Command::Setup(args) => setup::run(args).await,
         Command::Service(cmd) => service::run(cmd),
@@ -344,10 +436,29 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 /// trash purge and scheduled backups start and stop with it.
 pub(crate) async fn serve(
     cfg: ServerConfig,
+    wait_for_lock: bool,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     let modules = lode_server::module::select_enabled(&cfg.modules, available_modules());
     let state = lode_server::open_state(cfg.clone(), Arc::new(SystemClock), modules).await?;
+    let lock = Arc::new(active_server_lock(&state, wait_for_lock).await?);
+    let lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shutdown = {
+        let lock = lock.clone();
+        let lost = lost.clone();
+        async move {
+            tokio::select! {
+                () = shutdown => {}
+                () = lock.lost() => {
+                    lost.store(true, std::sync::atomic::Ordering::SeqCst);
+                    tracing::error!(
+                        "lost the connection that marks this server as the active one; \
+                         stopping, because a standby may take over"
+                    );
+                }
+            }
+        }
+    };
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let dispatcher = lode_server::events::Dispatcher::spawn(state.clone(), async move {
         let _ = stop_rx.await;
@@ -388,8 +499,58 @@ pub(crate) async fn serve(
     for w in workers {
         let _ = w.await;
     }
+    drop(lock);
     tracing::info!("stopped");
+    if lost.load(std::sync::atomic::Ordering::SeqCst) {
+        anyhow::bail!("stopped: lost the database lock");
+    }
     Ok(())
+}
+
+/// With Postgres, makes this process the one active server on the database: refuses to
+/// start while another holds it, or with `wait` waits until it stops.
+async fn active_server_lock(
+    state: &lode_server::AppState,
+    wait: bool,
+) -> anyhow::Result<lode_meta::ServerLock> {
+    let holder = format!("loded {} pid {}", host_name(), std::process::id());
+    let mut announced = false;
+    loop {
+        match state.meta().try_server_lock(&holder).await? {
+            lode_meta::LockAttempt::Held(lock) => {
+                if announced {
+                    tracing::info!("the other server stopped; this one is now active");
+                }
+                return Ok(lock);
+            }
+            lode_meta::LockAttempt::InUse(other) if !wait => anyhow::bail!(
+                "the database is in use by another server ({other}). Stop it first, or start \
+                 this one with --wait-for-lock to take over when it stops."
+            ),
+            lode_meta::LockAttempt::InUse(other) => {
+                if !announced {
+                    tracing::info!(active = %other, "another server is active; waiting to take over");
+                    announced = true;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+/// This machine's name, for the database lock's holder text.
+fn host_name() -> String {
+    let from_env = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok();
+    from_env
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|s| s.trim().to_owned())
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown-host".to_owned())
 }
 
 /// Every module compiled into this build. `[modules]` decides which are enabled. Keep in step

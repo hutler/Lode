@@ -282,18 +282,23 @@ pub async fn obliterate(
         return Err(refused(in_use));
     }
     let now = state.clock().now_ms();
-    let rows: Vec<ObliteratedRow> = sel
+    // A chunked file's chunks would let the content be put together again: the ones no other
+    // file needs are obliterated with it.
+    let chunks = own_chunks(state, depot, &sel).await?;
+    let row = |id: &ObjectId, size: u64, path: &str| ObliteratedRow {
+        depot_id: depot,
+        id: *id,
+        size,
+        path: path.to_owned(),
+        reason: reason.clone(),
+        by,
+        at: now,
+    };
+    let mut rows: Vec<ObliteratedRow> = sel
         .iter()
-        .map(|(id, (size, path))| ObliteratedRow {
-            depot_id: depot,
-            id: *id,
-            size: *size,
-            path: path.clone(),
-            reason: reason.clone(),
-            by,
-            at: now,
-        })
+        .map(|(id, (size, path))| row(id, *size, path))
         .collect();
+    rows.extend(chunks.iter().map(|(id, (size, path))| row(id, *size, path)));
     state
         .meta()
         .write(move |tx| {
@@ -309,7 +314,7 @@ pub async fn obliterate(
     state
         .failpoints()
         .check(crate::failpoint::OBLITERATE_AFTER_RECORD)?;
-    for id in sel.keys() {
+    for id in sel.keys().chain(chunks.keys()) {
         match state.blobs().delete(depot, id).await {
             Ok(()) | Err(StoreError::NotFound(_)) => {}
             Err(e) => return Err(e.into()),
@@ -328,6 +333,38 @@ pub async fn obliterate(
         bytes,
         in_use: Vec::new(),
     })
+}
+
+/// The chunks of the selected chunked files that nothing else reachable uses, with their
+/// size and the path of the file they belong to.
+async fn own_chunks(
+    state: &AppState,
+    depot: DepotId,
+    sel: &BTreeMap<ObjectId, (u64, String)>,
+) -> ApiResult<BTreeMap<ObjectId, (u64, String)>> {
+    let mut candidates = BTreeMap::new();
+    for (id, (size, path)) in sel {
+        if *size < lode_core::CHUNK_THRESHOLD {
+            continue;
+        }
+        match state.chunked().chunk_list(depot, id).await {
+            Ok(Some(list)) => {
+                for c in list.chunks {
+                    if !sel.contains_key(&c.id) {
+                        candidates.insert(c.id, (u64::from(c.size), path.clone()));
+                    }
+                }
+            }
+            Ok(None) | Err(StoreError::NotFound(_)) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(candidates);
+    }
+    let live = super::gc::live_without(state, depot, sel.keys().copied().collect()).await?;
+    candidates.retain(|id, _| !live.contains(id));
+    Ok(candidates)
 }
 
 fn refused(in_use: Vec<ContentInUse>) -> ApiError {

@@ -8,15 +8,16 @@ of SimpleDevOps. Apache-2.0 ([LICENSE](LICENSE)).
 | Folder | What it is | Language | Start reading at |
 | --- | --- | --- | --- |
 | [lode/](lode/) | **Lode**: the server `loded`, the command-line client `lode`, and **Lode Desk**, the desktop client | Rust | [lode/README.md](lode/README.md), [lode/docs/SPEC.md](lode/docs/SPEC.md) |
-| [unreal/](unreal/) | **Lode for Unreal**, an Unreal Editor plugin that makes Lode a revision control provider (planned, no code yet) | C++ | [unreal/docs/SPEC.md](unreal/docs/SPEC.md) |
+| [unreal/](unreal/) | **Lode for Unreal**, an Unreal Editor plugin that makes Lode a revision control provider | C++ | [unreal/docs/SPEC.md](unreal/docs/SPEC.md) |
 
 Rules for agents working here are in [AGENTS.md](AGENTS.md).
 
 ## Status
 
 Lode v1 (milestones M0 to M6), its packaging and 0.2 features (M7 to M12), Lode Desk with a
-native Slint UI (M13) and the server's admin web UI (M14) are implemented. The first public
-release is 0.2.0. Lode for Unreal is planned. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
+native Slint UI (M13), the server's admin web UI (M14), and chunked large files, Postgres and
+a caching proxy (M15) are implemented. The current release is 0.3.0. Lode for Unreal
+(T01 to T11) is implemented and builds on Unreal Engine 5.8. Status boards: [lode/docs/tasks/README.md](lode/docs/tasks/README.md),
 [unreal/docs/TASKS.md](unreal/docs/TASKS.md).
 
 ## How the parts fit

@@ -6,6 +6,8 @@
 //!   object never changes once written, so each copy uploads only objects the bucket does not
 //!   have yet.
 //! - `<backup-name>/meta.db` and `<backup-name>/loded.toml`: the database and configuration.
+//!   A Postgres-backed server has `DATABASE-BACKUP.txt` instead of `meta.db` (back the
+//!   database up with `pg_dump`).
 //! - `<backup-name>/objects.zst`: the objects this copy needs, one `<depot-id>/<hex>` per line,
 //!   compressed with zstd.
 //! - `<backup-name>/done.json`: written last; a copy without it is incomplete and ignored.
@@ -21,6 +23,7 @@ use std::path::{Path, PathBuf};
 use lode_store::S3BlobStore;
 use serde::{Deserialize, Serialize};
 
+use super::backup::DATABASE_NOTE_FILE;
 use super::schedule::BACKUP_PREFIX;
 use crate::config::{BackupCopy, CONFIG_FILE_NAME};
 use crate::server::{DEPOTS_DIR, META_DB_FILE};
@@ -263,7 +266,8 @@ pub async fn copy_backup(
         }
     }
 
-    for file in [META_DB_FILE, CONFIG_FILE_NAME] {
+    // A Postgres-backed server's backup holds a note instead of the database.
+    for file in [META_DB_FILE, DATABASE_NOTE_FILE, CONFIG_FILE_NAME] {
         let path = backup.join(file);
         if path.is_file() {
             bucket
@@ -390,19 +394,25 @@ pub async fn restore(
         name: name.clone(),
         ..RestoreReport::default()
     };
-    report.bytes += bucket
-        .get_file(&format!("{name}/{META_DB_FILE}"), &dest.join(META_DB_FILE))
-        .await?;
-    match bucket
-        .get_file(
-            &format!("{name}/{CONFIG_FILE_NAME}"),
-            &dest.join(CONFIG_FILE_NAME),
-        )
-        .await
-    {
-        Ok(n) => report.bytes += n,
-        Err(lode_store::StoreError::Io(e)) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
+    // The database, or for a Postgres-backed server the note saying it is backed up there.
+    let mut database = false;
+    for file in [META_DB_FILE, DATABASE_NOTE_FILE, CONFIG_FILE_NAME] {
+        match bucket
+            .get_file(&format!("{name}/{file}"), &dest.join(file))
+            .await
+        {
+            Ok(n) => {
+                report.bytes += n;
+                database |= file != CONFIG_FILE_NAME;
+            }
+            Err(lode_store::StoreError::Io(e)) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if !database {
+        return Err(CopyError::NotFound(format!(
+            "copy {name} holds neither {META_DB_FILE} nor {DATABASE_NOTE_FILE}"
+        )));
     }
     let list_path = dest.join(LIST_FILE);
     bucket

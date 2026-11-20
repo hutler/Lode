@@ -1,18 +1,20 @@
 //! Depot maintenance (ARCHITECTURE §11): garbage collection, consistency checks, backup,
-//! moving content to S3.
+//! moving content to S3 and metadata to Postgres.
 
 mod backup;
 pub mod copy;
 mod fsck;
 mod gc;
 mod migrate;
+mod migrate_db;
 mod obliterate;
 mod schedule;
 
-pub use backup::{backup, BackupError, BackupReport};
+pub use backup::{backup, BackupError, BackupReport, DATABASE_NOTE_FILE};
 pub use fsck::{fsck, FsckOptions};
 pub use gc::{collect_garbage, GcOptions};
 pub use migrate::{migrate_to_s3, MigrateError, MigrateOptions, MigrateReport};
+pub use migrate_db::{migrate_db_to_postgres, MigrateDbError, MigrateDbReport};
 pub use obliterate::{gone, missing_object, obliterate, obliterations, MAX_REASON, MAX_TARGETS};
 pub use schedule::{
     backup_tick, copy_newest, newest_backup, run_backups, BackupSchedule, BackupTick, BACKUP_PREFIX,

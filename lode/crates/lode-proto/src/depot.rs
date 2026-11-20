@@ -105,6 +105,16 @@ pub struct MissingObjectsResponse {
     pub missing: Vec<ObjectId>,
 }
 
+/// `GET /depots/{d}/obliterated-ids?after=`: content obliterated from the depot, ids only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObliteratedIds {
+    /// Ids obliterated at or after `after` (every one without it).
+    pub ids: Vec<ObjectId>,
+    /// The server's time in milliseconds since the epoch; pass it, less a margin, as the
+    /// next `after`.
+    pub now_ms: i64,
+}
+
 /// Answer to a blob upload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PutBlobResponse {

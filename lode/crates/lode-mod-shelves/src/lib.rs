@@ -68,8 +68,8 @@ impl Shelves {
     }
 }
 
-fn sql_error(e: rusqlite::Error) -> MetaError {
-    MetaError::from(e)
+fn sql_error(e: MetaError) -> MetaError {
+    e
 }
 
 fn ms_to_time(ms: lode_meta::Millis) -> time::OffsetDateTime {
@@ -908,11 +908,11 @@ impl Module for Shelves {
         tx.conn().execute(
             "DELETE FROM mod_shelves_change WHERE shelf_id IN \
              (SELECT id FROM mod_shelves_shelf WHERE depot_id = ?1)",
-            [depot.0],
+            lode_meta::vals![depot.0],
         )?;
         tx.conn().execute(
             "DELETE FROM mod_shelves_shelf WHERE depot_id = ?1",
-            [depot.0],
+            lode_meta::vals![depot.0],
         )?;
         Ok(())
     }

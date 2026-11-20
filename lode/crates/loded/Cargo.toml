@@ -25,6 +25,7 @@ lode-mod-mcp.workspace = true
 lode-mod-checks.workspace = true
 lode-mod-webhooks.workspace = true
 lode-mod-shelves.workspace = true
+lode-proxy.workspace = true
 lode-server.workspace = true
 rpassword.workspace = true
 tokio.workspace = true

@@ -645,6 +645,8 @@ pub(crate) async fn sync(
         "files": files,
         "counts": counts,
         "downloaded": fetched.downloaded,
+        "bytes_downloaded": fetched.bytes_downloaded,
+        "bytes_reused": fetched.bytes_reused,
         "obliterated": fetched.obliterated,
     }))
 }

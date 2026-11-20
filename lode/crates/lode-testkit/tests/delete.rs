@@ -260,7 +260,7 @@ async fn a_forced_delete_erases_at_once() {
         .meta()
         .read(move |tx| {
             let db = tx.db();
-            let count = |sql: &str| -> i64 { db.query_row(sql, [id], |r| r.get(0)).unwrap() };
+            let count = |sql: &str| -> i64 { db.value(sql, lode_meta::vals![id]).unwrap() };
             Ok([
                 count("SELECT count(*) FROM revision WHERE depot_id = ?1"),
                 count("SELECT count(*) FROM branch WHERE depot_id = ?1"),
