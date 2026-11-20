@@ -54,7 +54,11 @@ fn parse_spec(s: &str) -> OpResult<Spec> {
 }
 
 /// When a 404 means the server runs without a module, says so.
-async fn module_missing(client: &Client, e: lode_client::Error, module: &str) -> OpError {
+pub(crate) async fn module_missing(
+    client: &Client,
+    e: lode_client::Error,
+    module: &str,
+) -> OpError {
     if e.is_code(ErrorCode::NotFound) {
         if let Ok(info) = client.info().await {
             if !info.modules.iter().any(|m| m == module) {

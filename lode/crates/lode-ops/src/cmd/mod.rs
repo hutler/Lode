@@ -10,6 +10,7 @@ pub mod checks;
 pub mod commit;
 pub mod conflict;
 pub mod diff;
+pub mod events;
 pub mod files;
 pub mod history;
 pub mod import;
