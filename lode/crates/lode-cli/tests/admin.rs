@@ -1,6 +1,7 @@
 //! T053 acceptance: a server set up entirely with `lode admin`, then checked by behaviour.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use lode_proto::admin::{AccessLevel, AclEffect};
 use lode_testkit::{TestServer, TestWorkspace};
 use serde_json::Value;
 
@@ -144,6 +145,19 @@ async fn scripted_setup_then_behaviour() {
             .len(),
         4
     );
+    let filtered = admin.json(&[
+        "admin",
+        "acl",
+        "list",
+        "--depot",
+        "game",
+        "--subject",
+        "bob",
+    ]);
+    assert_eq!(filtered["rules"].as_array().unwrap().len(), 2, "{filtered}");
+    let (code, err) = admin.json_status(&["admin", "acl", "list", "--depot", "nope"]);
+    assert_ne!(code, 0);
+    assert_eq!(err["error"]["code"], "not_found");
     // Bad patterns never reach the server.
     let (code, err) = admin.json_status(&[
         "admin", "acl", "add", "allow", "read", "all", "--path", "a/[", "--depot", "game",
@@ -366,4 +380,134 @@ async fn users_and_depots_are_deleted() {
     );
     let (code, err) = admin.json_status(&["admin", "depot", "restore", "art"]);
     assert_eq!(code, 1, "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn depot_list_shows_revisions_size_and_last_commit_to_admins() {
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    server.create_depot("empty").await;
+    server
+        .commit_files("game", "main", &[("a.txt", b"one\n")])
+        .await;
+    let rev = server
+        .commit_files("game", "main", &[("b.txt", b"two\n")])
+        .await;
+    let admin = as_user(&server, server.admin_token());
+    let list = admin.json(&["admin", "depot", "list"]);
+    let depots = list["depots"].as_array().unwrap();
+    let game = depots.iter().find(|d| d["name"] == "game").unwrap();
+    assert_eq!(game["revisions"], rev, "{list}");
+    assert!(game["last_commit_at"].is_string(), "{list}");
+    assert!(game["size_bytes"].as_u64().unwrap() > 0, "{list}");
+    // A new depot starts with its first (empty) revision.
+    let empty = depots.iter().find(|d| d["name"] == "empty").unwrap();
+    assert_eq!(empty["revisions"], 1, "{list}");
+
+    let out = admin
+        .cmd()
+        .args(["admin", "depot", "list"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.starts_with("DEPOT"), "{text}");
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("game") && l.contains(&rev.to_string())),
+        "{text}"
+    );
+
+    // Someone who only reads sees the depot but not the figures.
+    let ana = server.create_user("ana", &["read"]).await;
+    server
+        .acl(
+            "game",
+            "ana",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Read,
+        )
+        .await;
+    let list = as_user(&server, &ana).json(&["admin", "depot", "list"]);
+    assert_eq!(list["depots"][0]["name"], "game", "{list}");
+    assert!(list["depots"][0].get("revisions").is_none(), "{list}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn agent_create_with_token_and_grant_is_ready_in_one_command() {
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    server
+        .commit_files("game", "main", &[("a.txt", b"one\n")])
+        .await;
+    server.create_user("ana", &["read"]).await;
+    let admin = as_user(&server, server.admin_token());
+
+    let (code, err) = admin.json_status(&[
+        "admin",
+        "agent",
+        "create",
+        "bot",
+        "--owner",
+        "ana",
+        "--grant",
+        "game:write",
+    ]);
+    assert_eq!(
+        code, 2,
+        "a bad grant is refused before anything is made: {err}"
+    );
+    let v = admin.json(&[
+        "admin",
+        "agent",
+        "create",
+        "bot",
+        "--owner",
+        "ana",
+        "--grant",
+        "game=write",
+        "--with-token",
+    ]);
+    assert_eq!(v["name"], "bot");
+    assert_eq!(v["rules"][0]["depot"], "game");
+    let token = v["token"]["token"].as_str().unwrap().to_owned();
+    let mut scopes: Vec<String> = v["token"]["info"]["scopes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_owned())
+        .collect();
+    scopes.sort();
+    assert_eq!(scopes, ["lock", "read", "shelve"]);
+
+    // It can shelve but not commit.
+    let ws = as_user(&server, &token);
+    ws.json(&["checkout", &format!("{}/game", server.url()), "."]);
+    ws.write("a.txt", "two\n");
+    let shelf = ws.json(&["shelve", "-m", "proposal", "--keep"]);
+    assert!(shelf["shelf"].as_u64().is_some(), "{shelf}");
+    let (code, err) = ws.json_status(&["commit", "-m", "direct"]);
+    assert_ne!(code, 0);
+    assert_eq!(err["error"]["code"], "permission_denied", "{err}");
+
+    // A failure after the agent exists says what was done.
+    let (code, err) = admin.json_status(&[
+        "admin",
+        "agent",
+        "create",
+        "bot2",
+        "--owner",
+        "ana",
+        "--grant",
+        "nope=read",
+    ]);
+    assert_ne!(code, 0);
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("agent bot2 was created"),
+        "{err}"
+    );
 }

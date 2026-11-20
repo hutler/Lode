@@ -17,6 +17,7 @@ clap.workspace = true
 directories.workspace = true
 diffy.workspace = true
 futures.workspace = true
+lode-build.workspace = true
 lode-client.workspace = true
 lode-core.workspace = true
 lode-import.workspace = true

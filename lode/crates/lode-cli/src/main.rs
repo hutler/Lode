@@ -60,6 +60,11 @@ enum Command {
     Logout,
     /// Show who you are signed in as.
     Whoami,
+    /// Check the way to a server: DNS, TLS and its certificate, /info, versions and your
+    /// sign-in. Exits with 0 when all is well, 2 on warnings only, 1 on a failure.
+    Doctor(cmd::doctor::DoctorArgs),
+    /// Change your own password.
+    Passwd(cmd::login::PasswdArgs),
     /// Download file content through a caching proxy in your office.
     #[command(subcommand)]
     Proxy(cmd::proxy::ProxyCmd),
@@ -131,12 +136,19 @@ enum Command {
     Blame(cmd::history::BlameArgs),
     /// List a directory as of a revision.
     Ls(cmd::history::LsArgs),
+    /// Print the lode:// link of a file, a revision or a shelf.
+    Link(cmd::link::LinkArgs),
     /// List the checks reported on a revision or a shelf version.
     Checks(cmd::checks::ChecksArgs),
     /// List what happened in a depot since a cursor, optionally waiting for it.
     Events(cmd::events::EventsArgs),
     /// Serve this workspace to a coding agent over MCP (stdio).
     Mcp(cmd::mcp::McpArgs),
+    /// Print a shell completion script: bash, zsh, fish, powershell or elvish.
+    Completions {
+        /// The shell.
+        shell: clap_complete::Shell,
+    },
     /// Administer the server: depots, users, agents, groups, tokens, access rules.
     Admin(cmd::admin::AdminArgs),
     /// Any other command runs `lode-<command>` from PATH.
@@ -147,6 +159,12 @@ enum Command {
 async fn run(cli: Cli) -> OpResult<Value> {
     // Already turned into path arguments by `paths_from::expand`.
     let _ = cli.paths_from;
+    if let Some(Command::Completions { shell }) = &cli.command {
+        // The script alone on stdout, also with --json (it is meant for a file or `source`).
+        use clap::CommandFactory;
+        clap_complete::generate(*shell, &mut Cli::command(), "lode", &mut std::io::stdout());
+        std::process::exit(0);
+    }
     let ctx = Ctx::new(
         Globals {
             json: cli.json,
@@ -170,6 +188,23 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Login(a)) => cmd::login::login(&ctx, a).await,
         Some(Command::Logout) => cmd::login::logout(&ctx).await,
         Some(Command::Whoami) => cmd::login::whoami(&ctx).await,
+        Some(Command::Doctor(a)) => {
+            let v = cmd::doctor::doctor(&ctx, a).await?;
+            let code = cmd::doctor::exit_code(&v);
+            if cli.json {
+                let mut doc = json!({ "ok": code != 1 });
+                if let (Some(d), Value::Object(m)) = (doc.as_object_mut(), v) {
+                    d.extend(m);
+                }
+                println!("{doc}");
+            } else {
+                for line in cmd::doctor::lines(&v) {
+                    ctx.out.line(line);
+                }
+            }
+            std::process::exit(i32::from(code));
+        }
+        Some(Command::Passwd(a)) => cmd::login::passwd(&ctx, a).await,
         Some(Command::Proxy(c)) => cmd::proxy::proxy(&ctx, c).await,
         Some(Command::Admin(a)) => cmd::admin::admin(&ctx, a).await,
         Some(Command::Checkout(a)) => cmd::checkout::checkout(&ctx, a).await,
@@ -206,6 +241,8 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Blame(a)) => cmd::history::blame(&ctx, a).await,
         Some(Command::Ls(a)) => cmd::history::ls(&ctx, a).await,
         Some(Command::Checks(a)) => cmd::checks::checks(&ctx, a).await,
+        Some(Command::Link(a)) => cmd::link::link(&ctx, a).await,
+        Some(Command::Completions { .. }) => Ok(Value::Null),
         Some(Command::Events(a)) => cmd::events::events(&ctx, a).await,
         Some(Command::Mcp(a)) => cmd::mcp::serve(&ctx, a).await,
         Some(Command::External(args)) => {

@@ -6,7 +6,7 @@ use axum::response::Response;
 
 use super::html::Html;
 use super::session::{set_cookie, NOTE_COOKIE};
-use super::{html_response, Admin, Ctx};
+use super::{html_response, Admin, Ctx, Viewer};
 use crate::config::TlsConfig;
 use crate::html;
 
@@ -21,6 +21,8 @@ pub(crate) enum Nav {
     Access,
     Webhooks,
     Settings,
+    /// The depot browser's account page.
+    Account,
 }
 
 const SECTIONS: [(Nav, &str, &str); 6] = [
@@ -76,26 +78,57 @@ impl<'a> Page<'a> {
     /// The whole page around `body`, for `admin` (or nobody, before signing in).
     pub(crate) fn render(&self, ctx: &Ctx, admin: Option<&Admin>, body: Html) -> Response {
         let webhooks = ctx.state().module_names().iter().any(|m| m == "webhooks");
-        let nav: Html = match admin {
+        let links: Vec<(bool, &str, &str)> = match admin {
             Some(_) => SECTIONS
                 .iter()
                 .filter(|(n, _, _)| *n != Nav::Webhooks || webhooks)
-                .map(|(n, href, label)| {
-                    if *n == self.nav {
-                        html!("<a href=\"{}\" aria-current=\"page\">{}</a>", *href, *label)
-                    } else {
-                        html!("<a href=\"{}\">{}</a>", *href, *label)
-                    }
-                })
+                .map(|(n, href, label)| (*n == self.nav, *href, *label))
+                .chain(std::iter::once((false, super::signin::WEB_HOME, "Browse")))
                 .collect(),
-            None => Html::new(),
+            None => Vec::new(),
         };
+        self.frame(ctx, "Lode admin", "/admin/", &links, admin, body)
+    }
+
+    /// A page of the depot browser (`/web/`, T173) for `viewer`: its own navigation, with a
+    /// link to the admin pages for server administrators.
+    pub(crate) fn render_web(&self, ctx: &Ctx, viewer: &Viewer, body: Html) -> Response {
+        let home = super::signin::WEB_HOME;
+        let mut links = vec![
+            (self.nav == Nav::Depots, home, "Depots"),
+            (self.nav == Nav::Account, super::web::ACCOUNT, "Account"),
+        ];
+        if viewer.is_admin(ctx) {
+            links.push((false, "/admin/", "Admin"));
+        }
+        self.frame(ctx, "Lode", home, &links, Some(&viewer.0), body)
+    }
+
+    fn frame(
+        &self,
+        ctx: &Ctx,
+        brand: &'static str,
+        home: &str,
+        links: &[(bool, &str, &str)],
+        session: Option<&Admin>,
+        body: Html,
+    ) -> Response {
+        let nav: Html = links
+            .iter()
+            .map(|(current, href, label)| {
+                if *current {
+                    html!("<a href=\"{}\" aria-current=\"page\">{}</a>", *href, *label)
+                } else {
+                    html!("<a href=\"{}\">{}</a>", *href, *label)
+                }
+            })
+            .collect();
         let nav = if nav.is_empty() {
             nav
         } else {
             html!("<nav aria-label=\"Sections\">{}</nav>", nav)
         };
-        let who = match admin {
+        let who = match session {
             Some(a) => html!(
                 "<div class=\"who\"><span>{}</span><form method=\"post\" action=\"{}\">{}\
                  <button type=\"submit\" class=\"link\">Sign out</button></form></div>",
@@ -105,7 +138,7 @@ impl<'a> Page<'a> {
             ),
             None => Html::new(),
         };
-        let note = match admin.and_then(|a| a.note.as_deref()) {
+        let note = match session.and_then(|a| a.note.as_deref()) {
             Some(n) => html!("<p class=\"note\" role=\"status\">{}</p>", n),
             None => Html::new(),
         };
@@ -117,16 +150,19 @@ impl<'a> Page<'a> {
             "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"/>\
              <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\
              <meta name=\"color-scheme\" content=\"light dark\"/>\
-             <title>{} · Lode admin</title>\
+             <title>{} · {}</title>\
              <link rel=\"stylesheet\" href=\"{}\"/>\
              <script src=\"{}\" defer=\"defer\"></script></head>\
-             <body{}><header class=\"top\"><div class=\"brand\"><a href=\"/admin/\">Lode admin</a>\
+             <body{}><header class=\"top\"><div class=\"brand\"><a href=\"{}\">{}</a>\
              <span class=\"server\">{} · {}</span></div>{}{}</header>\
              <main id=\"main\">{}{}</main></body></html>\n",
             self.title,
+            brand,
             super::assets::CSS_PATH,
             super::assets::JS_PATH,
             refresh,
+            home,
+            brand,
             server_name(ctx),
             lode_build::VERSION,
             nav,
@@ -135,7 +171,7 @@ impl<'a> Page<'a> {
             body
         );
         let mut r = html_response(StatusCode::OK, page);
-        if admin.is_some_and(|a| a.note.is_some()) {
+        if session.is_some_and(|a| a.note.is_some()) {
             r.headers_mut().append(
                 header::SET_COOKIE,
                 set_cookie(NOTE_COOKIE, "", 0, ctx.secure(), true),

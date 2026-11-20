@@ -274,7 +274,9 @@ depot      (id INTEGER PK, name TEXT UNIQUE, next_rev INTEGER NOT NULL, created_
 principal  (id INTEGER PK, kind TEXT CHECK(kind IN ('user','agent')), name TEXT UNIQUE,
             display_name, owner_id REFERENCES principal, password_hash, disabled INT, created_at,
             sso_id TEXT NULL,   -- UNIQUE INDEX principal_sso_id; lower case (§7, schema 4)
-            deleted_at NULL)    -- deleted: row kept for history, name stays taken (schema 6)
+            deleted_at NULL,    -- deleted: row kept for history, name stays taken (schema 6)
+            password_change_by NULL) -- set: a first password, good only for choosing a new
+                                     -- one, and only until this time (schema 9)
 grp        (id INTEGER PK, name TEXT UNIQUE)
 grp_member (grp_id, principal_id, PRIMARY KEY (grp_id, principal_id))
 token      (id INTEGER PK, principal_id, name, hash BLOB UNIQUE, scopes TEXT,
@@ -437,9 +439,10 @@ percent-encoded (`release%2F1.0`).
 | `GET /info` | Server version, API version, enabled modules |
 | `GET /info` with single sign-on | Adds `sso: {label, password_login}` when `[oidc]` is configured |
 | `POST /auth/login` · `GET /auth/whoami` | Password login → token; identity, scopes |
+| `POST /auth/password` | Change one's own password given the current one (no token); the only use of a must-change first password |
 | `GET /auth/sso/start?redirect_uri=&state=&code_challenge=[&token_name=]` · `GET /auth/sso/callback` · `POST /auth/sso/token {code, code_verifier}` | Single sign-on (§7). Start and callback are browser pages; the token call answers like a password login |
 | `GET/POST/DELETE /tokens[/{id}]` | Own tokens |
-| `GET/POST /depots` | List; create (admin) |
+| `GET/POST /depots` | List; create (admin). For server administrators each depot also carries `revisions` (newest revision number), `last_commit_at` and `size_bytes` (stored content, measured at most every ten minutes; absent with S3) (T179) |
 | `DELETE /admin/depots/{d}` `{confirm, force?}` · `POST /admin/depots/{d}/restore` · `GET /admin/trash` | Delete a depot: `confirm` must repeat its name. Without `force` it goes to the trash, answering `{name, purged: false, purge_after}`; with `force` it is erased at once (also from the trash), `{name, purged: true}`. A depot already in the trash is `conflict` without `force`. Restore answers the depot; the trash lists `{depots: [{name, created_at, deleted_at, purge_after}]}`. Server admin only |
 | `GET/POST /depots/{d}/branches` · `GET/PATCH …/{b}` | List, create, show, archive |
 | `GET /depots/{d}/branches/{b}/merge-info?source=<branch>` | Merging `source` into `b`: `{target, source, branch_point, merged: [{rev, from_rev, to_rev}], base, source_head, pending}`. `branch_point` is the newest revision both histories share; `merged` the ranges from `source` recorded in `b`'s history (§4.3); `base` the merge base of SPEC §5.4; `pending` how many source revisions come after it. Needs read on both branches |
@@ -454,6 +457,7 @@ percent-encoded (`release%2F1.0`).
 | `GET /depots/{d}/tree?rev=&path=` | List one directory |
 | `GET /depots/{d}/files?rev=&path=` | File content at a revision, with headers `X-Lode-Id`, `X-Lode-Kind` (`file` or `symlink`) and `X-Lode-Executable` (`true` or `false`). A missing, unreadable or directory path is `not_found` |
 | `GET /depots/{d}/blame?rev=&path=` | Per-line last-change revision of a text file: `{path, rev, id, lines: [{rev, text}], revisions: [{rev, branch, author, created_at, summary}], truncated?}`. Walks `rev_change` for the path along the branch chain and through `copy_from`, diffing successive versions line by line (Myers, 2 s per pair before settling for a less minimal diff). At most 1000 versions and 1 MiB per version; history the caller cannot read ends the walk. Either sets `truncated`, and the oldest version looked at takes the remaining lines. Binary or symlink is `invalid_request`, over 1 MiB `too_large`. Results are cached in memory (64 entries) by depot, path and the revision of the newest version, which fixes the history walked; walks cut short by access are not cached |
+| `GET /admin/acl?depot=&subject=` | The rules in evaluation order; `depot` keeps those that can apply there (its own and the server-wide ones; unknown depot `not_found`), `subject` (`user:NAME`, `group:NAME`, `all`) that subject's (T172). Server admin only |
 | `GET /admin/acl/check?principal=&depot=&branch=&path=` | The level the rules give a principal there, `{principal, depot, branch, path, level: read|write|admin|null, depot_admin?, matched?, decided_by?}`, evaluated as for a token with every scope; `matched` are the ids of the rules that apply and `decided_by` the one that set the level (T142). Server admin only |
 | `…/admin/principals[/{name}]` (`GET`/`POST` with optional `sso`; `PATCH` `{disabled?, password?, sso?}`, an empty `sso` removes the link; `DELETE` deletes a user with the agents they own, or an agent, answering `{name, agents}`, refused for `admin` and for the caller), `…/admin/principals/{name}/tokens[/{id}]` (`GET`/`POST`/`DELETE`, tokens of another principal; an agent's owner may use these for the agent), `/groups` (`GET`/`POST`), `/groups/{g}/members/{name}` (`PUT`/`DELETE`), `/acl`, `/depots/{d}/gc`, `/depots/{d}/fsck` | Administration. Needs scope `admin` and server-admin standing |
 | `/depots/{d}/locks`, `/depots/{d}/shelves…`, `/mcp` | Modules, section 9 |
@@ -505,10 +509,31 @@ them out, so `/admin/…` falls through to the API's 404.
 - **Sessions.** Signing in (password through the API's own check and rate limit, or single
   sign-on with a `Back::Admin` flow whose result is a one-time code redeemed only by
   `/admin/sign-in/sso-done`) creates a token named `web admin` with every registered scope
-  and an 8-hour expiry. The cookie `lode_admin` holds that token: `HttpOnly`,
-  `SameSite=Strict`, `Path=/admin`, `Secure` when `[tls]` is set. Each request resolves it
-  like a bearer token and requires server-admin standing, so disabling the user, revoking
-  the token or removing the rule ends the session. Sign-out deletes the token.
+  and an 8-hour expiry (named `web` for a user who is not a server administrator, T173).
+  The cookie `lode_admin` holds that token: `HttpOnly`, `SameSite=Strict`, `Path=/` (since
+  T173; the API reads only `Authorization`, never cookies), `Secure` when `[tls]` is set.
+  Each request resolves it like a bearer token; admin pages (`Admin` extractor) also require
+  server-admin standing, so disabling the user, revoking the token or removing the rule ends
+  the session. Sign-out deletes the token. A browser that still holds a cookie from before
+  T173 (`Path=/admin`) sends both; each is tried, and the old one is cleared at sign-in.
+- **Depot browser (T173).** `admin/web.rs` serves `/web/` to any session (`Viewer`
+  extractor): depots, a directory at a branch head or revision (`GET …/tree`), a file
+  (`GET …/files` streamed through `Api::raw`, text up to 2 MiB, images inline from
+  `/web/depots/{d}/raw`, other files as an attachment), a revision with unified diffs
+  (`diffy`, each side read through `…/files` at the parent revision or copy source, at most
+  50 files and 1 MiB per side) and the account (`GET/DELETE /tokens`, password change through
+  the same function as `POST /auth/password`). Everything is read with the session's token,
+  so access rules and path visibility apply as for any client. `lode://` links are built
+  with `lode_proto::links` from the request's `Host` (https with `[tls]` or
+  `X-Forwarded-Proto: https`).
+- **Shelf review (T174).** `admin/web_shelves.rs` adds `/web/depots/{d}/shelves[/{id}]`
+  when the shelves module is on: the list (`GET …/shelves?state=open`, checks per current
+  version from `GET …/checks`), a shelf (`GET …/shelves/{id}?diff=true` for the patches;
+  images from the base revision's file and from the shelf's blob, served only for a path the
+  shelf changes) and two forms posting to `POST …/shelves/{id}/submit` (with
+  `expected_version` from the page) and `DELETE …/shelves/{id}`. A refused submit is shown
+  on the shelf page with the API's message and, for `checks_required`, each entry of
+  `details.missing`.
 - **CSRF.** Every signed-in form carries `csrf`, the first 16 bytes of
   SHA-256(`"lode admin csrf\n"` + token) in hex, compared in constant time before the handler
   runs. The sign-in form uses a double-submit value in a short-lived `lode_admin_signin`
@@ -517,6 +542,20 @@ them out, so `/admin/…` falls through to the API's 404.
   `lode_testkit::web::Browser` (cookies, no redirect following, `submit` sends a form as it
   stands) and parses pages as XML. `cargo run -p lode-testkit --example admin_demo` starts a
   server with sample data; `docs/admin-guide/shoot.mjs` takes the guide's screenshots.
+
+### 6.2 Metrics (T181)
+
+`[metrics] enabled = true` mounts `GET /metrics` (outside `/api/v1`, on the same port) and a
+middleware around every route that counts requests by a fixed route class (`api_read`,
+`api_write`, `commit`, `blob_upload`, `blob_download`, `admin_ui`, `web_ui`, `metrics`,
+`other`) and status code, accepted commits, and blob body bytes as they stream. These
+counters live in `AppState` and reset with the process. Gauges are read per scrape: depots
+and head revisions from the metadata, module samples from `Module::metrics(tx)` (locks
+held and open shelves per depot, webhook deliveries by state), store and SQLite sizes
+(through the size cache), certificate expiry and the newest backup. The text format is
+written by `lode_server::metrics::render`; `check_text_format` is the test's checker. Access:
+the peer address in `allow_from` (CIDR), else a token with the `metrics` scope, which is
+registered only while metrics are on. Labels carry depot names and states, never paths.
 
 ## 7. Security
 
@@ -851,7 +890,8 @@ Tells outside systems that something happened, so they need not poll. Built only
 
 ```sql
 mod_webhooks_hook     (id INTEGER PK, depot_id, url TEXT, secret BLOB, events TEXT /*json list*/,
-                       branch_glob TEXT NULL, active INT, created_by, created_at)
+                       branch_glob TEXT NULL, active INT, created_by, created_at,
+                       format TEXT DEFAULT 'lode' /*module schema 2, T175*/)
 mod_webhooks_delivery (id INTEGER PK, hook_id, outbox_id NULL /*NULL for ping*/, event TEXT,
                        body TEXT, state TEXT /*pending|ok|failed*/, attempts INT,
                        next_attempt_at NULL, first_attempt_at NULL, last_status INT NULL,
@@ -880,10 +920,18 @@ mod_webhooks_delivery (id INTEGER PK, hook_id, outbox_id NULL /*NULL for ping*/,
   oldest first; different hooks proceed in parallel.
 - URLs must be `https://` unless `[webhooks] allow_http = true` in `loded.toml`, and may not
   carry a user name or password.
+- Formats (T175). `POST` also takes `format`: `lode` (the default, the event envelope above;
+  left out of JSON when it is the default) or `slack`, `discord`, `telegram`. A chat format's
+  body is built when the delivery is queued (`chat::body`): one line of text from the event's
+  identifiers, `{"text"}`, `{"content"}` or `{"chat_id", "text",
+  "disable_web_page_preview": true}` with `chat_id` from the hook URL's query (required at
+  create). Revision and shelf messages end with a `/web/` link when
+  `ServerConfig::public_base` knows the address (ACME domain, else `[oidc] public_url`).
+  Headers and signing are the same for every format.
 - Delivery rows that are no longer pending are deleted 7 days after they were queued.
 - Delivery is at-least-once and, under retry, not strictly ordered. Receivers should treat an
   event as a hint and read the revision list with `after=` from their own cursor.
-- CLI: `lode admin webhook add <depot> <url> --events e1,e2 [--branch GLOB]` (prints the
+- CLI: `lode admin webhook add <depot> <url> --events e1,e2 [--branch GLOB] [--format F]` (prints the
   secret once on stdout), `list <depot>`, `remove <depot> <id>`, `deliveries <depot> <id>`,
   `ping <depot> <id>`.
 

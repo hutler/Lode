@@ -48,7 +48,7 @@ and the branch are percent-encoded. A link opens in an open or recent workspace 
 server and depot (the app asks when there are several, putting ones on the link's branch first)
 and offers a checkout when there is none. Anything that is not exactly one of these forms is
 refused with the reason and nothing is opened. A link that arrives while a dialog is open waits
-until it closes. The rules are in `src/links.rs`, tested against `tests/link_cases.json`.
+until it closes. The rules are in `lode-ops` (`src/links.rs`, shared with `lode link`), tested against its `tests/link_cases.json`.
 
 Only one copy of the app runs per user (`src/instance.rs`): the first holds a lock file in the
 app's data folder and listens on a loopback port it writes there with a random token; starting

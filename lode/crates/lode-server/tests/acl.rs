@@ -277,3 +277,76 @@ async fn only_server_admins_manage_rules_and_a_global_admin_rule_makes_one() {
     let (s, _) = h.send("GET", "/api/v1/admin/principals", &ana, None).await;
     assert_eq!(s, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn rules_can_be_listed_for_one_depot_or_subject() {
+    let h = harness().await;
+    for name in ["art", "docs"] {
+        h.state
+            .meta()
+            .write(move |tx| tx.create_depot(name, 0).map(|_| ()))
+            .await
+            .unwrap();
+    }
+    h.user("ana").await;
+    let add = |depot: Option<&str>, subject: Value| {
+        let mut rule = json!({
+            "subject": subject, "branch": "**", "path": "**", "effect": "allow", "level": "read"
+        });
+        if let Some(d) = depot {
+            rule["depot"] = json!(d);
+        }
+        rule
+    };
+    for rule in [
+        add(Some("game"), json!({ "kind": "user", "name": "ana" })),
+        add(None, json!({ "kind": "all" })),
+        add(Some("art"), json!({ "kind": "user", "name": "ana" })),
+        add(Some("docs"), json!({ "kind": "all" })),
+    ] {
+        let (s, b) = h
+            .send("POST", "/api/v1/admin/acl", &h.admin, Some(rule))
+            .await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+    }
+    let depots = |v: &Value| -> Vec<String> {
+        v["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["depot"].as_str().unwrap_or("*").to_owned())
+            .collect()
+    };
+    let (s, all) = h.send("GET", "/api/v1/admin/acl", &h.admin, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(depots(&all), ["game", "*", "art", "docs"]);
+    let (_, art) = h
+        .send("GET", "/api/v1/admin/acl?depot=art", &h.admin, None)
+        .await;
+    assert_eq!(
+        depots(&art),
+        ["*", "art"],
+        "its own and the server-wide, in order"
+    );
+    let (_, ana) = h
+        .send("GET", "/api/v1/admin/acl?subject=user:ana", &h.admin, None)
+        .await;
+    assert_eq!(depots(&ana), ["game", "art"]);
+    let (_, both) = h
+        .send(
+            "GET",
+            "/api/v1/admin/acl?depot=docs&subject=all",
+            &h.admin,
+            None,
+        )
+        .await;
+    assert_eq!(depots(&both), ["*", "docs"]);
+    let (s, _) = h
+        .send("GET", "/api/v1/admin/acl?depot=nope", &h.admin, None)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _) = h
+        .send("GET", "/api/v1/admin/acl?subject=team:x", &h.admin, None)
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}

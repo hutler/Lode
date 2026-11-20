@@ -22,6 +22,9 @@ getent passwd lode > /dev/null || fail "no lode user"
 [ "$(stat -c %U /var/lib/lode)" = lode ] || fail "/var/lib/lode is not owned by lode"
 unit=/usr/lib/systemd/system/loded.service
 [ -f "$unit" ] || fail "no systemd unit"
+[ -f /usr/share/bash-completion/completions/lode ] || fail "no bash completion for lode"
+[ -f /usr/share/bash-completion/completions/loded ] || fail "no bash completion for loded"
+ls /usr/share/zsh/*/_lode > /dev/null 2>&1 || fail "no zsh completion for lode"
 
 printf 'test-password-123\n' > /tmp/pw
 chmod 0644 /tmp/pw

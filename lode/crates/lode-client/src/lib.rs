@@ -206,7 +206,9 @@ impl ClientBuilder {
             .pool_idle_timeout(Duration::from_secs(20))
             // Redirects could carry the token elsewhere or downgrade to http; the API never
             // redirects.
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            // Keeps the server's certificate on each response, for `lode doctor` (T178).
+            .tls_info(true);
         if !self.allow_insecure {
             // Plain http is only allowed for loopback, which `parse_server_url` checked.
             if base.scheme() == "https" && proxy.as_ref().is_none_or(|p| p.scheme() == "https") {
@@ -433,11 +435,40 @@ impl Client {
             .await
     }
 
+    /// [`Client::info`], with the certificate the server presented (DER) when it was reached
+    /// over https.
+    pub async fn info_with_certificate(&self) -> Result<(Info, Option<Vec<u8>>)> {
+        let url = self.url(&["info"])?;
+        let resp = self
+            .send(Retry::Yes, || Ok(self.request(Method::GET, url.clone())))
+            .await?;
+        let cert = resp
+            .extensions()
+            .get::<reqwest::tls::TlsInfo>()
+            .and_then(|t| t.peer_certificate())
+            .map(<[u8]>::to_vec);
+        Ok((decode(resp).await?, cert))
+    }
+
     /// `POST /auth/login`: exchanges a password for a new token. Not retried, since each
     /// success creates a token.
     pub async fn login(&self, req: &LoginRequest) -> Result<LoginResponse> {
         self.json_body(Retry::No, Method::POST, self.url(&["auth", "login"])?, req)
             .await
+    }
+
+    /// `POST /auth/password`: change one's own password (no token needed).
+    pub async fn change_password(
+        &self,
+        req: &lode_proto::auth::ChangePasswordRequest,
+    ) -> Result<lode_proto::auth::ChangePasswordResponse> {
+        self.json_body(
+            Retry::No,
+            Method::POST,
+            self.url(&["auth", "password"])?,
+            req,
+        )
+        .await
     }
 
     /// `GET /auth/whoami`.
@@ -965,8 +996,27 @@ impl Client {
 
     /// `GET /admin/acl`.
     pub async fn acl(&self) -> Result<AclList> {
-        self.json(Retry::Yes, Method::GET, self.url(&["admin", "acl"])?)
-            .await
+        self.acl_filtered(None, None).await
+    }
+
+    /// `GET /admin/acl?depot=&subject=`: the rules that can apply in `depot` (its own and the
+    /// server-wide ones), and only `subject`'s (`user:NAME`, `group:NAME` or `all`).
+    pub async fn acl_filtered(
+        &self,
+        depot: Option<&str>,
+        subject: Option<&str>,
+    ) -> Result<AclList> {
+        let mut url = self.url(&["admin", "acl"])?;
+        if depot.is_some() || subject.is_some() {
+            let mut q = url.query_pairs_mut();
+            if let Some(d) = depot {
+                q.append_pair("depot", d);
+            }
+            if let Some(s) = subject {
+                q.append_pair("subject", s);
+            }
+        }
+        self.json(Retry::Yes, Method::GET, url).await
     }
 
     /// `POST /admin/acl`: adds a rule and returns it with its id.

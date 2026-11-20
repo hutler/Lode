@@ -13,6 +13,20 @@ pub struct DepotView {
     /// Creation time.
     #[serde(with = "rfc3339")]
     pub created_at: Timestamp,
+    /// The newest revision number (T179). Given to server administrators in `GET /depots`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revisions: Option<u64>,
+    /// When the newest revision was made (T179), for server administrators.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "rfc3339::option"
+    )]
+    pub last_commit_at: Option<Timestamp>,
+    /// Bytes of stored content, measured at most every ten minutes (T179), for server
+    /// administrators; absent with S3 storage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
 }
 
 /// `GET /depots`.

@@ -29,7 +29,8 @@ fn depot_row(r: &Row) -> Result<DepotRow> {
 }
 
 const PRINCIPAL_COLS: &str =
-    "id, kind, name, display_name, owner_id, password_hash, disabled, created_at, sso_id, deleted_at";
+    "id, kind, name, display_name, owner_id, password_hash, disabled, created_at, sso_id, deleted_at, \
+     password_change_by";
 fn principal_row(r: &Row) -> Result<PrincipalRow> {
     let kind: String = r.get(1)?;
     Ok(PrincipalRow {
@@ -47,6 +48,7 @@ fn principal_row(r: &Row) -> Result<PrincipalRow> {
         created_at: r.get(7)?,
         sso_id: r.get(8)?,
         deleted_at: r.get(9)?,
+        password_change_by: r.get(10)?,
     })
 }
 
@@ -424,6 +426,18 @@ pub trait Reads {
         self.db().query_opt(
             &format!("SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 AND num = ?2"),
             vals![depot.0, to_i64(num)?],
+            revision_row,
+        )
+    }
+
+    /// The newest revision of a depot.
+    fn last_revision(&self, depot: DepotId) -> Result<Option<RevisionRow>> {
+        self.db().query_opt(
+            &format!(
+                "SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 \
+                 ORDER BY num DESC LIMIT 1"
+            ),
+            vals![depot.0],
             revision_row,
         )
     }
@@ -885,12 +899,24 @@ impl WriteTx<'_> {
         Ok(PrincipalId(new_id))
     }
 
-    /// Sets or clears a principal's password hash.
+    /// Sets or clears a principal's password hash. The new password is an ordinary one: a
+    /// pending "must change" mark is cleared.
     pub fn set_password_hash(&self, id: PrincipalId, hash: Option<&str>) -> Result<()> {
+        self.set_password(id, hash, None)
+    }
+
+    /// Sets a principal's password hash together with its "must change" deadline: `Some(t)`
+    /// makes the password good only for choosing a new one, and only until `t`.
+    pub fn set_password(
+        &self,
+        id: PrincipalId,
+        hash: Option<&str>,
+        change_by: Option<Millis>,
+    ) -> Result<()> {
         self.expect_one(
             self.conn().execute(
-                "UPDATE principal SET password_hash = ?2 WHERE id = ?1",
-                vals![id.0, hash],
+                "UPDATE principal SET password_hash = ?2, password_change_by = ?3 WHERE id = ?1",
+                vals![id.0, hash, change_by],
             )?,
             "principal",
         )

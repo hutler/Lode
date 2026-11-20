@@ -1,4 +1,5 @@
-//! The admin web UI (M14): `loded` serves pages for server administrators at `/admin/`.
+//! The admin web UI (M14): `loded` serves pages for server administrators at `/admin/`,
+//! and a read-only depot browser for every user at `/web/` (T173, see [`web`]).
 //!
 //! Pages are HTML rendered here, with every value escaped by [`html`]; they work without
 //! JavaScript, and one small script (served as a file, under a content security policy that
@@ -23,9 +24,9 @@ mod people;
 mod session;
 mod settings;
 mod signin;
+mod web;
+mod web_shelves;
 mod webhooks;
-
-use std::sync::Arc;
 
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -36,7 +37,7 @@ use crate::html;
 use crate::state::AppState;
 
 pub(crate) use layout::{Nav, Page};
-pub(crate) use session::{Admin, Fields};
+pub(crate) use session::{Admin, Fields, Viewer};
 
 /// What every admin page handler gets.
 #[derive(Clone)]
@@ -44,7 +45,6 @@ pub(crate) struct Ctx {
     state: AppState,
     /// The API router: core routes and the enabled modules' routes, without the admin UI.
     api: Router,
-    sizes: Arc<format::SizeCache>,
 }
 
 impl Ctx {
@@ -64,15 +64,12 @@ pub fn routes(state: AppState, api: Router) -> Router {
     if !state.config().admin_ui.enabled {
         return Router::new();
     }
-    let ctx = Ctx {
-        state,
-        api,
-        sizes: Arc::default(),
-    };
-    Router::new()
+    let ctx = Ctx { state, api };
+    web::routes(Router::new())
         .route("/admin", get(|| async { Redirect::permanent("/admin/") }))
         .route("/admin/", get(overview::page))
         .route(signin::SIGN_IN, get(signin::form).post(signin::submit))
+        .route(signin::SIGN_IN_PASSWORD, post(signin::change_password))
         .route(signin::SSO_START, get(signin::sso_start))
         .route(crate::auth::ADMIN_SSO_DONE, get(signin::sso_done))
         .route(signin::SIGN_OUT, post(signin::sign_out))

@@ -58,7 +58,7 @@
   <p class="meta">
     Version 0.4 · November 2026<br>
     Open source, Apache-2.0<br>
-    Describes Lode 0.4 and the 0.5 additions (validation scripts, shelf-only branches): streams and smarter merges (renames, JSON files, merge tools), on top of chunked large files, metadata in Postgres and a caching proxy (0.3), the integration release (webhooks, checks) and the admin web UI.
+    Describes Lode 0.4 and the 0.5 additions (validation scripts, shelf-only branches): streams and smarter merges (renames, JSON files, merge tools), agents as desktop clients, web pages for every user and setup feedback from the first deployment, on top of chunked large files, metadata in Postgres and a caching proxy (0.3), the integration release (webhooks, checks) and the admin web UI.
   </p>
 </section>
 
@@ -172,6 +172,13 @@ Get-FileHash lode-0.4.0-x86_64-pc-windows-msvc.zip   # Windows: compare with the
 lode --version</code></pre>
 <p>There is nothing else to install.</p>
 <p>A <code>lode</code> installed from an archive updates itself: <code>lode self-update</code> downloads the newest release for your platform, checks it against the release's <code>SHA256SUMS</code>, and replaces the executable. <code>lode self-update --check</code> only tells you whether there is a newer one. A <code>lode</code> installed by winget, the MSI, Homebrew or a Linux package is left to that tool, and <code>self-update</code> says which command to run instead.</p>
+<h3>Tab completion</h3>
+<p>The Linux packages install completion for bash, zsh and fish (open a new shell). Otherwise <code>lode completions &lt;bash|zsh|fish|powershell|elvish&gt;</code> prints the script, and <code>loded completions …</code> the server's:</p>
+<pre><code>lode completions bash &gt; ~/.local/share/bash-completion/completions/lode
+lode completions zsh &gt; ~/.zfunc/_lode          # with fpath+=~/.zfunc before compinit in ~/.zshrc
+lode completions fish &gt; ~/.config/fish/completions/lode.fish
+# PowerShell: add this line to your profile (notepad $PROFILE)
+lode completions powershell | Out-String | Invoke-Expression</code></pre>
 
 <h1>2. Signing in</h1>
 <p>Your administrator gives you a server address and an account name.</p>
@@ -587,6 +594,9 @@ lode proxy clear              # download from the server again</code></pre>
 <table>
   <tr><th style="width:44%">Command</th><th>Purpose</th></tr>
   <tr><td><code>lode login</code> · <code>logout</code> · <code>whoami</code></td><td>Sign in and out; show the current account</td></tr>
+  <tr><td><code>lode passwd</code></td><td>Change your own password</td></tr>
+  <tr><td><code>lode completions &lt;shell&gt;</code></td><td>Print a tab completion script (bash, zsh, fish, powershell, elvish)</td></tr>
+  <tr><td><code>lode link</code></td><td>Print the <code>lode://</code> link of a file (<code>PATH[@REV]</code>), a revision (<code>-r</code>) or a shelf (<code>--shelf</code>), the same links Lode Desk copies</td></tr>
   <tr><td><code>lode checkout URL/DEPOT [DIR]</code></td><td>Create a workspace</td></tr>
   <tr><td><code>lode init URL/DEPOT [--template T] [--dry-run]</code></td><td>Make the current folder a new depot</td></tr>
   <tr><td><code>lode import git REPO URL/DEPOT --branch B</code></td><td>Import a Git branch with its history</td></tr>
@@ -651,16 +661,17 @@ Admin password again:
 
 Lode is set up in /var/lib/lode
 Server address for clients: https://lode.example.com
-Admin token (shown only now; you can also sign in as admin with the password):
-lode_3q…
 
 loded service install --config /var/lib/lode/loded.toml
 loded service start</code></pre>
-<p><code>setup</code> writes a commented <code>loded.toml</code> with your answers, checks it, creates the data directory and an administrator account named <code>admin</code> with your password, and prints the admin token once. With a domain, the server gets its HTTPS certificate from Let's Encrypt when it starts (chapter 4); the name must already point at the machine. Without one, it serves plain HTTP on this machine only, for a single user or behind your own proxy.</p>
+<p><code>setup</code> writes a commented <code>loded.toml</code> with your answers, checks it, creates the data directory and an administrator account named <code>admin</code> with your password. Your password is the only secret it hands out; add <code>--print-admin-token</code> if a script also needs an admin token. With a domain, the server gets its HTTPS certificate from Let's Encrypt when it starts (chapter 4); the name must already point at the machine. Without one, it serves plain HTTP on this machine only, for a single user or behind your own proxy.</p>
+<p><strong>No domain?</strong> Use <code>&lt;public-ip&gt;.sslip.io</code>, such as <code>203.0.113.7.sslip.io</code> (dashes instead of colons for IPv6). sslip.io is a free public DNS service that answers each such name with the address inside it, so Let's Encrypt works with no registration. It suits a trial; a team that stays is better off with a domain of its own.</p>
+<p><strong>No password at hand?</strong> <code>--generate-admin-password</code> (also taken when there is no terminal and no <code>--admin-password-file</code>) makes a random first password and prints it once. It only lets <code>admin</code> choose a new password, at the first sign-in on the admin web page or with <code>lode login</code>, and it stops working after 24 hours if unused. <code>loded reset-admin --generate-password --config …</code> makes a new one offline, for a lost password too.</p>
 <p>Every answer can be a flag, for scripted installs; <code>--yes</code> (or no terminal) takes the defaults for the rest:</p>
 <pre><code>loded setup --yes --data-dir /var/lib/lode --domain lode.example.com \
     --email admin@example.com --backup-dir /mnt/backup/lode --admin-password-file pw.txt
-loded setup --yes --local --no-backup --admin-password-file -     # password on standard input</code></pre>
+loded setup --yes --local --no-backup --admin-password-file -     # password on standard input
+loded setup --yes --domain 203.0.113.7.sslip.io --generate-admin-password</code></pre>
 <p><code>loded service install</code> registers the server to start at boot (chapter 5). To try it in a terminal first, run <code>loded serve --config /var/lib/lode/loded.toml</code> and stop it with Ctrl-C.</p>
 <p>The older way still works: <code>loded init /var/lib/lode</code> creates the data directory with the default configuration (plain HTTP on 127.0.0.1:7480) and prints the admin token, and you edit <code>loded.toml</code> yourself.</p>
 <p>From your own machine, sign in as <code>admin</code> with the password (or the token) and set the server up:</p>
@@ -668,7 +679,7 @@ loded setup --yes --local --no-backup --admin-password-file -     # password on 
 lode admin depot create game
 lode admin user create alice                       # prompts for her first password
 lode admin acl add allow write user:alice --depot game</code></pre>
-<p>Alice can now run <code>lode login</code> with her name and password, and check out <code>game</code>.</p>
+<p>Alice can now run <code>lode login</code> with her name and password, and check out <code>game</code>. She changes her password herself with <code>lode passwd</code> (it asks for the current one first).</p>
 
 <h1>3. Configuration</h1>
 <p>All settings are in <code>loded.toml</code>, which <code>loded init</code> writes with a comment on every key. An unknown key is an error, so typing mistakes are caught at start. The defaults:</p>
@@ -710,6 +721,12 @@ validate = false                   # run depot validation scripts on shelves (ch
 [gc]
 grace_seconds = 86400              # unused data younger than this is kept</code></pre>
 <p>Restart the server after changing the file. The log level is set with the environment variable <code>LODED_LOG</code> (<code>info</code> by default; <code>debug</code> for more).</p>
+<h3>Prometheus metrics</h3>
+<p>Teams that already run Prometheus can scrape the server. Metrics are off by default; turn them on and say who may read them:</p>
+<pre><code>[metrics]
+enabled = true
+allow_from = ["127.0.0.1", "10.0.0.0/8"]   # addresses or networks that need no token</code></pre>
+<p><code>GET /metrics</code> on the server's own port answers in the Prometheus text format. From other addresses it needs a token with the <code>metrics</code> scope, for example <code>lode admin token create --for prometheus --name scrape --scope metrics</code> for an agent made for it, given to Prometheus as a bearer token (<code>authorization: { credentials_file: ... }</code>). It reports HTTP requests by kind of route and status (<code>lode_http_requests_total</code>), commits, file content bytes received and sent, depots and each depot's head revision, open shelves and held locks per depot, webhook deliveries by state, the size of the store and of the SQLite database, when the certificate expires and when the newest backup was made. Counters start at zero when the server starts. Metrics carry depot names but never paths, user names or file content. With metrics off, <code>/metrics</code> answers 404.</p>
 <h3>Keeping content in S3</h3>
 <p>File content can live in an S3-compatible bucket (Amazon S3, Backblaze B2, MinIO, Wasabi and others) instead of the data directory, so a small server can hold a large depot. The database stays in the data directory. Create the bucket first, then add a <code>[storage]</code> table:</p>
 <pre><code>[storage]
@@ -905,6 +922,8 @@ lode admin acl add allow write group:release --depot game --branch "release-*"
 lode admin acl add deny read group:contractors --depot game --path "sdk/**"
 
 lode admin acl list              # every rule, with its id
+lode admin acl list --depot game # the rules that can apply in game (its own and server-wide)
+lode admin acl list --subject group:artists
 lode admin acl remove 7</code></pre>
 <h3>How rules combine</h3>
 <ol>
@@ -919,10 +938,9 @@ lode admin acl remove 7</code></pre>
 
 <h1>9. Agents</h1>
 <p>An agent is an account for an automated tool. It belongs to a user, has its own tokens and its own permissions, and never inherits its owner's access.</p>
-<pre><code>lode admin agent create review-bot --owner alice
-lode admin token create --for review-bot --name default
-lode admin acl add allow read review-bot --depot game
+<pre><code>lode admin agent create review-bot --owner alice --grant game=read --with-token
 lode admin agent list</code></pre>
+<p>That one command creates the agent, lets it read <code>game</code> (<code>--grant</code> is repeatable) and prints its token once. The long way is the same three steps: <code>agent create</code>, <code>acl add allow read review-bot --depot game</code>, <code>token create --for review-bot</code>.</p>
 <ul>
   <li>New agent tokens get the scopes <code>read</code>, <code>shelve</code> and <code>lock</code>. An agent can therefore propose changes as shelves but cannot commit.</li>
   <li>To let an agent commit directly, an administrator must create its token with <code>--scope read,write,shelve,lock</code> and grant it <code>write</code> permission. Do this deliberately and narrowly.</li>
@@ -972,6 +990,15 @@ lode admin webhook remove game 4</code></pre>
   <li>A failed delivery is retried after 10 seconds, 1, 5 and 30 minutes, then hourly, for up to 24 hours. <code>deliveries</code> shows the state of each. The same event can arrive twice; the <code>X-Lode-Delivery</code> header identifies repeats.</li>
   <li>Addresses must use <code>https://</code> unless you set <code>allow_http = true</code> under <code>[webhooks]</code> in the configuration.</li>
 </ul>
+<h3>Notifications in team chat</h3>
+<p>With <code>--format slack</code>, <code>discord</code> or <code>telegram</code> (or the Format picker on the admin Webhooks page) a hook sends one line of text that the chat service shows as a message, such as <em>Lode game: bot (agent) shelved #4 on main for review.</em> Messages name who, which depot, branch, revision or shelf, never file names or content. When the server knows its public address (the <code>[tls]</code> ACME domain, or <code>[oidc] public_url</code>), each message about a revision or shelf ends with a link to its page in the depot browser, where a reviewer can submit it. Good events to pick: <code>shelf.created</code> and <code>shelf.updated</code> (something waits for review), <code>shelf.submitted</code>, <code>lock.acquired</code> and <code>lock.released</code>, and <code>check.updated</code> for failing builds.</p>
+<table>
+  <tr><th style="width:14%">Service</th><th>Where the URL comes from</th></tr>
+  <tr><td>Slack</td><td>Create a Slack app with <em>Incoming Webhooks</em> on, add a webhook to the channel, and copy its <code>https://hooks.slack.com/services/…</code> URL.<pre><code>lode admin webhook add game https://hooks.slack.com/services/T000/B000/XXXX --format slack --events shelf.created,shelf.updated,shelf.submitted</code></pre></td></tr>
+  <tr><td>Discord</td><td>In the channel's settings, <em>Integrations</em>, <em>Webhooks</em>, <em>New Webhook</em>, then <em>Copy Webhook URL</em>.<pre><code>lode admin webhook add game https://discord.com/api/webhooks/123/abc --format discord --events lock.acquired,lock.released</code></pre></td></tr>
+  <tr><td>Telegram</td><td>Create a bot with <code>@BotFather</code> (it gives the token), add the bot to the group, and find the group's chat id (for example from <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> after writing in the group). The URL is the bot's <code>sendMessage</code> with the chat id.<pre><code>lode admin webhook add game "https://api.telegram.org/bot&lt;token&gt;/sendMessage?chat_id=-1001234567890" --format telegram --events shelf.created,check.updated</code></pre></td></tr>
+</table>
+<p>Then send a test with <code>lode admin webhook ping game &lt;id&gt;</code> (or Send a test on the admin page): the chat shows <em>Lode game: test message: webhook N of this depot reaches this chat.</em> If nothing arrives, <code>lode admin webhook deliveries game &lt;id&gt;</code> shows the service's answer. The hook URL of these services is itself the credential (the Telegram URL holds the bot token), so only depot administrators see hook URLs.</p>
 
 <h2>Checks</h2>
 <p>A check is a named result, for example "ci/build: success", that another system attaches to a revision or to one version of a shelf. Lode stores and shows checks; it does not run builds.</p>
@@ -1103,6 +1130,10 @@ lode admin gc game</code></pre>
 lode admin fsck game --full      # also re-reads and verifies all content
 loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every depot</code></pre>
 <p>Run the quick check after any unclean shutdown or restore, and the full check occasionally, for example monthly. A reported problem names the revision, path and content affected; restore that content from a backup.</p>
+<h3>Checking the setup</h3>
+<pre><code>loded doctor --config /var/lib/lode/loded.toml   # on the server machine
+lode doctor https://lode.example.com             # from anyone's computer</code></pre>
+<p><code>loded doctor</code> checks what an operator would otherwise check by hand: the configuration parses, the data directory is writable, the disk has room (a warning below 10% free), the certificate is not near expiry (a warning with fewer than 14 days left), an automatic certificate's domain resolves to this machine, the newest backup is not older than two intervals, and the database and store answer. <code>lode doctor</code> checks the way from a client: the name resolves, the TLS handshake and certificate, <code>/info</code>, that the client and server versions fit, and that you are signed in. Both print one line per check, take <code>--json</code>, only read, and exit with 0 when all is well, 2 on warnings only and 1 on a failure, so they can run from a monitoring script.</p>
 <h3>Logs</h3>
 <p>The server writes its log to standard error (the journal under systemd, <code>docker logs</code> in a container). Each request has an id, also returned to the client, which you can use to find the matching log line when a user reports an error. Tokens, passwords and file content are never logged.</p>
 
@@ -1110,9 +1141,9 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 <p>The server has web pages for administrators at <code>/admin/</code>, for example <code>https://lode.example.com/admin/</code>. They show how the server is doing and do the everyday administration that the <code>lode admin</code> commands do: depots, maintenance, people, tokens, access rules and webhooks. Every page works without JavaScript and at phone width, and follows the system's light or dark setting.</p>
 <figure><img src="admin-guide/overview-light.png" alt="The overview page: server facts, counts, backups, maintenance per depot and recent commits"><figcaption>The overview refreshes itself every 30 seconds while it is open.</figcaption></figure>
 <h3>Signing in</h3>
-<p>Only server administrators get in: <code>admin</code>, and anyone with an access rule that allows <code>admin</code> on every depot. Sign in with a name and password, or with single sign-on when <code>[oidc]</code> is configured. A session lasts 8 hours, ends when you sign out, and ends at once when the account is disabled or its rights are taken away.</p>
-<p>A session is an ordinary token named <code>web admin</code>, listed with the account's other tokens and revocable like them. Its cookie cannot be read by scripts, is sent only to <code>/admin/</code> on this server, and is sent only over HTTPS when the server itself speaks TLS. Every form carries a token tied to the session, so another site cannot submit forms on your behalf.</p>
-<div class="warn">Use the pages over HTTPS only. Behind a TLS proxy, make sure the proxy passes <code>/admin/</code> through; served over plain HTTP, passwords and the session cookie cross the network readable.</div>
+<p>Every user signs in at <code>/admin/sign-in</code>, with a name and password or with single sign-on when <code>[oidc]</code> is configured. Server administrators (<code>admin</code>, and anyone with an access rule that allows <code>admin</code> on every depot) land on the admin pages; everyone else lands on the depot browser (below). A session lasts 8 hours, ends when you sign out, and ends at once when the account is disabled or its rights are taken away.</p>
+<p>A session is an ordinary token, named <code>web admin</code> for an administrator and <code>web</code> for anyone else, listed with the account's other tokens and revocable like them. Its cookie cannot be read by scripts, is sent only to this server's web pages (the API never reads it), and is sent only over HTTPS when the server itself speaks TLS. Every form carries a token tied to the session, so another site cannot submit forms on your behalf.</p>
+<div class="warn">Use the pages over HTTPS only. Behind a TLS proxy, make sure the proxy passes <code>/admin/</code> and <code>/web/</code> through; served over plain HTTP, passwords and the session cookie cross the network readable.</div>
 <h3>What the pages do</h3>
 <table>
   <tr><th style="width:18%">Page</th><th>Shows and does</th></tr>
@@ -1126,8 +1157,22 @@ loded fsck --config /var/lib/lode/loded.toml   # on the server machine, every de
 <figure><img src="admin-guide/depot-light.png" alt="A depot's page with branches, revisions, locks, maintenance and obliterate"><figcaption>A depot. Garbage collection and obliterate always start with a dry run; the report holds the button that does the work.</figcaption></figure>
 <figure><img src="admin-guide/access-check-light.png" alt="The access page with a check result and the deciding rule highlighted"><figcaption>Checking access: the rule that decided is highlighted, and other rules that apply are shaded.</figcaption></figure>
 <p>The pages act through the same API as <code>lode admin</code>, so the same checks and error messages apply, and every change is recorded the same way.</p>
+<h3>The depot browser</h3>
+<p>At <code>/web/</code>, for example <code>https://lode.example.com/web/</code>, every signed-in user browses the depots they can read, without installing anything: a reviewer, a producer or someone checking a file from a phone. It only reads; nothing on these pages changes a depot.</p>
+<table>
+  <tr><th style="width:18%">Page</th><th>Shows</th></tr>
+  <tr><td>Depots</td><td>The depots you can read, with their last commit.</td></tr>
+  <tr><td>A depot</td><td>The files of a directory at a branch's head (pick the branch) or at a revision, with sizes, and the recent revisions that touched it. Paths your access rules hide are not listed.</td></tr>
+  <tr><td>A file</td><td>Text with line numbers (up to 2 MiB), images inline, anything else as a download, and the file's history. Content removed with obliterate is reported as such.</td></tr>
+  <tr><td>A revision</td><td>Author, time, message and merges, and a diff of each changed text file.</td></tr>
+  <tr><td>Shelves</td><td>With the <code>shelves</code> module on: the open shelves of a depot, with owner (an agent and the user it belongs to), description, version, base revision and the state of their checks.</td></tr>
+  <tr><td>A shelf</td><td>The diff of each file against the shelf's base, images before and after side by side, the checks reported for its recent versions, and two buttons: <strong>Submit</strong> (the commit message starts as the shelf's description and can be edited) and <strong>Delete</strong>.</td></tr>
+  <tr><td>Account</td><td>Your tokens, with Revoke, and a form to change your password.</td></tr>
+</table>
+<p><strong>Reviewing an agent's work.</strong> An agent proposes a change as a shelf (through MCP or <code>lode shelve</code>); a person opens the shelf's link, reads the diff and presses Submit. There is no separate approval: submitting is the acceptance, and the rules are the API's. Submit needs <code>write</code> on the branch; when the branch's <code>.lodeconfig</code> requires checks, every required check must be <code>success</code> on the shelf's current version, and the page lists each one that is not, and why. A submit from a page that shows an older version is refused, so what was read is what goes in. Delete is for the shelf's owner and depot administrators.</p>
+<p>Each depot, file and revision page shows its <code>lode://</code> link with a Copy button and an "Open in Lode Desk" button, so a link pasted in chat opens the same place in the app. Administrators get an Admin link at the top, and the admin pages a Browse link.</p>
 <h3>Turning it off</h3>
-<p>When nobody uses the pages, turn them off; <code>/admin/</code> then answers 404 like any unknown address:</p>
+<p>When nobody uses the pages, turn them off; <code>/admin/</code> and <code>/web/</code> then answer 404 like any unknown address:</p>
 <pre><code>[admin_ui]
 enabled = false</code></pre>
 

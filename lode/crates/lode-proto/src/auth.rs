@@ -102,6 +102,30 @@ pub struct LoginRequest {
     pub token_name: Option<String>,
 }
 
+/// `POST /auth/password`: a user changes their own password. Also the only use of a password
+/// that must be changed (`details.reason` `password_change_required` on login).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangePasswordRequest {
+    /// User name.
+    pub name: String,
+    /// The current password.
+    pub password: String,
+    /// The new password.
+    pub new_password: String,
+}
+
+/// Answer to a password change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangePasswordResponse {
+    /// Whose password changed.
+    pub name: String,
+}
+
+/// `details.reason` of an `unauthenticated` login whose password must be changed first.
+pub const REASON_PASSWORD_CHANGE_REQUIRED: &str = "password_change_required";
+/// `details.reason` of an `unauthenticated` login whose must-change password ran out.
+pub const REASON_PASSWORD_EXPIRED: &str = "password_expired";
+
 /// Answer to a login.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoginResponse {
