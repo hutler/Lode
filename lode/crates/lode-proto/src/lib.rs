@@ -14,6 +14,7 @@ pub mod commit;
 pub mod consts;
 pub mod depot;
 pub mod error;
+pub mod links;
 pub mod locks;
 pub mod read;
 pub mod shelves;
