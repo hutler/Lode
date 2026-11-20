@@ -61,10 +61,16 @@ fn backup_and_fsck_from_the_command_line() {
         .find(|l| l.starts_with("lode_"))
         .unwrap()
         .to_owned();
-    let cfg_path = data.join("loded.toml");
-    let cfg = std::fs::read_to_string(&cfg_path)
+    let cfg_path = dir.path().join("production.toml");
+    let cfg = std::fs::read_to_string(data.join("loded.toml"))
         .unwrap()
         .replace("listen = \"127.0.0.1:7480\"", "listen = \"127.0.0.1:0\"");
+    let cfg = cfg
+        .replace("data_dir = \".\"", "data_dir = \"data\"")
+        .replace(
+            "max_changes_per_commit = 500000",
+            "max_changes_per_commit = 64",
+        );
     std::fs::write(&cfg_path, cfg).unwrap();
 
     let child = Command::cargo_bin("loded")
@@ -98,6 +104,12 @@ fn backup_and_fsck_from_the_command_line() {
     let backup_dir = dir.path().join("backup");
     let out = loded(&["backup", backup_dir.to_str().unwrap()], &cfg_path);
     assert!(out.status.success(), "{out:?}");
+    let restored = lode_server::ServerConfig::load(&backup_dir.join("loded.toml")).unwrap();
+    assert_eq!(restored.limits.max_changes_per_commit, 64);
+    assert_eq!(
+        restored.data_dir.canonicalize().unwrap(),
+        backup_dir.canonicalize().unwrap()
+    );
     drop(child);
 
     // Damage the original: remove every object of the depot.

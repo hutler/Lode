@@ -104,7 +104,8 @@ Only files and symlinks are versioned. Directories exist implicitly while they c
 ### 5.4 Merge (basic)
 
 - `lode merge <source-branch>` merges all not-yet-merged source revisions into the workspace.
-  `lode merge <source-branch> -r <rev>` picks one revision.
+  `lode merge <source-branch> -r <rev>` picks one revision. Both require the workspace view
+  to cover every path in the source delta before applying changes or recording a merge range.
 - The resulting commit records `merged_from`: source branch plus revision range. This is stored
   from the first version so that later, smarter merge tooling has complete history to work with.
 - v1 merge base rule: the highest source revision `R` such that every source revision up to `R`

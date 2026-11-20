@@ -15,7 +15,7 @@
 //! says to back the database up with `pg_dump` (or the provider's snapshots). Take the dump
 //! before copying the objects, for the same reason as above.
 
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::config::CONFIG_FILE_NAME;
@@ -93,27 +93,59 @@ pub async fn backup(state: &AppState, dest: &Path) -> Result<BackupReport, Backu
     }
 
     let src_root = state.config().data_dir.clone();
+    let config = state.config().source.clone();
     let dest_root = dest.to_owned();
     let objects = state.config().storage.s3_in_use().is_none();
-    let mut report =
-        tokio::task::spawn_blocking(move || copy_store(&src_root, &dest_root, objects))
-            .await
-            .map_err(|e| BackupError::Io {
-                context: "copy task failed".into(),
-                source: io::Error::other(e),
-            })??;
+    let mut report = tokio::task::spawn_blocking(move || {
+        copy_store(&src_root, &dest_root, objects, config.as_ref())
+    })
+    .await
+    .map_err(|e| BackupError::Io {
+        context: "copy task failed".into(),
+        source: io::Error::other(e),
+    })??;
     report.database_external = database_external;
     Ok(report)
+}
+
+/// A restored server must open the database and objects beside its backup configuration.
+fn write_backup_config(text: &str, dest: &Path) -> Result<(), BackupError> {
+    let mut table = text.parse::<toml::Table>().map_err(|_| {
+        io_err("cannot parse loaded configuration")(io::ErrorKind::InvalidData.into())
+    })?;
+    let rewritten;
+    let text = if table.get("data_dir").and_then(toml::Value::as_str) == Some(".") {
+        text
+    } else {
+        table.insert("data_dir".into(), toml::Value::String(".".into()));
+        rewritten = toml::to_string(&table).map_err(|_| {
+            io_err("cannot serialize backup configuration")(io::ErrorKind::InvalidData.into())
+        })?;
+        &rewritten
+    };
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(dest)
+        .and_then(|mut file| file.write_all(text.as_bytes()))
+        .map_err(io_err("cannot write backup configuration"))
 }
 
 fn copy_store(
     src_root: &Path,
     dest_root: &Path,
     objects: bool,
+    source: Option<&crate::config::ConfigSource>,
 ) -> Result<BackupReport, BackupError> {
     let mut report = BackupReport::default();
     let config = src_root.join(CONFIG_FILE_NAME);
-    if config.is_file() {
+    if let Some(source) = source {
+        write_backup_config(&source.0, &dest_root.join(CONFIG_FILE_NAME))?;
+    } else if config.is_file() {
         std::fs::copy(&config, dest_root.join(CONFIG_FILE_NAME))
             .map_err(io_err("cannot copy the configuration"))?;
     }
