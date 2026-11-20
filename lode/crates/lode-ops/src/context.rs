@@ -46,6 +46,22 @@ pub struct Settings {
     /// it. `LODE_PROXY` overrides it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub proxies: BTreeMap<String, String>,
+    /// Merge tools by name (T164): what `lode resolve --tool` runs for a name that a depot's
+    /// `[merge.tools]` gives a file. Only this file decides what runs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub merge_tools: BTreeMap<String, MergeToolSetting>,
+}
+
+/// `[merge_tools.NAME]` in `settings.toml`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeToolSetting {
+    /// Program and arguments; `{base}`, `{mine}`, `{theirs}` and `{merged}` are replaced by
+    /// file paths wherever they appear in an argument. No shell is involved.
+    pub command: Vec<String>,
+    /// Whether exit status 0 means merged (default true); when false, the merged file must
+    /// have changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_exit_code: Option<bool>,
 }
 
 /// What a command runs with.

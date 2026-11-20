@@ -87,6 +87,20 @@ Only files and symlinks are versioned. Directories exist implicitly while they c
 - `lode switch <branch>` moves a workspace to another branch.
 - Branches can be archived (hidden, read-only), never deleted.
 
+### 5.3a Streams (0.4)
+
+- A branch can be a **stream**: `mainline` (the trunk, a branch without a parent), `development`
+  (less stable than its parent) or `release` (more stable than its parent). Ordinary branches
+  stay as they are, and every merge involving one follows the v1 rules.
+- `lode branch create NAME --type development|release` makes a stream from a stream;
+  `lode branch set-type NAME TYPE|none` changes one (depot admins). `lode branch tree` shows
+  the streams with how far each is behind its parent and ahead of it.
+- Changes flow down into development streams freely and up from them only once they are up to
+  date with the parent ("merge down, copy up"). Release streams take only picked revisions from
+  their parent and merge fixes up freely. Nothing flows sideways.
+- The server enforces the rules on commit and on shelf submit; `lode merge` checks them before
+  touching the workspace. A depot admin can override with `--force-flow`, which is recorded.
+
 ### 5.4 Merge (basic)
 
 - `lode merge <source-branch>` merges all not-yet-merged source revisions into the workspace.
@@ -134,6 +148,19 @@ to certain branches (section 6.6):
 branches = ["main", "release/*"]
 required = [{ name = "ci/build", reporter = "ci" }]
 ```
+
+Since 0.4 it may also say how files merge (read by the client from the workspace):
+
+```toml
+[merge]
+json = ["**/*.json", "**/*.uproject", "**/*.uplugin"]  # the default: merged key by key
+                                                         # when a line merge conflicts
+[merge.tools]
+"**/*.uasset" = "unreal"     # `lode resolve --tool` starts the tool named `unreal`
+```
+
+A tool name only names a tool: the command it runs is set by each person in their own
+`settings.toml` (`[merge_tools.unreal]`), so a depot can never make Lode start a program.
 
 A commit that would leave `.lodeconfig` unparseable is refused. Rules are always taken from
 the branch head, never from the change being committed.

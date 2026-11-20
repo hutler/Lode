@@ -27,4 +27,5 @@ pub mod error;
 pub mod local;
 pub mod materialize;
 pub mod output;
+pub mod structured;
 pub mod templates;

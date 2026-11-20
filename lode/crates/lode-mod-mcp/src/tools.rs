@@ -136,8 +136,9 @@ pub(crate) fn core_tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
         tool(
             ctx,
             "list_branches",
-            "List the branches of a depot that you can read, with each branch's head revision \
-             and the branch it was created from.",
+            "List the branches of a depot that you can read, with each branch's head revision, \
+             the branch it was created from and, for streams, `stream` (mainline, development \
+             or release).",
             object(
                 json!({
                     "depot": depot_prop(),

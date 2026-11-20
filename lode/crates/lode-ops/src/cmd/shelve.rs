@@ -17,7 +17,7 @@ use lode_workspace::db::keys;
 use lode_workspace::Workspace;
 use serde_json::{json, Value};
 
-use crate::cmd::apply::{apply_changes, count, refuse_conflicts, Outcome};
+use crate::cmd::apply::{apply_changes, count, file_list, print_outcomes, refuse_conflicts};
 use crate::cmd::commit::{explain, gather, upload, Outgoing, PENDING_COMMIT};
 use crate::cmd::history::{format_time, who};
 use crate::cmd::merge::{describe, pending_merges, set_pending_merges};
@@ -97,6 +97,9 @@ pub enum ShelfCommand {
         /// Commit message (default: the shelf's description).
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
+        /// Skip the stream flow rules for the merge the shelf records (depot admins).
+        #[arg(long)]
+        force_flow: bool,
     },
 }
 
@@ -402,7 +405,11 @@ pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> OpResult<Value> {
             }
             to_json(&v)
         }
-        ShelfCommand::Submit { spec, message } => submit(ctx, &t, &spec, message).await,
+        ShelfCommand::Submit {
+            spec,
+            message,
+            force_flow,
+        } => submit(ctx, &t, &spec, message, force_flow).await,
         ShelfCommand::Delete { id } => {
             if let Err(e) = t.client.delete_shelf(&t.depot, id).await {
                 return Err(refused(&t.client, e).await);
@@ -483,7 +490,13 @@ fn submit_refused(e: lode_client::Error) -> OpError {
     err
 }
 
-async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> OpResult<Value> {
+async fn submit(
+    ctx: &Ctx,
+    t: &Target,
+    spec: &str,
+    message: Option<String>,
+    force_flow: bool,
+) -> OpResult<Value> {
     let (id, version) = parse_spec(spec)?;
     let version = match version {
         Some(v) => v,
@@ -506,7 +519,7 @@ async fn submit(ctx: &Ctx, t: &Target, spec: &str, message: Option<String>) -> O
     let req = SubmitShelfRequest {
         expected_version: version,
         message: message.filter(|m| !m.trim().is_empty()),
-        force_flow: false,
+        force_flow,
     };
     let resp = match t.client.submit_shelf(&t.depot, id, &req).await {
         Ok(r) => r,
@@ -610,17 +623,14 @@ pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> OpResult<Value> {
         &changes,
         format!("shelf {}", shelf.id),
         FROM_SHELF,
+        &Default::default(),
     )
     .await?;
     if !shelf.merged_from.is_empty() {
         set_pending_merges(&mut t.ws, &shelf.merged_from)?;
     }
-    let counts = count(&outcomes);
-    for (p, o) in &outcomes {
-        if *o != Outcome::Applied {
-            ctx.out.line(format!("{:<10} {p}", o.name()));
-        }
-    }
+    let counts = count(&outcomes.outcomes);
+    print_outcomes(ctx, &outcomes);
     let summary: Vec<String> = counts.iter().map(|(k, v)| format!("{v} {k}")).collect();
     ctx.out.line(format!(
         "Unshelved shelf {} (version {}): {}.",
@@ -638,14 +648,16 @@ pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> OpResult<Value> {
             describe(m)
         ));
     }
-    if counts.contains_key("conflicted") {
+    if counts.contains_key("conflicted") || counts.contains_key("rename_conflict") {
         ctx.out
             .line("Resolve conflicts with `lode resolve <path> --mine|--theirs|--merged`.");
     }
-    let files: Vec<Value> = outcomes
-        .iter()
-        .map(|(p, o)| json!({ "path": p, "outcome": o.name() }))
-        .collect();
+    let config = crate::cmd::update::local_config(&t.ws);
+    let files: Vec<Value> = file_list(&outcomes, config.as_ref());
+    if files.iter().any(|f| f.get("tool").is_some()) {
+        ctx.out
+            .line("Some conflicts have a merge tool: `lode resolve --tool` starts it.");
+    }
     Ok(json!({
         "shelf": shelf.id,
         "version": shelf.version,

@@ -302,6 +302,7 @@ impl Worker {
                     add_all: i.add_all,
                     keep_locks: i.keep_locks,
                     changelist: None,
+                    force_flow: false,
                 };
                 cmd::commit::commit(&ctx, args).await
             }
