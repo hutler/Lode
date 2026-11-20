@@ -133,7 +133,8 @@ so take a backup first.
 ### 0.4.0: streams and smarter merge (M16)
 
 Nothing has to be done to upgrade: replace the programs and restart. The database gains
-`branch.stream_type` (core schema 7), added on the first start; every existing branch has no
+`branch.stream_type` (core schema 7; with M18 and M17 below the core schema ends at 9),
+added on the first start; every existing branch has no
 type and keeps the 0.3 merge rules. A 0.3 server refuses a database a 0.4 server has opened,
 so take a backup first.
 
@@ -169,14 +170,17 @@ module's tables, on the same first start.
   this subject; a user named `agents` is written `user:agents`. A 0.3 client cannot list
   rules once one exists.
 
-### Next release: field feedback from the first deployment (M17)
+#### Also in 0.4.0: field feedback from the first deployment (M17)
+
+The database also gains `principal.password_change_by` (core schema 9) and the webhooks
+module's `format` (schema 2), on the same first start.
+
 
 - **Upgrade note:** `loded setup` no longer prints an admin token; the password is the one
   secret. Scripts that read the token from setup's output need `--print-admin-token`.
   Without a terminal and without `--admin-password-file`, setup now generates a first
   password (`--generate-admin-password`) instead of failing.
-- The database gains `principal.password_change_by` (core schema 9), added on the first
-  start. A generated first password is good only for choosing a new one (`POST
+- A generated first password is good only for choosing a new one (`POST
   /auth/password`, `lode passwd`, or the admin web sign-in), and for 24 hours. Logins with it
   are `unauthenticated` with `details.reason` `password_change_required` (or
   `password_expired`); older clients show the message.

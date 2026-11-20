@@ -11,8 +11,8 @@
 
 **Lode** is a centralized version control system for small teams, up to about 100 people, whose
 projects mix source code with large binary assets: game studios, simulation and media teams,
-anyone whose repository holds textures, models and builds next to the code. It takes
-Subversion's simple model, adds the Perforce features such teams miss (exclusive locks,
+anyone whose repository holds textures, models and builds next to the code. It pairs one
+server and a simple linear history with the features such teams need (exclusive locks,
 shelves, changelists, partial checkouts), and treats AI agents as users with their own
 identity, permissions and MCP tools.
 
@@ -109,7 +109,7 @@ See [lode/docs/MCP.md](lode/docs/MCP.md).
 | Client | What it is |
 | --- | --- |
 | `lode` | The command-line client. Every command has `--json`. |
-| **Lode Desk** | A native desktop app (Slint) in a Sourcetree-like layout: changes and changelists, history, blame, text and image diffs, branches and merges with conflict resolution, locks, shelves and their checks. It updates itself. Guide: [desk/docs/guide.md](desk/docs/guide.md). |
+| **Lode Desk** | A native desktop app (Slint): changes and changelists, history, blame, text and image diffs, branches and merges with conflict resolution, locks, shelves and their checks. It updates itself. Guide: [desk/docs/guide.md](desk/docs/guide.md). |
 | **Lode for Unreal** | An Unreal Editor plugin that makes Lode a revision control provider (Unreal Engine 5.8). It runs `lode --json`. Guide and spec: [unreal/docs/SPEC.md](unreal/docs/SPEC.md). |
 | Any MCP agent | `lode mcp` on a developer machine, or `/mcp` on the server. |
 
