@@ -109,6 +109,11 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 
 ### 0.3.0: chunked large files, Postgres, caching proxy (M15)
 
+Nothing has to be done to upgrade: replace the programs and restart. The database gains the
+columns for deleting users and depots (core schema 6: `lode admin user delete`, `lode admin
+depot delete` and the trash), added on the first start. A 0.2 server refuses a database a 0.3 server has opened,
+so take a backup first.
+
 - Files of 16 MiB and more are stored as content-defined chunks (T150, T151). The file id
   does not change, so history, trees and older clients are unaffected: an 0.2 client still
   uploads and downloads whole files, and the server serves whole files to it. 0.3 clients
@@ -120,6 +125,7 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 - Modules declare a Postgres form of each migration (`Migration::postgres`); a module without
   one cannot be enabled on a Postgres server. All modules shipped with Lode have one.
 - New `loded proxy` (T154): a caching proxy for remote offices, configured in its own
-  `proxy.toml`. Clients use it after `lode proxy set <url>` or with `LODE_PROXY`; nothing
-  changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
+  `proxy.toml` (see the user guide, "A caching proxy for a remote office"; `loded proxy
+  --example` prints a starting file). Clients use it after `lode proxy set <url>` or with
+  `LODE_PROXY`; nothing changes for anyone else. The server gains `GET /depots/{d}/obliterated-ids` for proxies,
   open to the depot's readers (ids only).
