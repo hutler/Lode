@@ -125,3 +125,5 @@ Built and tested, never published. 0.2.0 is the first public release; a server t
 - `lode link` prints `lode://` links; `lode shelve --json` gains `link`.
 - `lode completions` and `loded completions`; the Linux packages install bash, zsh and fish
   completion.
+- `GET /depots` gives server administrators `revisions`, `last_commit_at` and `size_bytes`
+  per depot; `lode admin depot list` prints them as a table. Older clients ignore the fields.

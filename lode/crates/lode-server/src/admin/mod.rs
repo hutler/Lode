@@ -25,7 +25,7 @@ mod settings;
 mod signin;
 mod webhooks;
 
-use std::sync::Arc;
+
 
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -44,7 +44,6 @@ pub(crate) struct Ctx {
     state: AppState,
     /// The API router: core routes and the enabled modules' routes, without the admin UI.
     api: Router,
-    sizes: Arc<format::SizeCache>,
 }
 
 impl Ctx {
@@ -64,11 +63,7 @@ pub fn routes(state: AppState, api: Router) -> Router {
     if !state.config().admin_ui.enabled {
         return Router::new();
     }
-    let ctx = Ctx {
-        state,
-        api,
-        sizes: Arc::default(),
-    };
+    let ctx = Ctx { state, api };
     Router::new()
         .route("/admin", get(|| async { Redirect::permanent("/admin/") }))
         .route("/admin/", get(overview::page))

@@ -895,8 +895,28 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
         }
         AdminCmd::Depot(DepotCmd::List) => {
             let list = c.depots().await?;
-            for d in &list.depots {
-                ctx.out.line(&d.name);
+            if list.depots.iter().any(|d| d.revisions.is_some()) {
+                let width = list.depots.iter().map(|d| d.name.len()).max().unwrap_or(0).max(5);
+                ctx.out.line(format!(
+                    "{:<width$}  {:>9}  {:>9}  LAST COMMIT",
+                    "DEPOT", "REVISIONS", "SIZE"
+                ));
+                for d in &list.depots {
+                    ctx.out.line(format!(
+                        "{:<width$}  {:>9}  {:>9}  {}",
+                        d.name,
+                        d.revisions.unwrap_or(0),
+                        d.size_bytes.map(crate::output::human_bytes).unwrap_or_else(|| "-".into()),
+                        d.last_commit_at
+                            .map(crate::cmd::history::format_time)
+                            .unwrap_or_else(|| "-".into())
+                    ));
+                }
+            } else {
+                // An older server: names only.
+                for d in &list.depots {
+                    ctx.out.line(&d.name);
+                }
             }
             to_json(&list)
         }

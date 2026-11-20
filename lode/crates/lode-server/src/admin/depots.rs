@@ -44,12 +44,7 @@ async fn depot_size(ctx: &Ctx, name: &str) -> Option<u64> {
         .ok()
         .flatten()?
         .id;
-    let dir = state
-        .config()
-        .data_dir
-        .join(crate::server::DEPOTS_DIR)
-        .join(id.0.to_string());
-    ctx.sizes.size(&dir, state.clock().now_ms()).await
+    crate::sizes::depot_size(state, id).await
 }
 
 fn size_text(size: Option<u64>) -> Html {

@@ -26,6 +26,7 @@ pub mod read;
 pub mod routes;
 mod serve;
 pub mod server;
+pub mod sizes;
 pub mod state;
 pub mod tls;
 pub mod trash;

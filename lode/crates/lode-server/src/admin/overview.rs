@@ -160,7 +160,7 @@ async fn storage(ctx: &Ctx, now: i64) -> (Html, Html) {
         }
         _ => {
             let dir = cfg.data_dir.join(crate::server::DEPOTS_DIR);
-            let size = match ctx.sizes.size(&dir, now).await {
+            let size = match ctx.state().sizes().size(&dir, now).await {
                 Some(n) => text(bytes(n)),
                 None => html!("<span class=\"muted\">Cannot be read</span>"),
             };
@@ -226,7 +226,7 @@ async fn backups(ctx: &Ctx, now: i64) -> Html {
         }
         None => match &newest {
             Some((_, path)) => {
-                let size = match ctx.sizes.size(path, now).await {
+                let size = match ctx.state().sizes().size(path, now).await {
                     Some(n) => html!(", {}", bytes(n)),
                     None => Html::new(),
                 };

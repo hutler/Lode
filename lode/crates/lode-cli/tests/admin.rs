@@ -1,6 +1,7 @@
 //! T053 acceptance: a server set up entirely with `lode admin`, then checked by behaviour.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use lode_proto::admin::{AccessLevel, AclEffect};
 use lode_testkit::{TestServer, TestWorkspace};
 use serde_json::Value;
 
@@ -371,4 +372,41 @@ async fn users_and_depots_are_deleted() {
     );
     let (code, err) = admin.json_status(&["admin", "depot", "restore", "art"]);
     assert_eq!(code, 1, "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn depot_list_shows_revisions_size_and_last_commit_to_admins() {
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    server.create_depot("empty").await;
+    server
+        .commit_files("game", "main", &[("a.txt", b"one\n")])
+        .await;
+    let rev = server
+        .commit_files("game", "main", &[("b.txt", b"two\n")])
+        .await;
+    let admin = as_user(&server, server.admin_token());
+    let list = admin.json(&["admin", "depot", "list"]);
+    let depots = list["depots"].as_array().unwrap();
+    let game = depots.iter().find(|d| d["name"] == "game").unwrap();
+    assert_eq!(game["revisions"], rev, "{list}");
+    assert!(game["last_commit_at"].is_string(), "{list}");
+    assert!(game["size_bytes"].as_u64().unwrap() > 0, "{list}");
+    // A new depot starts with its first (empty) revision.
+    let empty = depots.iter().find(|d| d["name"] == "empty").unwrap();
+    assert_eq!(empty["revisions"], 1, "{list}");
+
+    let out = admin.cmd().args(["admin", "depot", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.starts_with("DEPOT"), "{text}");
+    assert!(text.lines().any(|l| l.starts_with("game") && l.contains(&rev.to_string())), "{text}");
+
+    // Someone who only reads sees the depot but not the figures.
+    let ana = server.create_user("ana", &["read"]).await;
+    server
+        .acl("game", "ana", "*", "**", AclEffect::Allow, AccessLevel::Read)
+        .await;
+    let list = as_user(&server, &ana).json(&["admin", "depot", "list"]);
+    assert_eq!(list["depots"][0]["name"], "game", "{list}");
+    assert!(list["depots"][0].get("revisions").is_none(), "{list}");
 }

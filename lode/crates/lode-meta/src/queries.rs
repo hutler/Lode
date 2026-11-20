@@ -496,6 +496,21 @@ pub trait Reads {
             .optional()?)
     }
 
+    /// The newest revision of a depot.
+    fn last_revision(&self, depot: DepotId) -> Result<Option<RevisionRow>> {
+        Ok(self
+            .db()
+            .query_row(
+                &format!(
+                    "SELECT {REVISION_COLS} FROM revision WHERE depot_id = ?1 \
+                     ORDER BY num DESC LIMIT 1"
+                ),
+                params![depot.0],
+                revision_row,
+            )
+            .optional()?)
+    }
+
     /// The revision a client request id produced, for idempotent retries.
     fn revision_by_request_id(
         &self,

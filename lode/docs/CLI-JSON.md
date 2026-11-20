@@ -486,7 +486,7 @@ may also manage that agent's tokens).
 
 | Command | `--json` output |
 | --- | --- |
-| `depot create <name>` / `depot list` | the depot / `{ "depots": [ { "name", "created_at" } ] }` |
+| `depot create <name>` / `depot list` | the depot / `{ "depots": [ { "name", "created_at", "revisions"?, "last_commit_at"?, "size_bytes"? } ] }`; the last three for server administrators (T179), and the text output is then a table |
 | `user create <name> [--display-name D] [--sso IDENTITY] [--password-stdin]` | the principal, with `"sso"` when linked; with `--sso` no password is asked for unless `--password-stdin` is given |
 | `user sso <name> <identity>` / `user sso <name> --remove` | the principal; an identity linked to someone else is `conflict` |
 | `user list` / `agent list` | `{ "principals": [principal] }`, users or agents only |

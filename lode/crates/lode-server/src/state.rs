@@ -47,6 +47,7 @@ struct Inner {
     started_at: i64,
     last_backup: Mutex<Option<BackupRun>>,
     listening: std::sync::OnceLock<std::net::SocketAddr>,
+    sizes: crate::sizes::SizeCache,
 }
 
 /// The outcome of the last scheduled backup this server made (T140).
@@ -106,6 +107,7 @@ impl AppState {
                 failpoints: Arc::default(),
                 started_at,
                 last_backup: Mutex::new(None),
+                sizes: crate::sizes::SizeCache::default(),
                 listening: std::sync::OnceLock::new(),
             }),
         };
@@ -283,6 +285,12 @@ impl AppState {
     /// port 0).
     pub fn set_listening(&self, addr: std::net::SocketAddr) {
         let _ = self.inner.listening.set(addr);
+    }
+
+    /// Measured directory sizes (depots, store, database), shared by the admin pages and
+    /// `GET /depots`.
+    pub fn sizes(&self) -> &crate::sizes::SizeCache {
+        &self.inner.sizes
     }
 
     /// The address the server listens on: the bound one when known, else the configured one.

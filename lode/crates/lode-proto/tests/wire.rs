@@ -215,6 +215,9 @@ fn depot_types() {
             depots: vec![DepotView {
                 name: "game".into(),
                 created_at: T,
+                revisions: None,
+                last_commit_at: None,
+                size_bytes: None,
             }],
         }
     );
