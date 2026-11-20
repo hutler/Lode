@@ -439,11 +439,17 @@ impl Validate {
             let inner = self.inner.clone();
             let task = tokio::spawn(async move {
                 let _permit = permit;
-                if let Err(e) = run_one(&ctx2, &setup2, DepotId(d), s, v).await {
-                    // Retrying at once would loop on a lasting fault; the shelf version
-                    // stays unvalidated and a new shelf version runs again.
-                    tracing::error!(error = %e, depot = d, shelf = s, version = v, "validation run failed");
-                    let _ = mark_done(&ctx2, DepotId(d), s, v, &[]).await;
+                let depot = DepotId(d);
+                let results = match run_one(&ctx2, &setup2, depot, s, v).await {
+                    Ok(results) => results,
+                    Err(e) => {
+                        tracing::error!(error = %e, depot = d, shelf = s, version = v, "validation run failed");
+                        Vec::new()
+                    }
+                };
+                if let Err(e) = mark_done(&ctx2, &setup2.reporter, depot, s, v, &results).await {
+                    // Keep the run recoverable by the startup requeue after a storage failure.
+                    tracing::error!(error = %e, depot = d, shelf = s, version = v, "could not publish validation results");
                 }
                 if let Ok(mut r) = inner.running.lock() {
                     if r.get(&(d, s)).is_some_and(|(rv, _)| *rv == v) {
@@ -584,16 +590,14 @@ async fn walk(
     Ok(())
 }
 
-/// Reports one check; failures to report are logged, never fatal.
-async fn report(
-    ctx: &ModuleCtx,
-    setup: &Setup,
-    (depot, shelf, version): (DepotId, u64, u64),
+fn shelf_check(
+    shelf: u64,
+    version: u64,
     name: &str,
     state: CheckState,
     summary: String,
-) {
-    let req = ReportCheckRequest {
+) -> ReportCheckRequest {
+    ReportCheckRequest {
         target: CheckTarget {
             kind: CheckTargetKind::Shelf,
             id: shelf,
@@ -603,34 +607,54 @@ async fn report(
         state,
         summary: Some(summary),
         url: None,
-    };
-    if let Err(e) = lode_mod_checks::report_check_as(ctx, depot, &setup.reporter, req).await {
-        tracing::warn!(error = ?e, "could not report a validation check");
     }
 }
 
 async fn mark_done(
     ctx: &ModuleCtx,
+    reporter: &PrincipalRow,
     depot: DepotId,
     shelf: i64,
     version: i64,
     results: &[ScriptResult],
-) -> Result<bool, BoxError> {
+) -> Result<(), BoxError> {
     let text = serde_json::to_string(results)?;
+    let mut checks = Vec::new();
+    for result in results {
+        let state = match result.outcome {
+            Outcome::Skipped => continue,
+            Outcome::Passed => CheckState::Success,
+            Outcome::Failed | Outcome::Error => CheckState::Failure,
+        };
+        let req = shelf_check(
+            u64::try_from(shelf)?,
+            u64::try_from(version)?,
+            &result.name,
+            state,
+            result.summary(SUMMARY_MAX),
+        );
+        checks.push(lode_mod_checks::PreparedCheck::new(req).map_err(|e| format!("{e:?}"))?);
+    }
+    let reporter = reporter.clone();
     let now = ctx.clock().now_ms();
-    let d = depot.0;
-    let changed = ctx
-        .meta()
+    ctx.meta()
         .store()
         .write(move |tx| {
-            tx.conn().execute(
+            let changed = tx.conn().execute(
                 "UPDATE mod_validate_run SET state = ?4, results = ?5, updated_at = ?6
-                 WHERE depot_id = ?1 AND shelf_id = ?2 AND shelf_version = ?3 AND state = 'running'",
-                vals![d, shelf, version, state::DONE, &text, now],
-            )
+             WHERE depot_id = ?1 AND shelf_id = ?2 AND shelf_version = ?3 AND state = 'running'",
+                vals![depot.0, shelf, version, state::DONE, &text, now],
+            )?;
+            if changed > 0 {
+                for check in checks {
+                    check.store_in(tx, depot, &reporter, now)?;
+                }
+            }
+            Ok(())
         })
         .await?;
-    Ok(changed > 0)
+    ctx.notify_events();
+    Ok(())
 }
 
 /// One run: the shelf version's changed files and the head's scripts in a temporary tree.
@@ -640,7 +664,7 @@ async fn run_one(
     depot: DepotId,
     shelf_id: i64,
     version: i64,
-) -> Result<(), BoxError> {
+) -> Result<Vec<ScriptResult>, BoxError> {
     let shelf_u = u64::try_from(shelf_id)?;
     let version_u = u64::try_from(version)?;
     let shelf: Option<ShelfView> = lode_mod_shelves::shelf_for_module(ctx, depot, shelf_u)
@@ -648,12 +672,10 @@ async fn run_one(
         .map_err(|e| format!("{e:?}"))?;
     let Some(shelf) = shelf.filter(|s| s.version == version_u && s.state == ShelfState::Open)
     else {
-        mark_done(ctx, depot, shelf_id, version, &[]).await?;
-        return Ok(());
+        return Ok(Vec::new());
     };
     let Some((root, config)) = head_config(ctx, depot, &shelf.branch).await? else {
-        mark_done(ctx, depot, shelf_id, version, &[]).await?;
-        return Ok(());
+        return Ok(Vec::new());
     };
     let scripts = server_scripts(&config);
     let changes = shelf.changes.clone().unwrap_or_default();
@@ -665,15 +687,17 @@ async fn run_one(
         if m.is_empty() {
             results.push(ScriptResult::skipped(&s.name, "no matching files"));
         } else {
-            report(
-                ctx,
-                setup,
-                (depot, shelf_u, version_u),
+            let req = shelf_check(
+                shelf_u,
+                version_u,
                 &s.name,
                 CheckState::Pending,
                 format!("checking {} files", m.len()),
-            )
-            .await;
+            );
+            if let Err(e) = lode_mod_checks::report_check_as(ctx, depot, &setup.reporter, req).await
+            {
+                tracing::warn!(error = ?e, "could not report a pending validation check");
+            }
             todo.push((s, m));
         }
     }
@@ -727,28 +751,7 @@ async fn run_one(
         }
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
-    if mark_done(ctx, depot, shelf_id, version, &results).await? {
-        for r in &results {
-            if r.outcome == Outcome::Skipped {
-                continue;
-            }
-            let state = if r.outcome == Outcome::Passed {
-                CheckState::Success
-            } else {
-                CheckState::Failure
-            };
-            report(
-                ctx,
-                setup,
-                (depot, shelf_u, version_u),
-                &r.name,
-                state,
-                r.summary(SUMMARY_MAX),
-            )
-            .await;
-        }
-    }
-    Ok(())
+    Ok(results)
 }
 
 /// Writes the shelf's matching changed files, then the head's scripts and support files on

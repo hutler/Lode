@@ -258,122 +258,132 @@ pub async fn report_check(
     if !access.is_visible() {
         return Err(ApiError::not_found(format!("no depot `{depot}`")));
     }
-    if !valid_name(&req.name) {
-        return Err(ApiError::invalid_request(format!(
-            "check names are 1 to {MAX_NAME_LEN} of a-z, 0-9, `.`, `_`, `/` and `-`"
-        )));
+    let check = PreparedCheck::new(req)?;
+    if check.request.target.kind == CheckTargetKind::Revision {
+        readable(ctx, caller, d.id, check.request.target.id).await?;
     }
-    if req
-        .summary
-        .as_ref()
-        .is_some_and(|s| s.len() > MAX_SUMMARY_LEN)
-    {
-        return Err(ApiError::invalid_request(format!(
-            "summary is longer than {MAX_SUMMARY_LEN} bytes"
-        )));
-    }
-    if let Some(u) = &req.url {
-        check_url(u)?;
-    }
-    let (kind, _, _) = stored_target(&req.target)?;
-    if kind == CheckTargetKind::Revision {
-        readable(ctx, caller, d.id, req.target.id).await?;
-    }
-    store_check(ctx, d.id, &caller.principal, req).await
+    check.store(ctx, d.id, &caller.principal).await
 }
 
-/// Stores a check that another module reports on its own behalf, as `reporter` (the
-/// validation module's service user). No token or access check; the name and sizes are
-/// checked as for [`report_check`].
+/// Reports a check on behalf of a module's service principal.
 pub async fn report_check_as(
     ctx: &ModuleCtx,
     depot: DepotId,
     reporter: &lode_meta::PrincipalRow,
     req: ReportCheckRequest,
 ) -> ApiResult<CheckView> {
-    if !valid_name(&req.name) {
-        return Err(ApiError::invalid_request(format!(
-            "check names are 1 to {MAX_NAME_LEN} of a-z, 0-9, `.`, `_`, `/` and `-`"
-        )));
-    }
-    if req
-        .summary
-        .as_ref()
-        .is_some_and(|s| s.len() > MAX_SUMMARY_LEN)
-    {
-        return Err(ApiError::invalid_request(format!(
-            "summary is longer than {MAX_SUMMARY_LEN} bytes"
-        )));
-    }
-    if let Some(u) = &req.url {
-        check_url(u)?;
-    }
-    store_check(ctx, depot, reporter, req).await
+    PreparedCheck::new(req)?.store(ctx, depot, reporter).await
 }
 
-async fn store_check(
-    ctx: &ModuleCtx,
-    depot_id: DepotId,
-    principal: &lode_meta::PrincipalRow,
-    req: ReportCheckRequest,
-) -> ApiResult<CheckView> {
-    let (kind, id, version) = stored_target(&req.target)?;
-    let now = ctx.clock().now_ms();
-    let me = principal.id.0;
-    let reporter = principal.name.clone();
-    let view = ctx
-        .meta()
-        .store()
-        .write(move |tx| {
-            tx.conn().execute(
-                &format!(
-                    "INSERT INTO mod_checks_check (depot_id, {COLUMNS})
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                     ON CONFLICT (depot_id, target_kind, target_id, target_version, name)
-                     DO UPDATE SET state = excluded.state, summary = excluded.summary,
-                                   url = excluded.url, reporter_id = excluded.reporter_id,
-                                   updated_at = excluded.updated_at"
-                ),
-                vals![
-                    depot_id.0,
-                    kind.as_str(),
-                    to_i64(id),
-                    to_i64(version),
-                    &req.name,
-                    req.state.as_str(),
-                    &req.summary,
-                    &req.url,
-                    me,
-                    now
-                ],
-            )?;
-            let data = json!({
-                "target_kind": kind.as_str(),
-                "target_id": id,
-                "target_version": version,
-                "name": req.name,
-                "state": req.state.as_str(),
-                "reporter": reporter,
-            });
-            tx.append_outbox(Some(depot_id), "check.updated", &data.to_string(), now)?;
-            view(
-                tx,
-                CheckRow {
-                    kind: kind.as_str().to_owned(),
-                    target_id: to_i64(id),
-                    version: to_i64(version),
-                    name: req.name,
-                    state: req.state.as_str().to_owned(),
-                    summary: req.summary,
-                    url: req.url,
-                    reporter_id: me,
-                    updated_at: now,
-                },
-            )
+/// A validated report that can be committed with another module's metadata.
+pub struct PreparedCheck {
+    request: ReportCheckRequest,
+    version: u64,
+}
+
+impl PreparedCheck {
+    /// Checks the report fields and normalizes the target version for storage.
+    pub fn new(req: ReportCheckRequest) -> ApiResult<Self> {
+        if !valid_name(&req.name) {
+            return Err(ApiError::invalid_request(format!(
+                "check names are 1 to {MAX_NAME_LEN} of a-z, 0-9, `.`, `_`, `/` and `-`"
+            )));
+        }
+        if req
+            .summary
+            .as_ref()
+            .is_some_and(|s| s.len() > MAX_SUMMARY_LEN)
+        {
+            return Err(ApiError::invalid_request(format!(
+                "summary is longer than {MAX_SUMMARY_LEN} bytes"
+            )));
+        }
+        if let Some(u) = &req.url {
+            check_url(u)?;
+        }
+        let (_, _, version) = stored_target(&req.target)?;
+        Ok(Self {
+            request: req,
+            version,
         })
-        .await?;
-    ctx.notify_events();
-    Ok(view)
+    }
+
+    async fn store(
+        self,
+        ctx: &ModuleCtx,
+        depot: DepotId,
+        reporter: &lode_meta::PrincipalRow,
+    ) -> ApiResult<CheckView> {
+        let now = ctx.clock().now_ms();
+        let reporter = reporter.clone();
+        let result = ctx
+            .meta()
+            .store()
+            .write(move |tx| self.store_in(tx, depot, &reporter, now))
+            .await?;
+        ctx.notify_events();
+        Ok(result)
+    }
+
+    /// Writes the check and its outbox event in the caller's transaction.
+    /// Wake event consumers after the transaction commits.
+    pub fn store_in(
+        self,
+        tx: &WriteTx<'_>,
+        depot_id: DepotId,
+        principal: &lode_meta::PrincipalRow,
+        now: Millis,
+    ) -> Result<CheckView, MetaError> {
+        let req = self.request;
+        let (kind, id, version) = (req.target.kind, req.target.id, self.version);
+        let me = principal.id.0;
+        let reporter = &principal.name;
+        tx.conn().execute(
+            &format!(
+                "INSERT INTO mod_checks_check (depot_id, {COLUMNS})
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT (depot_id, target_kind, target_id, target_version, name)
+                 DO UPDATE SET state = excluded.state, summary = excluded.summary,
+                               url = excluded.url, reporter_id = excluded.reporter_id,
+                               updated_at = excluded.updated_at"
+            ),
+            vals![
+                depot_id.0,
+                kind.as_str(),
+                to_i64(id),
+                to_i64(version),
+                &req.name,
+                req.state.as_str(),
+                &req.summary,
+                &req.url,
+                me,
+                now
+            ],
+        )?;
+        let data = json!({
+            "target_kind": kind.as_str(),
+            "target_id": id,
+            "target_version": version,
+            "name": req.name,
+            "state": req.state.as_str(),
+            "reporter": reporter,
+        });
+        tx.append_outbox(Some(depot_id), "check.updated", &data.to_string(), now)?;
+        view(
+            tx,
+            CheckRow {
+                kind: kind.as_str().to_owned(),
+                target_id: to_i64(id),
+                version: to_i64(version),
+                name: req.name,
+                state: req.state.as_str().to_owned(),
+                summary: req.summary,
+                url: req.url,
+                reporter_id: me,
+                updated_at: now,
+            },
+        )
+    }
 }
 
 async fn list(

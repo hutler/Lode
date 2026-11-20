@@ -1039,9 +1039,11 @@ mod_validate_run (depot_id, shelf_id, shelf_version /*PK*/, state /*queued|runni
   rest it reports `validate/<name>` `pending`, writes a fresh directory under `work_dir`
   with the shelf's added and edited files, then the head's `support` files and scripts on top
   (so a shelf cannot replace them; at most `max_input_mib`), runs each script through
-  `lode-validate` with `phase: "server"`, stores the results (`done`) and reports `success`
-  or `failure` with a 1 KiB summary (`lode_mod_checks::report_check_as`, which skips token
-  checks for module reporters). A run that cannot finish is stored `done` without results.
+  `lode-validate` with `phase: "server"`. One metadata transaction publishes `done`, the
+  results, the final check states with their summaries (up to 1 KiB), and their outbox
+  events. A superseded run publishes none of them. A storage failure rolls the transaction
+  back and leaves the run eligible for retry on server restart. A run that cannot collect
+  its inputs completes without results and cannot satisfy required validation.
 - `pre_commit`: a shelf submit to a branch in `[checks].branches` needs a `done` row for that
   shelf version where every `server = true` script passed or was skipped; otherwise
   `checks_required` with `missing` entries in the checks module's format (`reporter:
