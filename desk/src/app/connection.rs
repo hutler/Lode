@@ -94,22 +94,10 @@ impl App {
                     )
                 })
             } else {
-                me.desk.connection_test(server).await.map(|v| {
-                    v["checks"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .map(|c| {
-                            format!(
-                                "{} · {}   {}",
-                                c["name"].as_str().unwrap_or(""),
-                                c["status"].as_str().unwrap_or(""),
-                                c["detail"].as_str().unwrap_or("")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
+                me.desk
+                    .connection_test(server)
+                    .await
+                    .map(|report| lode_ops::cmd::doctor::lines(&report).join("\n"))
             };
             if let Some(w) = me.window.upgrade() {
                 let c = w.global::<Connection>();

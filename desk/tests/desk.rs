@@ -98,7 +98,7 @@ async fn connection_settings_use_the_selected_server() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|c| c["name"] == "dns" && c["status"] == "ok"));
+        .any(|c| c["name"] == "info" && c["status"] == "ok"));
     assert!(s
         .desk
         .save_proxy(url.clone(), "broken address".into())
