@@ -1,0 +1,69 @@
+name: Desk installer acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful desk-release run ID (leave empty to test the public update feed)
+        type: string
+      previous_tag:
+        description: Previous release tag (defaults to the newest older release with a Desk MSI)
+        type: string
+      core_tag:
+        description: Server release tag (defaults to the latest stable Lode core)
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/desk-installer-acceptance.yml"
+      - "desk/packaging/*installer*.py"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installers:
+    name: Packaged Desk on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch and verify installer files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          CORE_TAG: ${{ inputs.core_tag }}
+        run: python desk/packaging/fetch-installers.py
+      - if: runner.os == 'Windows'
+        run: python -m pip install pywinauto==0.6.9
+      - name: Test the Windows upgrade and workspace
+        if: runner.os == 'Windows'
+        run: python -u desk/packaging/test-installers.py
+      - name: Open two desktop links with the installed Debian package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xdotool dbus-x11 desktop-file-utils
+          sudo apt-get install -y "$CANDIDATE_FILES"/lode-desk-"$DESK_VERSION"-linux-x86_64.deb
+          export SLINT_BACKEND=winit-software LODE_DESK_NO_UPDATE=1
+          xvfb-run -a dbus-run-session -- bash -euo pipefail <<'SHELL'
+          test -n "$(xdg-mime query default x-scheme-handler/lode)"
+          gio open lode://lode.example.com/game
+          timeout 45 xdotool search --sync --name 'Lode Desk' >/dev/null
+          before=$(pgrep -xo lode-desk)
+          gio open lode://lode.example.com/other
+          sleep 2
+          test "$before" = "$(pgrep -xo lode-desk)"
+          test "$(pgrep -xc lode-desk)" -eq 1
+          SHELL
