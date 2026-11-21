@@ -293,7 +293,7 @@ impl App {
     }
 
     /// Releases locks (`force` breaks other people's), then lists them again.
-    fn release(&self, paths: Vec<String>, force: bool) {
+    pub(super) fn release(&self, paths: Vec<String>, force: bool) {
         let Some((w, root)) = self.team_root() else {
             return;
         };
@@ -309,6 +309,10 @@ impl App {
         spawn(async move {
             let got = me.desk.unlock(root.clone(), paths, force).await;
             let Some(w) = me.window.upgrade() else { return };
+            if me.shown_root.borrow().as_deref() != Some(&root) {
+                return;
+            }
+            let released = got.is_ok();
             match got {
                 Ok(_) => {
                     if w.get_dialog() == Dialog::Confirm {
@@ -327,8 +331,16 @@ impl App {
                         let mut l = t.get_locks();
                         l.error = error_info(&e);
                         t.set_locks(l);
+                        if w.global::<Reading>().get_pane() == super::Pane::Files {
+                            let assets = w.global::<super::Assets>();
+                            assets.set_busy(false);
+                            assets.set_message(e.message.clone().into());
+                        }
                     }
                 }
+            }
+            if released {
+                me.reload_assets_for(&root);
             }
             me.load_locks();
             me.refresh(root);
@@ -421,6 +433,10 @@ impl App {
         let Some(path) = self.selected_file() else {
             return;
         };
+        self.ask_lock_path(&w, path);
+    }
+
+    pub(super) fn ask_lock_path(&self, w: &AppWindow, path: String) {
         *self.team.lock_paths.borrow_mut() = vec![path.clone()];
         let t = w.global::<Team>();
         t.set_lock_comment(SharedString::new());
@@ -464,6 +480,7 @@ impl App {
                     if w.get_dialog() == Dialog::Lock {
                         w.set_dialog(Dialog::None);
                     }
+                    me.reload_assets_for(&root);
                     me.changes_done("Locked.");
                     me.refresh(root);
                 }

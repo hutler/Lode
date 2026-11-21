@@ -23,21 +23,30 @@ use crate::history::{self, PAGE};
 pub(super) enum View {
     #[default]
     Changes,
+    Files(String),
     /// A branch's history (`path` none) or a file's, with a revision selected.
     History {
         path: Option<String>,
         rev: Option<u64>,
     },
     /// A file at a revision, or at the workspace's.
-    Blame { path: String, rev: Option<u64> },
+    Blame {
+        path: String,
+        rev: Option<u64>,
+    },
     /// A file as a revision changed it, or the working copy against its base.
-    Diff { path: String, rev: Option<u64> },
+    Diff {
+        path: String,
+        rev: Option<u64>,
+    },
     /// The depot's file locks (T133).
     Locks,
     /// The depot's shelves (T133).
     Shelves,
     /// A conflicted file being resolved (T134).
-    Conflict { path: String },
+    Conflict {
+        path: String,
+    },
     /// The workspace view's editor (T134).
     Patterns,
 }
@@ -284,7 +293,12 @@ impl App {
         if !matches!(view, View::Diff { .. }) {
             self.clear_peek();
         }
+        self.stop_asset_watch(&w);
         match view {
+            View::Files(path) => {
+                r.set_pane(Pane::Files);
+                self.load_assets(path);
+            }
             View::Changes => {
                 r.set_pane(Pane::Changes);
                 self.peek_selected();

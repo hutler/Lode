@@ -1,6 +1,8 @@
 // Lode Desk's main window (T130): Home with recent workspaces, sign-in, check out, and one tab
 // per open workspace. The Rust side (src/app.rs) runs the operations and fills the properties.
 
+import { Assets, AssetLine, AssetCard, DepotFolder, AssetBrowser, DepotTree } from "assets.slint";
+export { Assets, AssetLine, AssetCard, DepotFolder }
 import { Validation, ValidationRow, ValidationPanel } from "validation.slint";
 export { Validation, ValidationRow }
 import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
@@ -444,6 +446,7 @@ component Sidebar inherits Rectangle {
                     clicked => { Reading.show-pane(Pane.view); }
                 }
             }
+            SideSection { title: "FILES"; DepotTree { depot: root.ws.depot; } }
             SideSection {
                 title: "BRANCHES";
                 for b in Branching.side-rows: SideItem {
@@ -732,6 +735,7 @@ component WorkspacePage inherits Rectangle {
                         dismissed => { root.dismiss-error(); }
                     }
                 }
+                if Reading.pane == Pane.files: AssetBrowser { vertical-stretch: 1; }
                 if Reading.pane == Pane.history: HistoryView { vertical-stretch: 1; }
                 if Reading.pane == Pane.blame: BlameView { vertical-stretch: 1; }
                 if Reading.pane == Pane.diff: DiffView { vertical-stretch: 1; }
