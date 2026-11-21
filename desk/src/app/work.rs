@@ -117,6 +117,9 @@ impl App {
     /// them again.
     pub(super) fn show_root(&self, w: &AppWindow, root: Option<String>) {
         let before = self.shown_root.replace(root.clone());
+        if before != root {
+            self.reset_assets(w);
+        }
         if let Some(b) = before.filter(|b| Some(b) != root.as_ref()) {
             if let Some(st) = self.work.borrow_mut().get_mut(&b) {
                 st.message = w.get_commit_message().to_string();
@@ -219,6 +222,7 @@ impl App {
                 tab.rev = rev;
                 tab.branch = p.branch.as_str().into();
                 self.workspaces.set_row_data(i, tab);
+                self.reload_assets_for(root);
                 if self.shown_root.borrow().as_deref() == Some(root) {
                     self.refresh_side_branches();
                 }

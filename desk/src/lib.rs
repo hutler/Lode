@@ -10,6 +10,7 @@
 #![deny(unsafe_code)]
 
 pub mod app;
+mod asset_preview;
 pub mod branches;
 pub mod changes;
 pub mod desk;

@@ -179,6 +179,30 @@ async fn start(rt: Handle) -> World {
     let story = story(&server).await;
     add_user(&server, "alice", Some("correct horse"), None).await;
     add_user(&server, "bob", Some("battery staple"), None).await;
+    server.create_depot("artist").await;
+    server
+        .commit_files(
+            "artist",
+            "main",
+            &[
+                ("Content/Art/BigRock.uasset", &rock_package()),
+                ("Content/Art/Unknown.uasset", b"no thumbnail"),
+                (".lodeconfig", b"[locks]\nrequired = [\"**/*.uasset\"]\n"),
+            ],
+        )
+        .await;
+    for who in ["alice", "bob"] {
+        server
+            .acl(
+                "artist",
+                who,
+                "*",
+                "**",
+                AclEffect::Allow,
+                AccessLevel::Write,
+            )
+            .await;
+    }
     server.create_depot("validation").await;
     server
         .commit_files(
@@ -1419,6 +1443,125 @@ async fn report(world: &World, target: CheckTarget, name: &str, state: CheckStat
         .unwrap();
 }
 
+// A versioned UE4 editor package prefix with a named FObjectThumbnail. The browser
+// needs only the summary, thumbnail record and table. Export data is never read.
+fn rock_package() -> Vec<u8> {
+    let png = png_of([143, 123, 101]);
+    let mut bytes = Vec::new();
+    let int = |b: &mut Vec<u8>, n: i32| b.extend(n.to_le_bytes());
+    for n in [0x9e2a83c1u32 as i32, -7, 864, 522, 0, 0, 0, 0, 0] {
+        int(&mut bytes, n);
+    }
+    // Name map, localization string, text/export/import tables, dependencies,
+    // soft references, searchable names and thumbnail table offset.
+    for _ in 0..13 {
+        int(&mut bytes, 0);
+    }
+    let slot = bytes.len();
+    int(&mut bytes, 0);
+    let thumb = bytes.len() as i32;
+    for n in [4, 4, png.len() as i32] {
+        int(&mut bytes, n);
+    }
+    bytes.extend(png);
+    let table = bytes.len() as i32;
+    bytes[slot..slot + 4].copy_from_slice(&table.to_le_bytes());
+    int(&mut bytes, 1);
+    for s in ["StaticMesh", "BigRock"] {
+        int(&mut bytes, s.len() as i32 + 1);
+        bytes.extend(s.as_bytes());
+        bytes.push(0);
+    }
+    int(&mut bytes, thumb);
+    bytes
+}
+
+async fn artist_browser(world: &World) {
+    let home = Home::new();
+    let folder = home.path().join("artist");
+    let w = home.window(world, Some(folder.clone()));
+    signed_in(world, &w).await;
+    click(&w, "Check out a depot…");
+    type_into(&w, "Depot", &format!("{}/artist", world.url));
+    click(&w, "Browse…");
+    click(&w, "Check out");
+    until("artist workspace opens", || {
+        w.get_dialog() == Dialog::None && w.get_changes().loaded
+    })
+    .await;
+    let root = "Content/Art/BigRock.uasset";
+    let (_other, bob, bob_root) = bob_on(world, "artist").await;
+    bob.lock(
+        bob_root.clone(),
+        vec![root.into()],
+        Some("silhouette pass".into()),
+    )
+    .await
+    .unwrap();
+    assert!(folder
+        .join(root)
+        .metadata()
+        .unwrap()
+        .permissions()
+        .readonly());
+    assert_eq!(w.global::<Reading>().get_pane(), Pane::Changes);
+    let ui = w.global::<lode_desk::app::Assets>();
+    for label in [
+        "Browse depot root",
+        "Browse folder Content",
+        "Browse folder Content/Art",
+    ] {
+        until(label, || shown(&w, label) && !ui.get_busy()).await;
+        click(&w, label);
+    }
+    let select = "Inspect Content/Art/BigRock.uasset";
+    until("gallery loads", || shown(&w, select) && !ui.get_busy()).await;
+    click(&w, select);
+    let card = ui.get_selected();
+    assert!(card.preview);
+    assert_eq!(card.holder, "bob");
+    assert_eq!(card.comment, "silhouette pass");
+    assert!(!card.workspace.is_empty());
+    assert!(!card.mine);
+    click(&w, "Inspect Content/Art/Unknown.uasset");
+    assert!(!ui.get_selected().preview);
+    click(&w, select);
+    click(&w, "Watch lock");
+    assert!(ui.get_watching());
+    bob.unlock(bob_root, vec![root.into()], false)
+        .await
+        .unwrap();
+    until("released lock is visible", || {
+        !ui.get_busy() && ui.get_selected().path == root && ui.get_selected().holder.is_empty()
+    })
+    .await;
+    click(&w, "Lock for editing");
+    type_into(&w, "Comment", "rock pass");
+    click_in(&w, "Lock", "Lock");
+    until("real lock and writable copy", || {
+        ui.get_selected().mine && ui.get_selected().writable
+    })
+    .await;
+    assert!(!folder
+        .join(root)
+        .metadata()
+        .unwrap()
+        .permissions()
+        .readonly());
+    click(&w, "Release my lock");
+    until("unlock restores file protection", || {
+        !ui.get_busy() && !ui.get_selected().mine && !ui.get_selected().writable
+    })
+    .await;
+    assert!(folder
+        .join(root)
+        .metadata()
+        .unwrap()
+        .permissions()
+        .readonly());
+    w.hide().unwrap();
+}
+
 async fn locks_shelves_and_checks(world: &World) {
     let home = Home::new();
     let folder = home.path().join("harbor");
@@ -2178,6 +2321,7 @@ fn main() -> std::process::ExitCode {
         content_validation(&world).await;
         twenty_thousand_rows(&world).await;
         history_blame_and_diffs(&world).await;
+        artist_browser(&world).await;
         locks_shelves_and_checks(&world).await;
         branches_merges_and_views(&world).await;
         links_handed_to_the_app(&world).await;

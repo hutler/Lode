@@ -36,6 +36,7 @@ mod screens {
 
 pub use screens::*;
 
+mod assets;
 mod branch;
 mod outside;
 mod read;
@@ -195,6 +196,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         read,
         team,
         branch,
+        assets: assets::Browser::default(),
         outside,
         validation: validation::State::default(),
         this: RefCell::new(RcWeak::new()),
@@ -202,6 +204,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     *app.this.borrow_mut() = Rc::downgrade(&app);
     app.refresh_recent();
     connect(&window, &app);
+    assets::connect(&window, &app);
     work::connect(&window, &app);
     validation::connect(&window, &app, options.open_browser);
     read::connect(&window, &app);
@@ -305,6 +308,7 @@ struct App {
     team: TeamState,
     /// Branches, merges, conflicts and the view (T134).
     branch: BranchState,
+    assets: assets::Browser,
     /// Links and updates (T135).
     outside: OutsideState,
     validation: validation::State,

@@ -109,6 +109,20 @@ normal shelf checks and keeps the local edits.
 
 [View the same results in the dark theme](guide/validation-dark.png).
 
+### Browse files and take an asset into work
+
+From **Changes**, open the depot name under **Files**, then expand folders such as
+`Content/Art`. **Depot** lists the workspace revision on the server. **Workspace** filters
+that listing to files present in your checkout. Opening a folder loads its direct children.
+Use **Previous** and **Next** for additional pages.
+
+Select an asset by its preview or name. Desk reads previews from local bitmap files and
+saved PNG/JPEG thumbnails in supported versioned Unreal editor packages. Depot-only files,
+packages without an embedded preview and unsupported images show **No preview**.
+The inspector shows the actual lock owner, workspace, comment and local write access.
+Use **Watch lock** to follow the selected file, or **Refresh** to check once. After release, use **Lock for editing** to take the lock with
+an optional comment. **Release my lock** returns it. The server arbitrates competing requests.
+
 ### Locks
 
 Files that cannot be merged, such as art and maps, are marked **needs lock**. Lock one before

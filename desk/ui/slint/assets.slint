@@ -1,0 +1,102 @@
+// Native depot browser and asset inspector.
+import { Button, ListView, Palette } from "std-widgets.slint";
+import { Muted, Title } from "parts.slint";
+export struct DepotFolder { path: string, caption: string, depth: int, expanded: bool }
+export struct AssetCard { path: string, name: string, picture: image, preview: bool, local: bool, writable: bool, size: string, holder: string, mine: bool, comment: string, workspace: string }
+export struct AssetLine { tiles: [AssetCard] }
+export global Assets {
+    in-out property <[DepotFolder]> folders;
+    in-out property <[AssetLine]> lines;
+    in-out property <AssetCard> selected;
+    in-out property <string> folder;
+    in-out property <string> message;
+    in-out property <string> page-label;
+    in-out property <bool> previous;
+    in-out property <bool> next;
+    in-out property <bool> busy;
+    in-out property <bool> lock-known;
+    in-out property <bool> local-only;
+    callback browse(string);
+    callback pick(string);
+    in-out property <bool> watching;
+    callback watch();
+    callback refresh();
+    callback change-page(int);
+    callback scope(bool);
+    callback take();
+    callback release();
+}
+export component DepotTree inherits VerticalLayout {
+    in property <string> depot;
+    HorizontalLayout {
+        Button { text: "Depot"; checkable: true; checked: !Assets.local-only; clicked => { Assets.scope(false); } }
+        Button { text: "Workspace"; checkable: true; checked: Assets.local-only; clicked => { Assets.scope(true); } }
+    }
+    Button { text: root.depot; accessible-label: "Browse depot root"; clicked => { Assets.browse(""); } }
+    for f in Assets.folders: HorizontalLayout {
+        Rectangle { width: min(f.depth * 10px + 4px, 48px); }
+        Button { text: (f.expanded ? "▾ " : "▸ ") + f.caption; horizontal-stretch: 1;
+            accessible-label: "Browse folder " + f.path; clicked => { Assets.browse(f.path); } }
+    }
+}
+component Tile inherits Rectangle {
+    in property <AssetCard> asset;
+    min-width: 80px; height: 136px; horizontal-stretch: 1;
+    border-width: 1px; border-radius: 5px;
+    border-color: Assets.selected.path == asset.path ? Palette.accent-background : Palette.border;
+    background: Palette.alternate-background;
+    accessible-role: button; accessible-label: "Inspect " + asset.path;
+    accessible-action-default => { Assets.pick(asset.path); }
+    VerticalLayout {
+        padding: 6px;
+        if root.asset.preview: Image { source: root.asset.picture; image-fit: contain; height: 85px; }
+        if !root.asset.preview: Text { text: "No preview"; color: Palette.foreground.transparentize(0.4); height: 85px; horizontal-alignment: center; vertical-alignment: center; }
+        Text { text: root.asset.name; color: Palette.foreground; font-weight: 600; overflow: elide; }
+        Muted { text: root.asset.holder != "" ? "Locked by " + root.asset.holder : root.asset.local ? "In workspace" : "Depot only"; }
+    }
+    TouchArea { clicked => { Assets.pick(root.asset.path); } }
+}
+export component AssetBrowser inherits VerticalLayout {
+    padding: 10px; spacing: 8px;
+    HorizontalLayout { Title { text: Assets.folder == "" ? "Depot files" : Assets.folder; horizontal-stretch: 1; }
+        Button { text: "Refresh"; accessible-label: "Refresh depot folder"; enabled: !Assets.busy; clicked => { Assets.refresh(); } }
+    }
+    if Assets.message != "": Text { text: Assets.message; color: Palette.foreground; wrap: word-wrap; }
+    HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout {
+            horizontal-stretch: 2;
+            ListView {
+                for row in Assets.lines: HorizontalLayout {
+                    spacing: 5px; padding-bottom: 5px;
+                    for tile in row.tiles: Tile { asset: tile; }
+                }
+            }
+            HorizontalLayout { alignment: center; spacing: 5px;
+                Button { text: "Previous"; enabled: Assets.previous && !Assets.busy; clicked => { Assets.change-page(-1); } }
+                Muted { text: Assets.page-label; }
+                Button { text: "Next"; enabled: Assets.next && !Assets.busy; clicked => { Assets.change-page(1); } }
+            }
+        }
+        VerticalLayout { width: 212px; spacing: 8px; alignment: start;
+            Title { text: "Inspector"; }
+            if Assets.selected.path == "": Muted { text: "Select a file to inspect its editing access."; }
+            if Assets.selected.path != "": VerticalLayout { spacing: 7px;
+                Text { text: Assets.selected.path; color: Palette.foreground; wrap: word-wrap; }
+                if Assets.selected.preview: Image { source: Assets.selected.picture; height: 100px; image-fit: contain; }
+                Muted { text: Assets.selected.size + " · " + (!Assets.selected.local ? "Depot only" : Assets.selected.writable ? "Writable" : "Read-only"); }
+                Text { text: !Assets.lock-known ? "Lock status unavailable" : Assets.selected.holder == "" ? "No lock held" : "Locked by " + Assets.selected.holder;
+                    color: Palette.foreground; wrap: word-wrap; }
+                if Assets.selected.workspace != "": Muted { text: "Workspace: " + Assets.selected.workspace; }
+                if Assets.selected.comment != "": Text { text: Assets.selected.comment; color: Palette.foreground; wrap: word-wrap; }
+                if Assets.lock-known && Assets.selected.holder != "" && !Assets.selected.mine: Button {
+                    text: Assets.watching ? "Stop watching" : "Watch lock";
+                    clicked => { Assets.watch(); }
+                }
+                if !Assets.selected.mine: Button { text: "Lock for editing"; enabled: Assets.lock-known && !Assets.busy && Assets.selected.local && Assets.selected.holder == "";
+                    clicked => { Assets.take(); } }
+                if Assets.selected.mine: Button { text: "Release my lock"; enabled: Assets.lock-known && !Assets.busy; clicked => { Assets.release(); } }
+            }
+        }
+    }
+}
