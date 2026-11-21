@@ -16,7 +16,7 @@ use crate::desk::ErrorView;
 /// What the app keeps for one open workspace.
 #[derive(Debug, Default)]
 pub(super) struct WorkspaceState {
-    pending: Pending,
+    pub(super) pending: Pending,
     loaded: bool,
     picked: BTreeSet<String>,
     selected: Option<String>,
@@ -83,7 +83,7 @@ fn plural(n: usize, one: &str) -> String {
 }
 
 /// The paths a refusal names (`details.paths`), one per line.
-fn refused(e: &ErrorView) -> SharedString {
+pub(super) fn refused(e: &ErrorView) -> SharedString {
     e.details["paths"]
         .as_array()
         .map(|a| {
@@ -321,6 +321,11 @@ impl App {
         });
     }
 
+    pub(super) fn select_problem(&self, path: &str, line: i32) {
+        self.with_shown(|st| st.selected = Some(path.to_owned()));
+        self.peek_at_line(path.to_owned(), line);
+    }
+
     fn select_file(&self, path: &str) {
         self.with_shown(|st| st.selected = Some(path.to_owned()));
         self.peek_selected();
@@ -454,34 +459,20 @@ impl App {
         if message.is_empty() || (!merging && picked.is_empty()) {
             return;
         }
-        self.run("Committing", move |me, root| {
-            Box::pin(async move {
-                let r = if merging {
-                    // A merge is committed whole.
-                    me.desk.commit_all(root.clone(), message.clone()).await?
-                } else {
-                    if !untracked.is_empty() {
-                        me.desk.add(root.clone(), untracked).await?;
-                    }
-                    me.desk
-                        .commit(root.clone(), picked, message.clone())
-                        .await?
-                };
-                me.committed(&root, &message);
-                Ok(format!(
-                    "Committed r{} ({}).",
-                    r["rev"],
-                    plural(
-                        usize::try_from(r["files"].as_u64().unwrap_or(0)).unwrap_or(0),
-                        "file"
-                    )
-                ))
-            })
-        });
+        let request = crate::desk::ShelveRequest {
+            paths: if merging { Vec::new() } else { picked },
+            message: Some(message),
+            ..Default::default()
+        };
+        self.start_validation(
+            crate::validation::Action::Commit,
+            request,
+            if merging { Vec::new() } else { untracked },
+        );
     }
 
     /// After a commit: the message is remembered and cleared, and nothing is picked.
-    fn committed(&self, root: &str, message: &str) {
+    pub(super) fn committed(&self, root: &str, message: &str) {
         {
             let mut m = self.messages.borrow_mut();
             changes::remember_message(&mut m, message);
@@ -687,23 +678,15 @@ impl App {
                 if value.is_empty() {
                     return;
                 }
-                self.dialog_op(move |me, root| {
-                    Box::pin(async move {
-                        let r = me
-                            .desk
-                            .commit_changelist(root.clone(), name.clone(), Some(value.clone()))
-                            .await?;
-                        me.committed(&root, &value);
-                        Ok(format!(
-                            "Committed r{} ({}) from {name}.",
-                            r["rev"],
-                            plural(
-                                usize::try_from(r["files"].as_u64().unwrap_or(0)).unwrap_or(0),
-                                "file"
-                            )
-                        ))
-                    })
-                });
+                self.start_validation(
+                    crate::validation::Action::Commit,
+                    crate::desk::ShelveRequest {
+                        message: Some(value),
+                        changelist: Some(name),
+                        ..Default::default()
+                    },
+                    Vec::new(),
+                );
             }
             Dialog::DeleteChangelist => {
                 self.dialog_op(move |me, root| {

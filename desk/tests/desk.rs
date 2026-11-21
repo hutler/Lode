@@ -1486,3 +1486,82 @@ paths = ["*.txt"]
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn cancelling_a_validator_terminates_the_child_before_sending() {
+    use lode_desk::validation::{Action, Control, Event};
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+    let s = setup().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let script = format!("import socket\nwith socket.create_connection(('127.0.0.1', {port})) as sock:\n    sock.sendall(b'R')\n    sock.recv(1)\n");
+    s.server
+        .commit_files(
+            "game",
+            "main",
+            &[
+                (
+                    ".lodeconfig",
+                    br#"[[validate.script]]
+name = "slow"
+run = "tools/slow.py"
+paths = ["a.txt"]
+"#,
+                ),
+                ("tools/slow.py", script.as_bytes()),
+            ],
+        )
+        .await;
+    let root = checked_out(&s).await;
+    std::fs::write(std::path::Path::new(&root).join("a.txt"), "local edit").unwrap();
+    let before = s.desk.status(root.clone()).await.unwrap()["rev"].clone();
+    for action in [Action::Check, Action::Commit, Action::Shelve] {
+        let control = Arc::new(Control::default());
+        let consent = control.clone();
+        let check = s.desk.check_or_send(
+            root.clone(),
+            action,
+            ShelveRequest {
+                paths: vec!["a.txt".into()],
+                message: Some("Will be cancelled".into()),
+                ..Default::default()
+            },
+            false,
+            control.clone(),
+            move |event| {
+                if matches!(event, Event::Trust(_)) {
+                    consent.answer(true);
+                }
+            },
+        );
+        let stop_child = async {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut byte = [0u8];
+            socket.read_exact(&mut byte).await.unwrap();
+            assert_eq!(byte, [b'R']);
+            control.cancel();
+            // Terminating Python closes the connection with EOF or a reset on Windows.
+            match socket.read(&mut byte).await {
+                Ok(0) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+                other => panic!("validator connection remained open: {other:?}"),
+            }
+        };
+        let (out, ()) = tokio::time::timeout(Duration::from_secs(20), async {
+            tokio::join!(check, stop_child)
+        })
+        .await
+        .unwrap();
+        assert_eq!(out.unwrap_err().code, "cancelled");
+    }
+    assert_eq!(s.desk.status(root.clone()).await.unwrap()["rev"], before);
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(&root).join("a.txt")).unwrap(),
+        "local edit"
+    );
+    assert!(s.desk.shelves(root, true, None).await.unwrap()["shelves"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}

@@ -252,6 +252,35 @@ fn main() {
         w.set_commit_message("Harbor lights: boats bob with the tide".into());
         shot("changes");
 
+        let validation = w.global::<app::Validation>();
+        validation.set_stage("results".into());
+        validation.set_heading("Validation failed".into());
+        validation
+            .set_detail("Review the problems below, then edit the files and check again.".into());
+        validation.set_retryable(true);
+        validation.set_allow_shelve(true);
+        validation.set_allow_commit(false);
+        let results = json!([
+            {"name":"json", "outcome":"failed", "problems":[
+                {"path":"Data/harbor.json","line":14,"level":"error","message":"Expected a comma between entries"}
+            ]},
+            {"name":"asset-names", "outcome":"passed", "problems":[]}
+        ]);
+        validation.set_rows(ModelRc::from(Rc::new(VecModel::from(
+            lode_desk::validation::rows(&results)
+                .into_iter()
+                .map(|row| app::ValidationRow {
+                    kind: row.kind.into(),
+                    label: row.label.into(),
+                    path: row.path.into(),
+                    line: row.line,
+                })
+                .collect::<Vec<_>>(),
+        ))));
+        w.set_dialog(Dialog::Validation);
+        shot("validation");
+        w.set_dialog(Dialog::None);
+
         w.set_changes(ChangesState {
             error: app::error_info(&lode_desk::desk::ErrorView {
                 code: "locked".into(),

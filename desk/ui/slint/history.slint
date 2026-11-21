@@ -136,6 +136,7 @@ export struct DiffNote {
 }
 
 export struct DiffState {
+    focus-row: int,
     path: string,
     name: string,
     where: string,
@@ -881,10 +882,23 @@ component DiffBody inherits VerticalLayout {
     if Reading.diff.plain != "": Muted { text: Reading.diff.plain; wrap: word-wrap; }
     if Reading.diff.image: ImageDiffView { vertical-stretch: 1; }
     if !Reading.diff.image: ListView {
+        in property <int> focus-row: Reading.diff.focus-row;
+        changed focus-row => {
+            if self.focus-row > 0 {
+                self.content-y = -min(max(0px, self.content-height - self.visible-height), (self.focus-row - 1) * 20px);
+            }
+        }
         vertical-stretch: 1;
         accessible-role: list;
         accessible-label: Reading.diff.layout == "split" ? "Side-by-side diff" : "Unified diff";
-        for r in Reading.diff-rows: DiffRowView { item: r; char-width: root.char-width; }
+        for r[i] in Reading.diff-rows: DiffRowView {
+            item: r;
+            char-width: root.char-width;
+            if i + 1 == Reading.diff.focus-row: Rectangle {
+                width: 3px;
+                background: Palette.accent-background;
+            }
+        }
     }
 }
 

@@ -31,7 +31,8 @@ settle without fixing Desk in the same change, and Desk follows when it is ready
 
 The boundary: Desk uses only the public operations of `lode-ops` (`cmd::*`, `context`,
 `output`, `error`, `links`) and the JSON documents they return (the same as `lode --json`, described in
-`lode/docs/CLI-JSON.md`), plus `lode_client::ServerUrl` and `lode_core::PathGlobSet`. Every call
+`lode/docs/CLI-JSON.md`), plus `lode_client::ServerUrl`, `lode_core::PathGlobSet` and
+`lode_core::LodeConfig` for branch policy and the validation script list. Every call
 into `lode-ops` goes through `src/desk.rs`. Core tests and benches are not Desk's business, and
 the core never depends on Desk.
 
