@@ -5,7 +5,7 @@ use lode_proto::admin::{AccessLevel, AclEffect};
 use lode_testkit::{TestServer, TestServerOptions, TestWorkspace};
 use serde_json::{json, Value};
 
-const CONFIG: &[u8] = b"[locks]\nrequired = [\"**/*.psd\"]\n";
+const CONFIG: &[u8] = b"[locks]\nrequired = [\"**/*.psd\", \"**/*.uasset\"]\n";
 
 struct Team {
     server: TestServer,
@@ -89,6 +89,25 @@ fn lock_paths(ws: &TestWorkspace) -> Vec<(String, String)> {
             )
         })
         .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn competing_adds_of_a_lock_required_asset_preserve_the_first_commit() {
+    let t = team(TestServerOptions::default()).await;
+    let a = checkout(&t.server, &t.ana);
+    let b = checkout(&t.server, &t.bob);
+    let path = "Content/Art/BigRock.uasset";
+    for (ws, content) in [(&a, "first"), (&b, "second")] {
+        ws.write(path, content);
+        ws.json(&["add", path]);
+    }
+    a.json(&["commit", "-m", "First addition"]);
+    let (code, error) = b.json_status(&["commit", "-m", "Competing addition"]);
+    assert_eq!(code, 1);
+    assert_eq!(error["error"]["code"], "out_of_date");
+    assert!(error["error"]["message"].as_str().unwrap().contains(path));
+    assert_eq!(checkout(&t.server, &t.bob).read(path), b"first");
+    assert_eq!(b.read(path), b"second");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

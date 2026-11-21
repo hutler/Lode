@@ -220,6 +220,10 @@ async fn agent_tokens_scopes_and_access() {
     assert_eq!(s, StatusCode::FORBIDDEN);
     let (s, v) = h.token_for(&h.admin, "bob", &[]).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["code"], "invalid_request");
+    let (s, v) = h.token_for(&h.admin, "bob", &["read"]).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    assert_eq!(v["info"]["scopes"], json!(["read"]));
 
     // By default an agent cannot commit.
     let (s, v) = h.commit(&bot, "a.txt", Value::Null).await;
