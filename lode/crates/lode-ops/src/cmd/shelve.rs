@@ -361,11 +361,26 @@ async fn discard(ctx: &Ctx, ws: &mut Workspace, out: &[Outgoing]) -> OpResult<()
     crate::cmd::locks::protect(ws, &paths)
 }
 
+/// Resolves an explicit depot with the configured server, or uses the workspace as before.
+fn review_target(ctx: &Ctx, depot: Option<&str>) -> OpResult<(Client, String)> {
+    if let Some(depot) = depot {
+        let server = ctx.server_url(None)?;
+        return Ok((ctx.client(&server)?, depot.to_owned()));
+    }
+    let target = open(ctx)?;
+    Ok((target.client, target.depot))
+}
+
 /// Runs `lode shelves`.
 pub async fn shelves(ctx: &Ctx, args: ShelvesArgs) -> OpResult<Value> {
-    let t = open(ctx)?;
+    shelves_in(ctx, args, None).await
+}
+
+/// Lists shelves in an explicit depot or the current workspace's depot.
+pub async fn shelves_in(ctx: &Ctx, args: ShelvesArgs, depot: Option<&str>) -> OpResult<Value> {
+    let (client, depot) = review_target(ctx, depot)?;
     let owner = if args.mine {
-        Some(t.client.whoami().await?.principal.name)
+        Some(client.whoami().await?.principal.name)
     } else {
         args.user.clone()
     };
@@ -380,9 +395,9 @@ pub async fn shelves(ctx: &Ctx, args: ShelvesArgs) -> OpResult<Value> {
         branch: args.branch.clone(),
         state,
     };
-    let list = match t.client.shelves(&t.depot, &q).await {
+    let list = match client.shelves(&depot, &q).await {
         Ok(l) => l,
-        Err(e) => return Err(refused(&t.client, e).await),
+        Err(e) => return Err(refused(&client, e).await),
     };
     for s in &list.shelves {
         ctx.out.line(format!(
@@ -402,15 +417,30 @@ pub async fn shelves(ctx: &Ctx, args: ShelvesArgs) -> OpResult<Value> {
 
 /// Runs `lode shelf`.
 pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> OpResult<Value> {
-    let t = open(ctx)?;
+    shelf_in(ctx, args, None).await
+}
+
+/// Runs a shelf command, allowing an explicit depot for read-only review.
+pub async fn shelf_in(ctx: &Ctx, args: ShelfArgs, depot: Option<&str>) -> OpResult<Value> {
+    if depot.is_some()
+        && !matches!(
+            args.command,
+            ShelfCommand::Show { .. } | ShelfCommand::Diff { .. }
+        )
+    {
+        return Err(OpError::usage(
+            "--depot is available for shelf show and shelf diff",
+        ));
+    }
+    let (client, depot) = review_target(ctx, depot)?;
     match args.command {
         ShelfCommand::Show { id } => {
-            let v = get(&t, id, false).await?;
+            let v = get(&client, &depot, id, false).await?;
             print_shelf(ctx, &v);
             to_json(&v)
         }
         ShelfCommand::Diff { id } => {
-            let v = get(&t, id, true).await?;
+            let v = get(&client, &depot, id, true).await?;
             ctx.out
                 .line(format!("# shelf {} version {}", v.id, v.version));
             for d in v.diff.iter().flatten() {
@@ -426,10 +456,10 @@ pub async fn shelf(ctx: &Ctx, args: ShelfArgs) -> OpResult<Value> {
             spec,
             message,
             force_flow,
-        } => submit(ctx, &t, &spec, message, force_flow).await,
+        } => submit(ctx, &client, &depot, &spec, message, force_flow).await,
         ShelfCommand::Delete { id } => {
-            if let Err(e) = t.client.delete_shelf(&t.depot, id).await {
-                return Err(refused(&t.client, e).await);
+            if let Err(e) = client.delete_shelf(&depot, id).await {
+                return Err(refused(&client, e).await);
             }
             ctx.out.line(format!("Deleted shelf {id}."));
             Ok(json!({ "deleted": id }))
@@ -509,7 +539,8 @@ fn submit_refused(e: lode_client::Error) -> OpError {
 
 async fn submit(
     ctx: &Ctx,
-    t: &Target,
+    client: &Client,
+    depot: &str,
     spec: &str,
     message: Option<String>,
     force_flow: bool,
@@ -524,7 +555,7 @@ async fn submit(
                     "name the version you reviewed: `lode shelf submit ID@VERSION`",
                 ));
             }
-            let v = get(t, id, false).await?;
+            let v = get(client, depot, id, false).await?;
             print_shelf(ctx, &v);
             let question = format!("Submit version {} of shelf {id}?", v.version);
             if !ctx.out.ui().confirm(&question)? {
@@ -538,11 +569,9 @@ async fn submit(
         message: message.filter(|m| !m.trim().is_empty()),
         force_flow,
     };
-    let resp = match t.client.submit_shelf(&t.depot, id, &req).await {
+    let resp = match client.submit_shelf(depot, id, &req).await {
         Ok(r) => r,
-        Err(e) if e.is_code(lode_core::ErrorCode::NotFound) => {
-            return Err(refused(&t.client, e).await)
-        }
+        Err(e) if e.is_code(lode_core::ErrorCode::NotFound) => return Err(refused(client, e).await),
         Err(e) => return Err(submit_refused(e)),
     };
     ctx.out.line(format!(
@@ -564,10 +593,10 @@ async fn submit(
     }))
 }
 
-async fn get(t: &Target, id: u64, diff: bool) -> OpResult<ShelfView> {
-    match t.client.shelf(&t.depot, id, diff).await {
+async fn get(client: &Client, depot: &str, id: u64, diff: bool) -> OpResult<ShelfView> {
+    match client.shelf(depot, id, diff).await {
         Ok(v) => Ok(v),
-        Err(e) => Err(refused(&t.client, e).await),
+        Err(e) => Err(refused(client, e).await),
     }
 }
 
@@ -615,7 +644,7 @@ pub async fn unshelve(ctx: &Ctx, args: UnshelveArgs) -> OpResult<Value> {
     let _lock = t.ws.lock()?;
     refuse_unfinished(&t.ws)?;
     refuse_conflicts(&t.ws)?;
-    let shelf = get(&t, args.id, false).await?;
+    let shelf = get(&t.client, &t.depot, args.id, false).await?;
     if shelf.state == ShelfState::Deleted {
         return Err(OpError::failed(
             "not_found",

@@ -282,7 +282,8 @@ caches on people's computers, and webhook payloads already sent.
 - `lode shelve [-c <changelist>] -m <description>` uploads pending changes as a shelf and,
   unless `--keep` is given, reverts them locally.
 - `lode shelves`, `lode shelf show <id>`, `lode shelf diff <id>` inspect shelves of any user
-  (subject to read permission).
+  (subject to read permission). In a workspace they default to its depot. With `--depot NAME`
+  they use the configured server and can run outside a workspace.
 - `lode unshelve <id>` applies a shelf to the workspace, merging like an update.
 - `lode shelf submit <id>` commits a shelf directly on the server. Author is the shelf owner,
   submitter is the caller. This is the approval path for agent work.

@@ -123,9 +123,21 @@ enum Command {
     /// Run the depot's validation scripts on your changes.
     Validate(cmd::validate::ValidateArgs),
     /// List the shelves of this depot.
-    Shelves(cmd::shelve::ShelvesArgs),
+    Shelves {
+        /// Depot to inspect, including from outside a workspace.
+        #[arg(long)]
+        depot: Option<String>,
+        #[command(flatten)]
+        args: cmd::shelve::ShelvesArgs,
+    },
     /// Show, diff or delete a shelf.
-    Shelf(cmd::shelve::ShelfArgs),
+    Shelf {
+        /// Depot to inspect with show or diff, including from outside a workspace.
+        #[arg(long, global = true)]
+        depot: Option<String>,
+        #[command(flatten)]
+        args: cmd::shelve::ShelfArgs,
+    },
     /// Apply a shelf's changes to the workspace.
     Unshelve(cmd::shelve::UnshelveArgs),
     /// Show revision history.
@@ -233,8 +245,12 @@ async fn run(cli: Cli) -> OpResult<Value> {
         Some(Command::Changelist(a)) => cmd::changelist::changelist(&ctx, a).await,
         Some(Command::Shelve(a)) => cmd::shelve::shelve(&ctx, a).await,
         Some(Command::Validate(a)) => cmd::validate::validate(&ctx, a).await,
-        Some(Command::Shelves(a)) => cmd::shelve::shelves(&ctx, a).await,
-        Some(Command::Shelf(a)) => cmd::shelve::shelf(&ctx, a).await,
+        Some(Command::Shelves { args, depot }) => {
+            cmd::shelve::shelves_in(&ctx, args, depot.as_deref()).await
+        }
+        Some(Command::Shelf { args, depot }) => {
+            cmd::shelve::shelf_in(&ctx, args, depot.as_deref()).await
+        }
         Some(Command::Unshelve(a)) => cmd::shelve::unshelve(&ctx, a).await,
         Some(Command::Log(a)) => cmd::history::log(&ctx, a).await,
         Some(Command::Cat(a)) => cmd::history::cat(&ctx, a).await,
