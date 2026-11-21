@@ -91,6 +91,87 @@ async fn signed_in(s: &TestServer) -> Browser {
     b
 }
 
+#[tokio::test]
+async fn depot_validation_shows_isolated_runs_and_escaped_diagnostics() {
+    use lode_meta::{vals, Reads};
+    let s = server_with(|c| {
+        c.modules.checks = true;
+        c.modules.validate = true;
+        c.validate.python = Some(lode_server::PythonCommand::Program(
+            if cfg!(windows) { "python" } else { "python3" }.into(),
+        ));
+    })
+    .await;
+    s.create_depot("game").await;
+    s.create_depot("other").await;
+    let mut b = signed_in(&s).await;
+    let empty = b.get("/admin/depots/game").await;
+    assert!(empty.body.contains("No queued or running checks."));
+    let reader = s.create_user("reader", &["read", "admin"]).await;
+    s.acl(
+        "game",
+        "reader",
+        "*",
+        "**",
+        AclEffect::Allow,
+        AccessLevel::Read,
+    )
+    .await;
+    let denied = reqwest::Client::new()
+        .get(format!("{}/api/v1/admin/depots/game/validation", s.url()))
+        .bearer_auth(reader)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(denied.status().as_u16(), 403);
+    s.state().meta().write(|tx| {
+        let id = tx.depot_by_name("game")?.unwrap().id.0;
+        let other = tx.depot_by_name("other")?.unwrap().id.0;
+        let result = r#"[{"name":"lint","outcome":"failed","problems":[{"path":"a.txt","line":3,"level":"error","message":"<unsafe>"}],"text":"output <here>"}]"#;
+        for (d, shelf, v, state, time) in [(id,7,1,"superseded",1), (id,7,2,"done",2), (id,8,1,"running",3), (other,99,1,"done",4)] {
+            tx.conn().execute("INSERT INTO mod_validate_run (depot_id,shelf_id,shelf_version,state,results,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?6)",
+                vals![d, i64::from(shelf), i64::from(v), state, result, i64::from(time)])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let page = b.get("/admin/depots/game").await;
+    assert_eq!(page.status, 200);
+    assert!(page.body.contains("running"));
+    assert!(page.body.find("Shelf 7 · v2").unwrap() < page.body.find("Shelf 7 · v1").unwrap());
+    assert!(!page.body.contains("Shelf 99"));
+    let link = "/admin/depots/game/validation/7/2";
+    assert!(page.body.contains(link));
+    let run = b.get(link).await;
+    assert_eq!(run.status, 200);
+    for expected in [
+        "failed",
+        "lint",
+        "a.txt:3",
+        "&lt;unsafe&gt;",
+        "output &lt;here&gt;",
+    ] {
+        assert!(run.body.contains(expected), "{expected}");
+    }
+    assert_eq!(
+        b.get("/admin/depots/game/validation/99/1").await.status,
+        404
+    );
+    assert_eq!(Browser::new(s.url()).get(link).await.status, 303);
+}
+
+#[tokio::test]
+async fn validation_section_is_absent_when_module_is_disabled() {
+    let s = server().await;
+    s.create_depot("game").await;
+    let mut b = signed_in(&s).await;
+    assert!(!b
+        .get("/admin/depots/game")
+        .await
+        .body
+        .contains("id=\"validation\""));
+    assert_eq!(b.get("/admin/depots/game/validation/1/1").await.status, 404);
+}
+
 fn error_text(page: &Page) -> String {
     page.doc()
         .find(&|n| n.attr("class") == Some("error"))

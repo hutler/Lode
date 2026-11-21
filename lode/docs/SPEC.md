@@ -409,6 +409,8 @@ from the shelves module); the MCP module hosts them and adds the tools that read
   `[checks].branches` every such script must have passed on the submitted shelf version, in
   addition to `[checks].required`; with `[branches].shelf_only` that covers every change.
   `GET /depots/{d}/validate/{shelf}/{version}` (scope `read`) answers the full results.
+  When validation is enabled, the admin depot page lists active and recent runs. Select a shelf
+  version to read each script’s outcome, diagnostics and captured output.
 - Client runs are a convenience; the server run is the enforcement. Neither is a sandbox:
   a script runs with the rights of whoever runs it.
 

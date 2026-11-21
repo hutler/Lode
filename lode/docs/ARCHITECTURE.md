@@ -1050,6 +1050,10 @@ mod_validate_run (depot_id, shelf_id, shelf_version /*PK*/, state /*queued|runni
   "lode-validate"`). Other commits are not gated here.
 - Route `GET /api/v1/depots/{d}/validate/{shelf}/{version}`: `{ shelf, version, state,
   results }`. `purge_depot` deletes the depot's rows.
+- `GET /api/v1/admin/depots/{d}/validation` requires the `admin` scope and depot admin access.
+  It returns `active` (up to 25 queued or running versions, oldest first) and `recent` (up to
+  25 finished or superseded versions, newest update first). The admin UI loads full results
+  through the existing per-version API only when someone opens a run.
 
 ## 10. Client
 

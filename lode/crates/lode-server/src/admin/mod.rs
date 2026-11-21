@@ -24,6 +24,7 @@ mod people;
 mod session;
 mod settings;
 mod signin;
+mod validation;
 mod web;
 mod web_shelves;
 mod webhooks;
@@ -75,6 +76,10 @@ pub fn routes(state: AppState, api: Router) -> Router {
         .route(signin::SIGN_OUT, post(signin::sign_out))
         .route("/admin/depots", get(depots::list).post(depots::create))
         .route("/admin/depots/{d}", get(depots::show))
+        .route(
+            "/admin/depots/{d}/validation/{shelf}/{version}",
+            get(validation::show),
+        )
         .route("/admin/depots/{d}/gc", post(depots::gc))
         .route("/admin/depots/{d}/fsck", post(depots::fsck))
         .route("/admin/depots/{d}/obliterate", post(depots::obliterate))

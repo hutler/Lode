@@ -26,7 +26,7 @@ pub(crate) fn depot_href(d: &str) -> String {
     format!("/admin/depots/{}", encode(d))
 }
 
-fn has_module(ctx: &Ctx, name: &str) -> bool {
+pub(super) fn has_module(ctx: &Ctx, name: &str) -> bool {
     ctx.state().module_names().iter().any(|m| m == name)
 }
 
@@ -357,7 +357,7 @@ async fn depot_page(ctx: &Ctx, admin: &Admin, d: &str, top: Html) -> Response {
          <section><h2 id=\"branches\">Branches</h2><table class=\"wide\"><thead><tr><th>Branch</th>\
          <th class=\"num\">Head</th><th>Created from</th><th>State</th></tr></thead><tbody>{}</tbody>\
          </table></section>\
-         <section><h2 id=\"revisions\">Recent revisions</h2>{}</section>{}\
+         <section><h2 id=\"revisions\">Recent revisions</h2>{}</section>{}{}\
          <section><h2 id=\"maintenance\">Maintenance</h2>\
          <div class=\"actions\">\
          <form method=\"post\" action=\"{}/gc\">{}<input type=\"hidden\" name=\"dry_run\" value=\"1\"/>\
@@ -393,6 +393,7 @@ async fn depot_page(ctx: &Ctx, admin: &Admin, d: &str, top: Html) -> Response {
         branch_rows,
         rev_section,
         locks,
+        if has_module(ctx, "validate") { super::validation::section(ctx, admin, d).await } else { Html::new() },
         href,
         csrf.clone(),
         href,
