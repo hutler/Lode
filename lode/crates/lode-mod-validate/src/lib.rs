@@ -28,7 +28,9 @@ use lode_meta::{
     vals, MetaError, Migration, NewPrincipal, PrincipalKind, PrincipalRow, Reads, WriteTx,
 };
 use lode_mod_checks::{ATTR_SHELF_ID, ATTR_SHELF_VERSION, SHELVES_ORIGIN};
+use lode_proto::admin::{ValidationActivity, ValidationRun};
 use lode_proto::checks::{CheckState, CheckTarget, CheckTargetKind, ReportCheckRequest};
+use lode_proto::consts::paths;
 use lode_proto::shelves::{ShelfState, ShelfView};
 use lode_server::commit::{CommitCtx, Origin};
 use lode_server::module::{BoxError, BoxFuture, Event, Module, ModuleCtx, Stop};
@@ -45,7 +47,7 @@ pub const SERVICE_USER: &str = "lode-validate";
 /// Prefix of the checks this module reports.
 pub const CHECK_PREFIX: &str = "validate/";
 /// `GET` the full results of one shelf version.
-pub const RESULTS_PATH: &str = "/api/v1/depots/{d}/validate/{shelf}/{version}";
+pub const RESULTS_PATH: &str = paths::VALIDATION_RESULT;
 /// How often the worker looks for queued runs without being woken.
 const IDLE_POLL: Duration = Duration::from_secs(30);
 /// Longest check summary (the checks module's limit).
@@ -241,6 +243,7 @@ impl Module for Validate {
         Some(
             Router::new()
                 .route(RESULTS_PATH, get(results))
+                .route(paths::ADMIN_VALIDATION, get(activity))
                 .with_state(ctx),
         )
     }
@@ -834,6 +837,51 @@ async fn prepare(
             .map_err(err)?;
     }
     Ok(())
+}
+
+/// Activity summaries omit script output so a busy depot page stays bounded.
+async fn activity(
+    State(ctx): State<ModuleCtx>,
+    caller: Caller,
+    ApiPath(depot): ApiPath<String>,
+) -> ApiResult<Json<ValidationActivity>> {
+    caller.require_scope("admin")?;
+    let (d, access) = ctx.depots().resolve(&caller, &depot).await?;
+    if !access.is_depot_admin() {
+        return Err(ApiError::new(
+            ErrorCode::PermissionDenied,
+            "validation activity requires depot admin",
+        ));
+    }
+    let runs = ctx
+        .meta()
+        .read(move |tx| {
+            let summary = |r: &lode_meta::Row| {
+                Ok(ValidationRun {
+                    shelf: r.get(0)?,
+                    version: r.get(1)?,
+                    state: r.get(2)?,
+                    updated_at: r.get(3)?,
+                })
+            };
+            let active = tx.db().query(
+                "SELECT shelf_id, shelf_version, state, updated_at FROM mod_validate_run
+             WHERE depot_id = ?1 AND state IN ('queued','running')
+             ORDER BY created_at, shelf_id, shelf_version LIMIT 25",
+                vals![d.id.0],
+                summary,
+            )?;
+            let recent = tx.db().query(
+                "SELECT shelf_id, shelf_version, state, updated_at FROM mod_validate_run
+             WHERE depot_id = ?1 AND state IN ('done','superseded')
+             ORDER BY updated_at DESC, shelf_id DESC, shelf_version DESC LIMIT 25",
+                vals![d.id.0],
+                summary,
+            )?;
+            Ok(ValidationActivity { active, recent })
+        })
+        .await?;
+    Ok(Json(runs))
 }
 
 /// `GET /depots/{d}/validate/{shelf}/{version}`: the state and full results of one run.

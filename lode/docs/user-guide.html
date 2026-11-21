@@ -1042,6 +1042,7 @@ max_input_mib = 512                # most content written out for one run
 <ul>
   <li>The scripts and their support files always come from the target branch, never from the shelf, so a shelf cannot change what it is checked with.</li>
   <li>On branches listed in <code>[checks] branches</code>, a shelf is submitted only when every script with <code>server = true</code> passed on that shelf version. Together with <code>[branches] shelf_only</code>, nothing lands on the branch unchecked.</li>
+  <li>In the admin web UI, open <strong>Depots</strong>, choose the depot and find <strong>Validation</strong>. The queue shows the oldest 25 active runs; recent runs shows the last 25 finished or superseded versions. Open a shelf version to read each script’s outcome, file and line diagnostics, and captured output.</li>
   <li>Results show in <code>lode checks 37</code>, reported by the service account <code>lode-validate</code>, which cannot sign in. The full list of problems is at <code>GET /api/v1/depots/game/validate/37/2</code>.</li>
   <li>A run cut short by a restart starts over. A shelf that existed before the module was turned on, or before the scripts were added, has no results; update the shelf to run them.</li>
   <li><b>This runs code from the depot on the server</b> as the user <code>loded</code> runs as, with a cleared environment and a timeout but no sandbox. Run <code>loded</code> as its own user (the packages do), and keep the branches that hold the scripts on shelves and required checks.</li>

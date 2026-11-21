@@ -6,6 +6,28 @@ use crate::auth::PrincipalView;
 use crate::PrincipalKind;
 use lode_core::ObjectId;
 
+/// A shelf version in the validation queue or its recent history.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidationRun {
+    /// Shelf identifier.
+    pub shelf: i64,
+    /// Shelf version that was checked.
+    pub version: i64,
+    /// Queued, running, done or superseded.
+    pub state: String,
+    /// Last state transition in milliseconds since the Unix epoch.
+    pub updated_at: i64,
+}
+
+/// A bounded view of one depot's validation activity.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ValidationActivity {
+    /// Active runs, oldest first.
+    pub active: Vec<ValidationRun>,
+    /// Completed or superseded runs, most recently updated first.
+    pub recent: Vec<ValidationRun>,
+}
+
 /// `POST /admin/principals`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatePrincipalRequest {

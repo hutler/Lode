@@ -132,6 +132,10 @@ pub mod paths {
     pub const ADMIN_OBLITERATE: &str = "/api/v1/admin/depots/{d}/obliterate";
     /// Admin: what was obliterated from a depot.
     pub const ADMIN_OBLITERATED: &str = "/api/v1/admin/depots/{d}/obliterated";
+    /// Validation module: active and recent runs for depot administrators.
+    pub const ADMIN_VALIDATION: &str = "/api/v1/admin/depots/{d}/validation";
+    /// Validation results for a shelf version.
+    pub const VALIDATION_RESULT: &str = "/api/v1/depots/{d}/validate/{shelf}/{version}";
     /// Locks module.
     pub const LOCKS: &str = "/api/v1/depots/{d}/locks";
     /// Shelves module: list and create.
