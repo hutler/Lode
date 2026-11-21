@@ -174,6 +174,10 @@ pub enum DepotCmd {
         name: String,
     },
     /// List depots.
+    ///
+    /// For administrators, STORED SIZE shows the total length of files in the local
+    /// depot store, cached for up to ten minutes. A dash means the size is unavailable
+    /// (including S3 storage).
     List,
     /// Delete a depot. It goes to the trash, where it is kept for 30 days and can be
     /// restored; then it is erased. With --force it is erased now, history and content,
@@ -967,12 +971,12 @@ pub async fn admin(ctx: &Ctx, args: AdminArgs) -> OpResult<Value> {
                     .unwrap_or(0)
                     .max(5);
                 ctx.out.line(format!(
-                    "{:<width$}  {:>9}  {:>9}  LAST COMMIT",
-                    "DEPOT", "REVISIONS", "SIZE"
+                    "{:<width$}  {:>9}  {:>11}  LAST COMMIT",
+                    "DEPOT", "REVISIONS", "STORED SIZE"
                 ));
                 for d in &list.depots {
                     ctx.out.line(format!(
-                        "{:<width$}  {:>9}  {:>9}  {}",
+                        "{:<width$}  {:>9}  {:>11}  {}",
                         d.name,
                         d.revisions.unwrap_or(0),
                         d.size_bytes

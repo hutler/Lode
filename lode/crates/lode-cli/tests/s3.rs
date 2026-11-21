@@ -64,6 +64,16 @@ async fn a_depot_lives_in_s3() {
     let (fake, mut server) = s3_server().await;
     server.create_depot("game").await;
     let ws = TestWorkspace::new(&server).with_token(server.admin_token());
+    let listing = ws.json(&["admin", "depot", "list"]);
+    assert!(listing["depots"][0]
+        .as_object()
+        .unwrap()
+        .get("size_bytes")
+        .is_none());
+    let output = ws.lode(&["admin", "depot", "list"]);
+    let text = std::str::from_utf8(&output.get_output().stdout).unwrap();
+    let row = text.lines().find(|line| line.starts_with("game ")).unwrap();
+    assert_eq!(row.split_whitespace().nth(2), Some("-"));
     ws.json(&["checkout", &format!("{}/game", server.url()), "."]);
     let big: Vec<u8> = b"level data "
         .iter()

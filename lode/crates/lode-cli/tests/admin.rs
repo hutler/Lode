@@ -383,6 +383,45 @@ async fn users_and_depots_are_deleted() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn depot_list_refreshes_stored_bytes_at_ten_minutes() {
+    fn bytes_under(path: &std::path::Path) -> u64 {
+        std::fs::read_dir(path)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let metadata = entry.metadata().unwrap();
+                if metadata.is_dir() {
+                    bytes_under(&entry.path())
+                } else {
+                    metadata.len()
+                }
+            })
+            .sum()
+    }
+
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    let admin = as_user(&server, server.admin_token());
+    let stored = || {
+        admin.json(&["admin", "depot", "list"])["depots"][0]["size_bytes"]
+            .as_u64()
+            .unwrap()
+    };
+    let dir = server.data_dir().join("depots");
+    let empty = bytes_under(&dir);
+    assert_eq!(stored(), empty);
+    server
+        .commit_files("game", "main", &[("a.txt", b"first commit")])
+        .await;
+    let updated = bytes_under(&dir);
+    assert!(updated > empty);
+    server.clock().advance_ms(599_999);
+    assert_eq!(stored(), empty);
+    server.clock().advance_ms(1);
+    assert_eq!(stored(), updated);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn depot_list_shows_revisions_size_and_last_commit_to_admins() {
     let server = TestServer::start().await;
     server.create_depot("game").await;
@@ -410,7 +449,14 @@ async fn depot_list_shows_revisions_size_and_last_commit_to_admins() {
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.starts_with("DEPOT"), "{text}");
+    assert_eq!(
+        text.lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["DEPOT", "REVISIONS", "STORED", "SIZE", "LAST", "COMMIT"]
+    );
     assert!(
         text.lines()
             .any(|l| l.starts_with("game") && l.contains(&rev.to_string())),
