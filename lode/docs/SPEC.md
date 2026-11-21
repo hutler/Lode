@@ -118,6 +118,9 @@ Only files and symlinks are versioned. Directories exist implicitly while they c
   provider (`lode login URL --sso`, §5.9).
 - Tokens carry scopes. The core defines `read`, `write` and `admin`; modules add their own
   (`lock`, `shelve`, `checks`). A scope belonging to a module that is switched off has no effect.
+- An explicitly created token for a user needs at least one `--scope`, for example
+  `lode admin token create --for alice --name review --scope read`. When the target of
+  `admin token create --for` is an agent, omitting `--scope` selects its defaults (§7.1).
 - Access rules grant `read`, `write` or `admin` on `depot / branch pattern / path pattern` to a
   user, group, every agent (`agents`, 0.4), or everyone. Default is no access. Rules are `allow` or `deny`. A matching `deny`
   at level L refuses L and every higher level, whatever other rules say (`deny write` still
@@ -271,8 +274,11 @@ caches on people's computers, and webhook payloads already sent.
 - `lode lock <path>…` takes exclusive locks; all-or-nothing. A lock is per branch and path.
 - A lock can only be taken on a file the workspace has at the branch head version.
 - A commit touching a path locked by someone else is rejected (`locked`).
-- A commit touching a path matching `[locks].required` without holding its lock is rejected
-  (`lock_required`). The client keeps such files read-only on disk until locked.
+- Modifying or deleting an existing path matching `[locks].required` requires its lock
+  (`lock_required`). The client keeps the tracked file read-only until locked. The first
+  add may commit without a lock because the path has no version at branch head yet.
+  If two workspaces add the same path, the first commit creates it and the other receives
+  `out_of_date` for that path.
 - Locks are released on commit unless `--keep-locks` is given. `lode unlock` releases manually.
   Admins can break locks (`lode unlock --force`).
 - `lode locks` lists locks with owner, time and comment.
@@ -419,8 +425,8 @@ from the shelves module); the MCP module hosts them and adds the tools that read
 ### 7.1 Agent identities
 
 - An agent is a principal of kind `agent`, owned by a user or an admin, with its own tokens.
-- Default agent scopes are `read`, `shelve`, `lock`. `write` (direct commit) must be granted
-  explicitly.
+- An agent token defaults to `read` plus the agent-default scopes of enabled modules
+  (`shelve` for shelves, `lock` for locks). `write` (direct commit) must be granted explicitly.
 - Access rules apply to agents exactly as to users. An agent never inherits its owner's access.
 - One rule can cover every agent (0.4): `lode admin acl add deny write agents --depot game
   --branch main` keeps agents' work on shelves for `main` even when a token has `write`.
@@ -497,6 +503,10 @@ lode admin depot delete <name> [--force] | restore <name> | trash
 lode admin user|agent delete <name>
 lode admin webhook add|list|remove|deliveries|ping …   (with the webhooks module)
 ```
+
+For history, `lode log -n 4` and `lode log --max-count 4` return at most four revisions,
+newest first. The default maximum is 50; zero requests the entire matching history.
+Pass the last revision number to `--before REV` to continue with older entries.
 
 Every command honours the environment variables `LODE_SERVER` and `LODE_TOKEN_FILE` (a path
 to a file holding a token) for sign-in without a stored login, and `LODE_CACHE_DIR` (or the

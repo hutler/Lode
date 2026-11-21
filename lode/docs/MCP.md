@@ -20,11 +20,14 @@ Give an agent its own identity rather than your token, so revisions show who did
 
 ```sh
 # An admin creates the agent, lets it read the depot and prints its token (once);
-# no --scope means read, shelve and lock:
+# With the shelves and locks modules enabled, an agent defaults to read, shelve and lock:
 lode admin agent create fixer --owner ana --grant game=read --with-token
 # Later its owner (or an admin) can make more tokens:
 lode admin token create --for fixer --name laptop
 ```
+
+For a human user, specify the token's scopes explicitly, for example
+`lode admin token create --for ana --name review --scope read`.
 
 An agent's owner can create and revoke its tokens. By default an agent can read, lock and
 shelve but not commit: its work arrives as shelves for a person to review. Only an admin can
