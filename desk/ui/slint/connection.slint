@@ -1,0 +1,33 @@
+import { Button, LineEdit, Palette } from "std-widgets.slint";
+import { Card, Title, Muted, FormLabel } from "parts.slint";
+export global Connection {
+    in-out property <string> server;
+    in-out property <string> proxy;
+    in-out property <string> report;
+    in-out property <bool> busy;
+    callback open();
+    callback edited(string);
+    callback test();
+    callback save();
+}
+export component ConnectionDialog inherits Card {
+    callback close();
+    callback sign-in(string);
+    width: 540px;
+    accessible-role: groupbox; accessible-label: "Connection settings";
+    VerticalLayout { padding: 16px; spacing: 8px;
+        Title { text: "Connection settings"; }
+        FormLabel { text: "Server URL"; }
+        LineEdit { text <=> Connection.server; accessible-label: "Connection server URL"; enabled: !Connection.busy; edited(t) => { Connection.edited(t); } }
+        FormLabel { text: "Download proxy (optional)"; }
+        LineEdit { text <=> Connection.proxy; accessible-label: "Download proxy URL"; enabled: !Connection.busy; }
+        Muted { text: "Leave blank for direct downloads. LODE_PROXY overrides this setting."; }
+        if Connection.report != "": Text { text: Connection.report; color: Palette.foreground; wrap: word-wrap; }
+        HorizontalLayout { spacing: 5px;
+            Button { text: "Test connection"; enabled: !Connection.busy && Connection.server != ""; clicked => { Connection.test(); } }
+            Button { text: "Sign in…"; enabled: !Connection.busy && Connection.server != ""; clicked => { root.sign-in(Connection.server); } }
+            Button { text: "Save proxy"; enabled: !Connection.busy && Connection.server != ""; clicked => { Connection.save(); } }
+            Button { text: "Close"; enabled: !Connection.busy; clicked => { root.close(); } }
+        }
+    }
+}

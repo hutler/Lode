@@ -667,6 +667,51 @@ async fn sign_in_with_a_password(world: &World) {
     println!("sign in with a password ... ok");
 }
 
+async fn desktop_menus(world: &World) {
+    let home = Home::new();
+    let opened = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = opened.clone();
+    let w = app::build(Options {
+        home: home.path().into(),
+        data_dir: home.path().join("app"),
+        config_dir: Some(home.path().join("config")),
+        pick_folder: Rc::new(|_| None),
+        open_browser: Arc::new(move |url| {
+            captured.lock().unwrap().push(url.to_owned());
+            true
+        }),
+        updater: Updater {
+            pubkey: String::new(),
+            feed: String::new(),
+            current: "0.5.0".into(),
+            platforms: Vec::new(),
+            settings_file: home.path().join("app/settings.json"),
+        },
+    })
+    .unwrap();
+    w.show().unwrap();
+    let c = w.global::<lode_desk::app::Connection>();
+    c.invoke_open();
+    assert_eq!(w.get_dialog(), Dialog::Connection);
+    type_into(&w, "Connection server URL", &world.url);
+    click(&w, "Test connection");
+    until("server health report", || {
+        !c.get_busy() && c.get_report().contains("dns")
+    })
+    .await;
+    click(&w, "Sign in…");
+    assert_eq!(w.get_dialog(), Dialog::SignIn);
+    assert_eq!(w.get_sign_in().server, world.url.as_str());
+    w.invoke_close_dialog();
+    w.invoke_guide();
+    assert_eq!(
+        opened.lock().unwrap().as_slice(),
+        ["https://github.com/hutler/Lode/blob/main/desk/docs/guide.md"]
+    );
+    w.invoke_exit_requested();
+    assert!(!w.window().is_visible());
+}
+
 async fn single_sign_on_when_offered(world: &World) {
     let home = Home::new();
     let w = home.window(world, None);
@@ -2312,6 +2357,7 @@ fn main() -> std::process::ExitCode {
         .unwrap();
     let world = rt.block_on(start(rt.handle().clone()));
     slint::spawn_local(async move {
+        desktop_menus(&world).await;
         sign_in_with_a_password(&world).await;
         single_sign_on_when_offered(&world).await;
         check_out_with_progress_then_reopen(&world).await;

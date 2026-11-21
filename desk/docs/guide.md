@@ -36,6 +36,18 @@ command: signing in with either one signs in both.
 
 Home lists the workspaces you opened recently. The × beside one forgets it (the folder stays).
 
+## Desktop menus
+
+**File** opens an existing workspace, starts a checkout or exits Desk. **Connection → Connection
+settings** shows the active workspace server, or the configured default on Home. Enter the
+server URL and choose **Test connection** for the CLI's DNS, TLS and server diagnostics.
+**Sign in** opens the existing password and SSO flow for that address.
+
+**Save proxy** sets the optional Lode download proxy for this server in the shared CLI
+settings. Clear the field and save to return to direct downloads. `LODE_PROXY` takes
+precedence. Changing the address in this dialog leaves open workspace bindings intact.
+**Help → Desk guide** (F1) opens this guide. **Help → About Lode Desk** shows the build.
+
 ## Sign in
 
 Home, **Sign in to a server…**. Give the server address (such as `https://lode.example.com`),

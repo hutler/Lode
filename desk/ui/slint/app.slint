@@ -7,6 +7,8 @@ import { Validation, ValidationRow, ValidationPanel } from "validation.slint";
 export { Validation, ValidationRow }
 import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Links, LinkChoice, LinkState, RefusedLinkDialog, ChooseWorkspaceDialog, NoWorkspaceDialog } from "links.slint";
+import { Connection, ConnectionDialog } from "connection.slint";
+export { Connection }
 import { Updates, UpdateOffer, UpdateSettings, UpdateBanner, UpdateSettingsPanel } from "updates.slint";
 import { ErrorInfo, ErrorBanner, Card, Muted, Title, Badge } from "parts.slint";
 import { Icon, Icons } from "icons.slint";
@@ -56,7 +58,7 @@ export struct WorkspaceTab {
     server-url: string,
 }
 
-export enum Dialog { none, validation, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
+export enum Dialog { none, connection, validation, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
 
 /// A tab of the window's title strip: Workspaces, then one per open workspace.
 component Tab inherits Rectangle {
@@ -799,6 +801,22 @@ export component AppWindow inherits Window {
     background: Palette.background;
     default-font-size: 13px;
 
+    callback guide();
+    callback exit-requested();
+    MenuBar {
+        Menu { title: "File";
+            MenuItem { title: "Open workspace…"; enabled: root.dialog == Dialog.none; activated => { root.open-folder(); } }
+            MenuItem { title: "Check out…"; enabled: root.dialog == Dialog.none; activated => { root.show-check-out(); } }
+            MenuItem { title: "Exit"; enabled: root.dialog == Dialog.none; activated => { root.exit-requested(); } }
+        }
+        Menu { title: "Connection";
+            MenuItem { title: "Connection settings…"; enabled: root.dialog == Dialog.none; activated => { Connection.open(); } }
+        }
+        Menu { title: "Help";
+            MenuItem { title: "Desk guide"; shortcut: @keys(F1); activated => { root.guide(); } }
+            MenuItem { title: "About Lode Desk"; enabled: root.dialog == Dialog.none; activated => { root.dialog = Dialog.about; } }
+        }
+    }
     in property <string> version;
     in property <[Recent]> recent;
     in property <[WorkspaceTab]> workspaces;
@@ -969,6 +987,12 @@ export component AppWindow inherits Window {
             height: min(parent.height - 32px, Validation.stage == "results" || Validation.preview != "" ? 520px : 250px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
+        }
+        if root.dialog == Dialog.connection: ConnectionDialog {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            height: self.preferred-height;
+            sign-in(server) => { root.show-sign-in(server); }
+            close => { root.close-dialog(); }
         }
         if root.dialog == Dialog.sign-in: SignInDialog {
             x: (parent.width - self.width) / 2;

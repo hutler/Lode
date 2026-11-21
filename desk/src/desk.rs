@@ -251,6 +251,48 @@ impl Desk {
         })
     }
 
+    /// The effective default server when opening connection settings from Home.
+    pub fn default_connection(&self) -> Result<String, ErrorView> {
+        Ok(self.ctx(&self.home, None)?.server_url(None)?.to_string())
+    }
+
+    /// The persistent download proxy for an address, before environment overrides.
+    pub fn saved_proxy(&self, server: &str) -> Result<String, ErrorView> {
+        let ctx = self.ctx(&self.home, None)?;
+        let key = ctx.parse_server(server)?;
+        Ok(ctx
+            .settings()?
+            .proxies
+            .get(key.as_str())
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Save or clear the per-server download proxy through the same operation as the CLI.
+    pub async fn save_proxy(&self, server: String, url: String) -> Result<Value, ErrorView> {
+        use lode_ops::cmd::proxy::{proxy, ProxyCmd};
+        let ctx = self.ctx(&self.home, Some(server))?;
+        run_op(move || async move {
+            proxy(
+                &ctx,
+                if url.is_empty() {
+                    ProxyCmd::Clear
+                } else {
+                    ProxyCmd::Set { url }
+                },
+            )
+            .await
+        })
+        .await
+    }
+
+    /// Run the core connection diagnostics for the selected endpoint.
+    pub async fn connection_test(&self, server: String) -> Result<Value, ErrorView> {
+        use lode_ops::cmd::doctor::{doctor, DoctorArgs};
+        let ctx = self.ctx(&self.home, None)?;
+        run_op(move || async move { doctor(&ctx, DoctorArgs { url: Some(server) }).await }).await
+    }
+
     /// Run the selected validation, commit or shelf operation on its own runtime.
     /// The normal send path validates the actual gathered changes under the workspace lock.
     pub async fn check_or_send(
