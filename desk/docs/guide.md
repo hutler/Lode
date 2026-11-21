@@ -16,7 +16,7 @@ Contents: [Install](#install) · [Sign in](#sign-in) · [Check out](#check-out-a
 
 ## Install
 
-Download the file for your system from the project's release page (tags `lode-v<version>`):
+Download the file for your system from the project's release page (tags `desk-v<version>`):
 
 | System | File | Notes |
 | --- | --- | --- |
