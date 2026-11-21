@@ -908,6 +908,16 @@ export component AppWindow inherits Window {
                 root.close-dialog();
                 return accept;
             }
+            if (root.dialog == Dialog.none && root.current-tab > 0) {
+                if (event.text == Key.F5) {
+                    root.refresh-changes();
+                    return accept;
+                }
+                if (event.modifiers.control && event.text == "\n") {
+                    root.commit();
+                    return accept;
+                }
+            }
             reject
         }
         VerticalLayout {

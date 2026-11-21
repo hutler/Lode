@@ -561,7 +561,7 @@ export component ChangesView inherits Rectangle {
                     spacing: 10px;
                     TextEdit {
                         accessible-label: "Commit message";
-                        placeholder-text: "Describe what changed";
+                        placeholder-text: "Describe what changed (Ctrl+Enter commits)";
                         text <=> root.message;
                         enabled: root.state.busy != "Committing";
                         min-height: 64px;
