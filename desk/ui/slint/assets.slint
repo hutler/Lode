@@ -18,6 +18,7 @@ export global Assets {
     in-out property <bool> lock-known;
     in-out property <bool> local-only;
     callback browse(string);
+    callback toggle(string);
     callback pick(string);
     in-out property <bool> watching;
     callback watch();
@@ -36,7 +37,21 @@ export component DepotTree inherits VerticalLayout {
     Button { text: root.depot; accessible-label: "Browse depot root"; clicked => { Assets.browse(""); } }
     for f in Assets.folders: HorizontalLayout {
         Rectangle { width: min(f.depth * 10px + 4px, 48px); }
-        Button { text: (f.expanded ? "▾ " : "▸ ") + f.caption; horizontal-stretch: 1;
+        Rectangle {
+            width: 18px;
+            accessible-role: button;
+            accessible-label: (f.expanded ? "Collapse folder " : "Expand folder ") + f.path;
+            accessible-action-default => { Assets.toggle(f.path); }
+            expand-touch := TouchArea { clicked => { Assets.toggle(f.path); } }
+            Text {
+                text: f.expanded ? "▾" : "▸";
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: Palette.foreground.transparentize(0.35);
+                accessible-role: none;
+            }
+        }
+        Button { text: f.caption; horizontal-stretch: 1;
             accessible-label: "Browse folder " + f.path; clicked => { Assets.browse(f.path); } }
     }
 }

@@ -36,10 +36,13 @@ struct Page {
     index: usize,
 }
 
-fn page_data(root: &Path, folder: &str, listing: &Value, local_only: bool, index: usize) -> Page {
+fn child_dirs(
+    canonical: Option<&Path>,
+    folder: &str,
+    listing: &Value,
+    local_only: bool,
+) -> Vec<String> {
     let mut dirs = Vec::new();
-    let mut files = Vec::new();
-    let canonical = root.canonicalize().ok();
     for entry in listing["entries"].as_array().into_iter().flatten() {
         let Some(name) = entry["name"].as_str() else {
             continue;
@@ -52,17 +55,38 @@ fn page_data(root: &Path, folder: &str, listing: &Value, local_only: bool, index
         if name.contains('/') || lode_core::DepotPath::parse(&path).is_err() {
             continue;
         }
-        if entry["kind"] == "dir" {
-            if !local_only
-                || canonical.as_ref().is_some_and(|r| {
+        if entry["kind"] == "dir"
+            && (!local_only
+                || canonical.is_some_and(|r| {
                     r.join(&path)
                         .canonicalize()
                         .is_ok_and(|p| p.starts_with(r) && p.is_dir())
-                })
-            {
-                dirs.push(path);
-            }
+                }))
+        {
+            dirs.push(path);
+        }
+    }
+    dirs.sort();
+    dirs
+}
+
+fn page_data(root: &Path, folder: &str, listing: &Value, local_only: bool, index: usize) -> Page {
+    let mut files = Vec::new();
+    let canonical = root.canonicalize().ok();
+    let dirs = child_dirs(canonical.as_deref(), folder, listing, local_only);
+    for entry in listing["entries"].as_array().into_iter().flatten() {
+        let Some(name) = entry["name"].as_str() else {
+            continue;
+        };
+        let path = if folder.is_empty() {
+            name.to_owned()
         } else {
+            format!("{folder}/{name}")
+        };
+        if name.contains('/') || lode_core::DepotPath::parse(&path).is_err() {
+            continue;
+        }
+        if entry["kind"] != "dir" {
             let regular = entry["kind"] == "file";
             if local_only
                 && (!regular
@@ -81,7 +105,6 @@ fn page_data(root: &Path, folder: &str, listing: &Value, local_only: bool, index
             ));
         }
     }
-    dirs.sort();
     files.sort_by(|a, b| a.0.cmp(b.0));
     let total = files.len();
     let index = index.min(total.saturating_sub(1) / PAGE);
@@ -121,12 +144,14 @@ pub(super) fn connect(w: &AppWindow, app: &Rc<App>) {
     let ui = w.global::<Assets>();
     let a = app.clone();
     ui.on_browse(move |path| {
+        a.assets.page.set(0);
+        a.open_view(View::Files(path.to_string()));
+    });
+    let a = app.clone();
+    ui.on_toggle(move |path| {
         let folder = path.to_string();
-        let current = a.window.upgrade().is_some_and(|w| {
-            w.global::<Reading>().get_pane() == Pane::Files
-                && w.global::<Assets>().get_folder() == path
-        });
-        if current && !folder.is_empty() && a.assets.dirs.borrow().contains_key(&folder) {
+        if a.assets.dirs.borrow().contains_key(&folder) {
+            // Collapse: forget the folder and everything under it.
             a.assets
                 .dirs
                 .borrow_mut()
@@ -134,10 +159,9 @@ pub(super) fn connect(w: &AppWindow, app: &Rc<App>) {
             if let Some(w) = a.window.upgrade() {
                 a.folder_rows(&w);
             }
-            return;
+        } else {
+            a.expand_folder(folder);
         }
-        a.assets.page.set(0);
-        a.open_view(View::Files(folder));
     });
     let a = app.clone();
     ui.on_refresh(move || a.refresh_assets());
@@ -269,6 +293,32 @@ impl App {
         ui.set_lock_known(false);
         ui.set_busy(false);
     }
+    /// Loads a folder's subfolders without opening it, so the tree can grow in place.
+    fn expand_folder(&self, folder: String) {
+        let Some(w) = self.window.upgrade() else {
+            return;
+        };
+        let Some(root) = self.shown_root.borrow().clone() else {
+            return;
+        };
+        let local = w.global::<Assets>().get_local_only();
+        let Some(me) = self.me() else { return };
+        spawn(async move {
+            let Ok(listing) = me.desk.view_tree(root.clone(), Some(folder.clone())).await else {
+                return;
+            };
+            // The workspace may have changed while the listing was on its way.
+            if me.shown_root.borrow().as_deref() != Some(root.as_str()) {
+                return;
+            }
+            let Some(w) = me.window.upgrade() else { return };
+            let canonical = Path::new(&root).canonicalize().ok();
+            let children = child_dirs(canonical.as_deref(), &folder, &listing, local);
+            me.assets.dirs.borrow_mut().insert(folder, children);
+            me.folder_rows(&w);
+        });
+    }
+
     fn folder_rows(&self, w: &AppWindow) {
         fn append(
             parent: &str,
