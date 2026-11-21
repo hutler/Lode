@@ -54,6 +54,74 @@ fn checkout(server: &TestServer, token: &str) -> TestWorkspace {
     ws
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_shelves_by_depot_without_checkout() {
+    let t = team().await;
+    checkout(&t.server, t.server.admin_token()).json(&["branch", "create", "other"]);
+    let author = checkout(&t.server, &t.ana);
+    author.write("a.txt", "review this change\n");
+    let created = author.json(&["shelve", "-m", "Review"]);
+    let id = created["shelf"].as_u64().unwrap();
+    let number = id.to_string();
+    let reader = TestWorkspace::new(&t.server).with_token(&t.bob);
+
+    assert_eq!(
+        reader.json(&["shelves", "--depot", "game"]),
+        author.json(&["shelves"])
+    );
+    for command in ["show", "diff"] {
+        assert_eq!(
+            reader.json(&["shelf", command, &number, "--depot", "game"]),
+            author.json(&["shelf", command, &number])
+        );
+    }
+    let by_ana = reader.json(&[
+        "shelves", "--depot", "game", "--user", "ana", "--branch", "main",
+    ]);
+    assert_eq!(by_ana["shelves"][0]["id"], id);
+    assert_eq!(
+        reader.json(&["shelves", "--depot", "game", "--mine"])["shelves"],
+        json!([])
+    );
+    assert_eq!(
+        reader.json(&["shelves", "--depot", "game", "--branch", "other"])["shelves"],
+        json!([])
+    );
+    assert_eq!(
+        reader
+            .json_status(&["--server", t.server.url(), "shelves"])
+            .1["error"]["code"],
+        "not_a_workspace"
+    );
+
+    t.server.create_depot("other").await;
+    let admin = TestWorkspace::new(&t.server).with_token(t.server.admin_token());
+    assert_eq!(
+        admin.json(&["shelves", "--depot", "other"])["shelves"],
+        json!([])
+    );
+    let outsider = t.server.create_user("outsider", &["read"]).await;
+    let denied = t
+        .server
+        .client(&outsider)
+        .shelf("game", id, true)
+        .await
+        .unwrap_err();
+    let outside = TestWorkspace::new(&t.server).with_token(&outsider);
+    let (code, error) = outside.json_status(&["shelf", "diff", &number, "--depot", "game"]);
+    assert_ne!(code, 0);
+    assert_eq!(
+        error["error"]["code"].as_str(),
+        Some(denied.api().unwrap().code.as_str())
+    );
+
+    for command in ["delete", "submit"] {
+        let (code, error) = admin.json_status(&["shelf", command, &number, "--depot", "game"]);
+        assert_eq!(code, 2, "{error}");
+    }
+    assert!(!reader.root().join(".lode").exists());
+}
+
 /// `status --json` without the changelist and lock fields.
 fn pending(ws: &TestWorkspace) -> Vec<Value> {
     ws.json(&["status"])["files"]

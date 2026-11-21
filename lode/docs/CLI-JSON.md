@@ -371,13 +371,17 @@ The changes are uploaded and checked against the branch head like a commit (`out
 means: run `lode update` first), then reverted in the workspace unless `--keep`. The
 description defaults to the changelist's (`-c`) or, with `--update`, the shelf's.
 
-### `lode shelves [--mine | --user U] [--branch B] [--state open|submitted|deleted]`
+### `lode shelves [--depot NAME] [--mine | --user U] [--branch B] [--state open|submitted|deleted]`
 
 `{ "shelves": [ { "id", "version", "branch", "base_rev", "owner": { "name", "kind" },
 "agent_owner"?, "description", "state", "submitted_rev"?, "created_at", "updated_at" } ] }`,
 newest first, open shelves by default.
 
 ### `lode shelf show|diff|delete|submit <id>`
+
+For review without a checkout, use `lode --server URL shelves --depot NAME` or
+`lode --server URL shelf show|diff ID --depot NAME`. The list spans branches unless filtered
+with `--branch`; the server applies the same permissions as for workspace-based review.
 
 - `show`: the shelf as above plus `"changes": [ { "path", "action", "base_id", "new_id",
   "kind", "executable", "size", "copy_from" } ]`.
