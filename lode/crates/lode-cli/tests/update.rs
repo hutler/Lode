@@ -142,8 +142,7 @@ async fn a_file_already_at_the_incoming_content_is_left_alone() {
     let mine = checkout(&server);
     mine.write("a.txt", "mine, committed\n");
     mine.json(&["commit", "-m", "mine"]);
-    // The workspace's synced revision is older than its committed a.txt: the delta brings
-    // a.txt with the id it already has.
+    // The commit advanced the synced revision to the head: the update finds nothing to do.
     let v = mine.json(&["update"]);
     assert!(outcomes(&v).is_empty(), "{v}");
     assert_eq!(mine.read("a.txt"), b"mine, committed\n");

@@ -1149,6 +1149,9 @@ very large inputs but has no three-way merge, so it would mean a second crate.
 Scan → select changes (paths, changelist) → refuse if any selected file is `conflicted` →
 hash → `objects/missing` → upload missing blobs in parallel (default 8) → `POST commits` →
 on success update `base_id`, size, mtime, state for committed files and clear lock flags.
+Then, when the delta `GET manifest?rev=new&base=synced_rev` holds only the committed paths,
+the pristine rows are exactly the new tree, so `synced_rev` advances to the committed
+revision; when anything else came in between, it stays and the next update reconciles.
 
 Missing files (gone without `lode rm`) stop the commit, as do conflicted ones. Each sent file
 is hashed with a stat before and after, and stat-checked again after the upload; a file that

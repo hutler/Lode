@@ -219,3 +219,36 @@ async fn refusals_before_sending() {
     assert_eq!(log["revisions"][0]["message"], "From a file");
     assert_eq!(changed(&ws), ["untracked msg.txt"]);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_commit_advances_the_synced_revision() {
+    let server = server().await;
+    let ws = checkout(&server);
+    let at = ws.json(&["status"])["rev"].as_u64().unwrap();
+    ws.write("a.txt", "apple pie\n");
+    ws.write("b.txt", "banana split\n");
+    let v = ws.json(&["commit", "-m", "only a", "a.txt"]);
+    let rev = v["rev"].as_u64().unwrap();
+    assert!(rev > at);
+    // The committed revision is the workspace's now, and the file left out of the commit
+    // is still modified against it.
+    let st = ws.json(&["status"]);
+    assert_eq!(st["rev"].as_u64(), Some(rev));
+    assert_eq!(changed(&ws), ["modified b.txt"]);
+
+    // A commit made while another revision came in between does not pretend to be synced:
+    // the workspace keeps its older revision.
+    let other = checkout(&server);
+    other.write("c.txt", "cherry pie\n");
+    other.json(&["commit", "-m", "c by other"]);
+    ws.write("d/e.txt", "elderberry\n");
+    let v = ws.json(&["commit", "-m", "only d", "d/e.txt"]);
+    let rev2 = v["rev"].as_u64().unwrap();
+    assert!(rev2 > rev);
+    assert_eq!(ws.json(&["status"])["rev"].as_u64(), Some(rev));
+
+    // The update brings the other's file and lifts the synced revision.
+    ws.json(&["update"]);
+    assert_eq!(ws.json(&["status"])["rev"].as_u64(), Some(rev2));
+    assert_eq!(ws.read("c.txt"), b"cherry pie\n");
+}

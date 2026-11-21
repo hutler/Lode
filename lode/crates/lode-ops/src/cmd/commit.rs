@@ -10,10 +10,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use lode_client::Client;
 use lode_core::{validate_changes, Change, ChangeAction, DepotPath, EntryKind, ObjectId};
 use lode_proto::commit::{CommitRequest, EXT_FORCE_FLOW, EXT_OVERRIDE_SHELF_ONLY};
+use lode_proto::read::ManifestDelta;
 use lode_workspace::db::keys;
 use lode_workspace::scan::{symlink_id, trusted_mtime};
 use lode_workspace::{FileRow, FileState, Status, Workspace};
@@ -298,6 +299,47 @@ fn apply(ws: &mut Workspace, p: &Pending, trust_stats: bool) -> OpResult<()> {
     Ok(())
 }
 
+/// Advances the synced revision to a committed one when the commit is the only difference
+/// between the two revisions' trees: then the pristine rows `apply` just wrote are exactly
+/// the new tree. When anything else came in between (or the check itself fails), the synced
+/// revision stays and the next update reconciles as before.
+async fn advance_synced(
+    ws: &mut Workspace,
+    client: &Client,
+    depot: &str,
+    p: &Pending,
+    new_rev: u64,
+) -> OpResult<()> {
+    let Some(from) = ws.db().config_u64(keys::SYNCED_REV)? else {
+        return Ok(());
+    };
+    if from >= new_rev {
+        return Ok(());
+    }
+    let Ok(view) = ws.view_spec() else {
+        return Ok(());
+    };
+    let checked: OpResult<bool> = async {
+        let stream = client
+            .manifest_delta(depot, from, new_rev, &view.include, &view.exclude)
+            .await?;
+        let entries: Vec<ManifestDelta> = stream.try_collect().await?;
+        Ok(entries.iter().all(|d| {
+            let path = match d {
+                ManifestDelta::Put(e) => &e.path,
+                ManifestDelta::Del { path } => path,
+            };
+            p.request.changes.iter().any(|c| &c.path == path)
+        }))
+    }
+    .await;
+    if checked.unwrap_or(false) {
+        ws.db_mut()
+            .write(|tx| tx.set_config(keys::SYNCED_REV, &new_rev.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Sends a stored request again and applies it.
 async fn finish_pending(
     ctx: &Ctx,
@@ -312,6 +354,7 @@ async fn finish_pending(
     match client.commit(depot, branch, &pending.request).await {
         Ok(resp) => {
             apply(ws, &pending, false)?;
+            advance_synced(ws, client, depot, &pending, resp.rev).await?;
             ctx.out.line(format!(
                 "Committed r{} ({} file{}).",
                 resp.rev,
@@ -702,6 +745,7 @@ pub async fn commit(ctx: &Ctx, args: CommitArgs) -> OpResult<Value> {
     };
     crate::crash::point("commit.sent");
     apply(&mut ws, &pending, true)?;
+    advance_synced(&mut ws, &client, &depot, &pending, resp.rev).await?;
     let n = pending.request.changes.len();
     ctx.out.line(format!(
         "Committed r{} ({n} file{}).",
