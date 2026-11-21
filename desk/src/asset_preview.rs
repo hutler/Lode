@@ -34,8 +34,11 @@ fn string(r: &mut impl Read) -> Option<String> {
         let mut bytes = vec![0; len * 2];
         r.read_exact(&mut bytes).ok()?;
         let wide: Vec<_> = bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_le_bytes)
             .collect();
         String::from_utf16(wide.strip_suffix(&[0])?).ok()
     } else {
