@@ -26,7 +26,7 @@ pub(crate) fn depot_href(d: &str) -> String {
     format!("/admin/depots/{}", encode(d))
 }
 
-fn has_module(ctx: &Ctx, name: &str) -> bool {
+pub(super) fn has_module(ctx: &Ctx, name: &str) -> bool {
     ctx.state().module_names().iter().any(|m| m == name)
 }
 

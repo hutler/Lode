@@ -105,6 +105,9 @@ pub(super) async fn show(
     admin: Admin,
     Path((d, shelf, version)): Path<(String, u64, u64)>,
 ) -> Response {
+    if !super::depots::has_module(&ctx, "validate") {
+        return super::not_found_page(&ctx, Some(&admin));
+    }
     let uri = path(
         paths::VALIDATION_RESULT,
         &[&d, &shelf.to_string(), &version.to_string()],
