@@ -45,6 +45,16 @@ languages = ["en-US"]
 
 [package.metadata.packager.nsis]
 installer-mode = "currentUser"
+# cargo-packager 0.11.8 compares the handler at compile time. Check the installed
+# command at uninstall time so a replacement handler survives.
+preinstall-section = '''
+Function un.onUninstSuccess
+  ReadRegStr $R7 HKCU "Software\Classes\lode\shell\open\command" ""
+  StrCmp $R7 "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\"" 0 done
+  DeleteRegKey HKCU "Software\Classes\lode"
+  done:
+FunctionEnd
+'''
 
 [package.metadata.packager.macos]
 minimum-system-version = "11.0"

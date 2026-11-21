@@ -189,6 +189,10 @@ jobs:
           if ((Split-Path -Leaf $long) -ne 'lode-desk.exe') { throw "the lode scheme does not open lode-desk.exe: $cmd" }
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "uninstall exited with $($p.ExitCode)" }
+      - name: Check NSIS uninstall removes only its own link handler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/test-nsis.ps1 (Get-Item dist/*-setup.exe).FullName
       - uses: actions/upload-artifact@v4
         with:
           name: lode-desk-${{ matrix.platform }}
