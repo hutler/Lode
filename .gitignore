@@ -11,3 +11,8 @@ DerivedDataCache/
 .vscode/
 Thumbs.db
 .DS_Store
+
+# Beads runtime files at the repository root.
+/.beads.gate.lock*
+/.beads-credential-key
+/.dolt/
