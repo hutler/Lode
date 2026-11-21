@@ -680,6 +680,7 @@ component WorkspacePage inherits Rectangle {
     callback toggle-file(string);
     callback toggle-group(string);
     callback toggle-all();
+    callback filter-changed(string);
     callback select-file(string);
     callback refresh();
     callback new-changelist();
@@ -755,6 +756,7 @@ component WorkspacePage inherits Rectangle {
                     toggle-group(k) => { root.toggle-group(k); }
                     toggle-all => { root.toggle-all(); }
                     select-file(p) => { root.select-file(p); }
+                    filter-changed(t) => { root.filter-changed(t); }
                     refresh => { root.refresh(); }
                     new-changelist => { root.new-changelist(); }
                     commit-changelist(n) => { root.commit-changelist(n); }
@@ -862,6 +864,7 @@ export component AppWindow inherits Window {
     callback toggle-group(string);
     callback toggle-all();
     callback select-file(string);
+    callback filter-changes(string);
     callback refresh-changes();
     callback commit();
     callback show-dialog(Dialog, string);
@@ -963,6 +966,7 @@ export component AppWindow inherits Window {
                 toggle-group(k) => { root.toggle-group(k); }
                 toggle-all => { root.toggle-all(); }
                 select-file(p) => { root.select-file(p); }
+                filter-changed(t) => { root.filter-changes(t); }
                 refresh => { root.refresh-changes(); }
                 new-changelist => { root.show-dialog(Dialog.new-changelist, ""); }
                 commit-changelist(n) => { root.show-dialog(Dialog.commit-changelist, n); }

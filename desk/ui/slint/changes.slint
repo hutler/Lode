@@ -54,6 +54,8 @@ export struct FileDetails {
 
 export struct ChangesState {
     loaded: bool,
+    /// Only files whose path holds this text (ignoring case) are listed; empty shows all.
+    filter: string,
     total: int,
     picked: int,
     /// What runs now ("Committing", "Reverting" …), or empty.
@@ -332,6 +334,7 @@ export component ChangesView inherits Rectangle {
     callback toggle-group(string);
     callback toggle-all();
     callback select-file(string);
+    callback filter-changed(string);
     callback refresh();
     callback new-changelist();
     callback commit-changelist(string);
@@ -425,6 +428,14 @@ export component ChangesView inherits Rectangle {
                             toggled => { root.toggle-all(); }
                         }
                         Muted { text: "Pick all"; font-size: 12px; vertical-alignment: center; accessible-role: none; }
+                        LineEdit {
+                            width: 150px;
+                            height: 24px;
+                            placeholder-text: "Filter files…";
+                            text: root.state.filter;
+                            accessible-label: "Filter files";
+                            edited(t) => { root.filter-changed(t); }
+                        }
                         BarButton { text: "New changelist…"; enabled: root.idle; clicked => { root.new-changelist(); } }
                         BarButton { text: "Refresh"; enabled: root.idle; clicked => { root.refresh(); } }
                     }

@@ -296,6 +296,44 @@ pub fn split_rows(rows: &[ChangeRow]) -> (Vec<ChangeRow>, Vec<ChangeRow>, Vec<Ch
     (picked, pending, lists)
 }
 
+/// Keeps only the file rows whose path holds `filter` (ignoring case) and the groups that
+/// still have files, with their counts updated. An empty filter keeps everything.
+pub fn filter_rows(rows: &[ChangeRow], filter: &str) -> Vec<ChangeRow> {
+    let needle = filter.trim().to_lowercase();
+    if needle.is_empty() {
+        return rows.to_vec();
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    let mut i = 0;
+    while i < rows.len() {
+        let g = &rows[i];
+        if !g.is_group {
+            if g.key.to_lowercase().contains(&needle) {
+                out.push(g.clone());
+            }
+            i += 1;
+            continue;
+        }
+        let end = rows[i + 1..]
+            .iter()
+            .position(|r| r.is_group)
+            .map_or(rows.len(), |n| i + 1 + n);
+        let files: Vec<ChangeRow> = rows[i + 1..end]
+            .iter()
+            .filter(|f| f.key.to_lowercase().contains(&needle))
+            .cloned()
+            .collect();
+        if !files.is_empty() {
+            let mut g = g.clone();
+            g.count = i32::try_from(files.len()).unwrap_or(i32::MAX);
+            out.push(g);
+            out.extend(files);
+        }
+        i = end;
+    }
+    out
+}
+
 /// One file's row.
 pub fn file_row(f: &FileEntry, picked: bool, selected: bool) -> ChangeRow {
     let (dir, name) = split_path(&f.path);
@@ -474,6 +512,32 @@ mod tests {
         );
         assert_eq!(g[2].description, "New logo");
         assert_eq!(p.paths(), ["src/a.rs", "b.txt", "art/logo.png", "notes.md"]);
+    }
+
+    #[test]
+    fn filter_keeps_matching_files_and_their_groups() {
+        let p = pending();
+        let r = rows(&p, &BTreeSet::new(), None);
+        assert_eq!(filter_rows(&r, ""), r, "an empty filter keeps everything");
+        assert_eq!(filter_rows(&r, "  "), r, "a blank filter keeps everything");
+
+        let f = filter_rows(&r, "LOGO");
+        assert_eq!(
+            f.iter().map(|x| x.key.as_str()).collect::<Vec<_>>(),
+            ["ui", "art/logo.png"],
+            "case does not matter, and only the matching group survives"
+        );
+        assert_eq!(f[0].count, 1, "the group count follows the filter");
+
+        let f = filter_rows(&r, ".txt");
+        let keys: Vec<_> = f.iter().map(|x| x.key.as_str()).collect();
+        assert!(keys.contains(&"b.txt") && !keys.contains(&"src/a.rs"));
+        assert!(
+            !f.iter().any(|x| x.is_group && x.key == "ui"),
+            "a group with no matching files is left out"
+        );
+
+        assert!(filter_rows(&r, "no such file").is_empty());
     }
 
     #[test]

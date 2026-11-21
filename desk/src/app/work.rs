@@ -20,6 +20,8 @@ pub(super) struct WorkspaceState {
     loaded: bool,
     picked: BTreeSet<String>,
     selected: Option<String>,
+    /// Only file rows holding this text (ignoring case) are shown; empty shows all.
+    filter: String,
     /// The commit message typed while another tab was showing.
     message: String,
     /// Bumped by each refresh; only the newest answer is shown.
@@ -41,6 +43,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
     window.on_toggle_all(move || a.toggle_all());
     let a = Rc::clone(app);
     window.on_select_file(move |p| a.select_file(&p));
+    let a = Rc::clone(app);
+    window.on_filter_changes(move |t| a.filter_changes(&t));
     let a = Rc::clone(app);
     window.on_refresh_changes(move || a.refresh_shown());
     let a = Rc::clone(app);
@@ -239,6 +243,7 @@ impl App {
         match st {
             Some(st) => {
                 let rows = changes::rows(&st.pending, &st.picked, st.selected.as_deref());
+                let rows = changes::filter_rows(&rows, &st.filter);
                 let (picked, pending, lists) = changes::split_rows(&rows);
                 self.picked_rows.set_vec(picked);
                 self.pending_rows.set_vec(pending);
@@ -246,6 +251,7 @@ impl App {
                 self.change_rows.set_vec(rows);
                 let total = st.pending.paths().len();
                 changes.loaded = st.loaded;
+                changes.filter = st.filter.as_str().into();
                 changes.total = i32::try_from(total).unwrap_or(i32::MAX);
                 changes.picked = i32::try_from(st.picked.len()).unwrap_or(i32::MAX);
                 changes.conflicted = i32::try_from(st.pending.conflicted()).unwrap_or(i32::MAX);
@@ -333,6 +339,10 @@ impl App {
     fn select_file(&self, path: &str) {
         self.with_shown(|st| st.selected = Some(path.to_owned()));
         self.peek_selected();
+    }
+
+    fn filter_changes(&self, text: &str) {
+        self.with_shown(|st| st.filter = text.to_owned());
     }
 
     /// Shows the selected file's diff beside the lists (files not added yet have none).
