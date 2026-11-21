@@ -1084,7 +1084,7 @@ async fn content_validation(world: &World) {
     let config_text = std::fs::read_to_string(&config_path).unwrap();
     std::fs::write(
         &config_path,
-        format!("[validate]\npython = \"99.0\"\n{config_text}"),
+        format!("[validate]\npython = \"3.999\"\n{config_text}"),
     )
     .unwrap();
     click(&w, "Check changes");
@@ -1093,7 +1093,7 @@ async fn content_validation(world: &World) {
     })
     .await;
     click(&w, "Close");
-    assert!(v.get_python_warning().contains("99.0"));
+    assert!(v.get_python_warning().contains("3.999"));
     click(&w, "Dismiss");
     click(&w, "Check changes");
     until("second check finishes", || {
