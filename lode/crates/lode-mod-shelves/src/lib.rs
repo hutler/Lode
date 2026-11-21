@@ -926,10 +926,6 @@ struct GetShelfInput {
     diff: bool,
 }
 
-fn bad_input(e: serde_json::Error) -> ApiError {
-    ApiError::invalid_request(format!("bad input: {e}"))
-}
-
 impl Module for Shelves {
     fn name(&self) -> &'static str {
         NAME
@@ -1059,8 +1055,7 @@ impl Module for Shelves {
                 handler: Arc::new(move |caller, input| {
                     let ctx = list_ctx.clone();
                     Box::pin(async move {
-                        let input: ListShelvesInput =
-                            serde_json::from_value(input).map_err(bad_input)?;
+                        let input: ListShelvesInput = lode_server::extract::tool_input(input)?;
                         let list = list_shelves(&ctx, &caller, &input.depot, input.query).await?;
                         serde_json::to_value(list).map_err(|_| ApiError::internal())
                     })
@@ -1086,8 +1081,7 @@ impl Module for Shelves {
                 handler: Arc::new(move |caller, input| {
                     let ctx = ctx.clone();
                     Box::pin(async move {
-                        let input: GetShelfInput =
-                            serde_json::from_value(input).map_err(bad_input)?;
+                        let input: GetShelfInput = lode_server::extract::tool_input(input)?;
                         let shelf =
                             get_shelf(&ctx, &caller, &input.depot, input.id, input.diff).await?;
                         serde_json::to_value(shelf).map_err(|_| ApiError::internal())

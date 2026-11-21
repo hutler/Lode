@@ -409,8 +409,19 @@ fn tool(module: &Feed, ctx: &ModuleCtx) -> ToolDef {
                     Value::Null => None,
                     Value::Array(a) => Some(
                         a.iter()
-                            .map(|k| k.as_str().unwrap_or_default())
-                            .collect::<Vec<_>>()
+                            .enumerate()
+                            .map(|(index, value)| {
+                                value
+                                    .as_str()
+                                    .filter(|kind| EVENTS.contains(kind))
+                                    .ok_or_else(|| {
+                                        ApiError::invalid_request(format!(
+                                            "kinds[{index}] must be one of: {}",
+                                            EVENTS.join(", ")
+                                        ))
+                                    })
+                            })
+                            .collect::<ApiResult<Vec<_>>>()?
                             .join(","),
                     ),
                     _ => return Err(ApiError::invalid_request("`kinds` must be a list")),

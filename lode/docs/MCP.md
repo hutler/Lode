@@ -199,6 +199,12 @@ work.
 4. The person submits the version they reviewed: `lode shelf submit <id>@<version>`. The
    revision's author is the agent, its submitter the person.
 
+Each entry in `edits` requires `path` and `action`. Set `action` to `add`, `modify` or
+`delete`. An optional `copy_from` on an add requires both the source `path` and its `rev`.
+If the first edit omits its action, the server returns `invalid_request` with the message
+`edits[0]: missing required field "action" (one of: add, modify, delete)`. HTTP shelf and
+commit requests identify the same error under `changes[0]`.
+
 Limits per `create_shelf`/`update_shelf` call: 500 edits and 16 MiB of inline content
 (`[limits] mcp_max_edits`, `mcp_max_inline_bytes`). Larger work goes through the HTTP blob API.
 `read_file` and `diff` output is capped (256 KiB by default) and says when it was cut.

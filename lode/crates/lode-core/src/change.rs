@@ -19,6 +19,9 @@ pub enum ChangeAction {
 }
 
 impl ChangeAction {
+    /// Allowed action names on the JSON wire, in declaration order.
+    pub const NAMES: [&'static str; 3] = ["add", "modify", "delete"];
+
     /// Single-letter form used in the history index (`A`, `M`, `D`).
     pub fn letter(self) -> char {
         match self {

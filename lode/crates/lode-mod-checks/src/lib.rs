@@ -392,10 +392,7 @@ async fn list(
     ApiPath(depot): ApiPath<String>,
     q: ApiQuery,
 ) -> ApiResult<Json<CheckList>> {
-    let kind = q
-        .get("target_kind")
-        .and_then(CheckTargetKind::parse)
-        .ok_or_else(|| ApiError::invalid_request("target_kind must be revision or shelf"))?;
+    let kind = parse_target_kind(q.get("target_kind"))?;
     let id = q
         .u64("target_id")?
         .ok_or_else(|| ApiError::invalid_request("target_id is required"))?;
@@ -405,6 +402,12 @@ async fn list(
         target_version: q.u64("target_version")?,
     };
     Ok(Json(list_checks(&ctx, &caller, &depot, query).await?))
+}
+
+fn parse_target_kind(value: Option<&str>) -> ApiResult<CheckTargetKind> {
+    value
+        .and_then(CheckTargetKind::parse)
+        .ok_or_else(|| ApiError::invalid_request("target_kind must be revision or shelf"))
 }
 
 /// The checks of one target that `caller` may see (see `GET /depots/{d}/checks`).
@@ -561,10 +564,13 @@ impl Module for Checks {
                     "target_kind": { "type": "string", "enum": ["revision", "shelf"] },
                     "target_id": { "type": "integer", "minimum": 1,
                                    "description": "Revision number or shelf id" },
-                    "target_version": { "type": "integer", "minimum": 1,
+                    "target_version": { "type": "integer", "minimum": 0,
                                         "description": "Shelf version; required for a shelf" }
                 },
                 "required": ["depot", "target_kind", "target_id"],
+                "if": { "properties": { "target_kind": { "const": "shelf" } }, "required": ["target_kind"] },
+                "then": { "required": ["target_version"], "properties": { "target_version": { "minimum": 1 } } },
+                "else": { "properties": { "target_version": { "const": 0 } } },
                 "additionalProperties": false
             }),
             scope: SCOPE_READ.into(),
@@ -574,12 +580,18 @@ impl Module for Checks {
                     #[derive(serde::Deserialize)]
                     struct Input {
                         depot: String,
-                        #[serde(flatten)]
-                        query: ChecksQuery,
+                        #[serde(default)]
+                        target_kind: serde_json::Value,
+                        target_id: u64,
+                        target_version: Option<u64>,
                     }
-                    let input: Input = serde_json::from_value(input)
-                        .map_err(|e| ApiError::invalid_request(format!("bad input: {e}")))?;
-                    let list = list_checks(&ctx, &caller, &input.depot, input.query).await?;
+                    let input: Input = lode_server::extract::tool_input(input)?;
+                    let query = ChecksQuery {
+                        target_kind: parse_target_kind(input.target_kind.as_str())?,
+                        target_id: input.target_id,
+                        target_version: input.target_version,
+                    };
+                    let list = list_checks(&ctx, &caller, &input.depot, query).await?;
                     serde_json::to_value(list).map_err(|_| ApiError::internal())
                 })
             }),

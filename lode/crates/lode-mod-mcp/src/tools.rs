@@ -35,10 +35,6 @@ const PAGE_MAX: u32 = 100;
 /// Revisions `search_history` looks through per call before it hands back a cursor.
 const SEARCH_SCAN: usize = 2000;
 
-fn bad_input(e: serde_json::Error) -> ApiError {
-    ApiError::invalid_request(format!("bad input: {e}"))
-}
-
 fn to_value<T: serde::Serialize>(v: &T) -> ApiResult<Value> {
     serde_json::to_value(v).map_err(|_| ApiError::internal())
 }
@@ -61,7 +57,7 @@ where
             let ctx = ctx.clone();
             let f = f.clone();
             Box::pin(async move {
-                let input: I = serde_json::from_value(input).map_err(bad_input)?;
+                let input: I = lode_server::extract::tool_input(input)?;
                 f(ctx, caller, input).await
             })
         }),

@@ -56,6 +56,137 @@ async fn tool_names(client: &McpClient) -> Vec<String> {
         .collect()
 }
 
+#[tokio::test]
+async fn published_schemas_and_input_errors_identify_the_edit() {
+    let server = TestServer::start_with(TestServerOptions {
+        configure: Box::new(|c| c.modules.checks = true),
+    })
+    .await;
+    server.create_depot("game").await;
+    server.create_user("owner", &["read"]).await;
+    let token = server
+        .create_agent("bot", "owner", &["read", "shelve"])
+        .await;
+    let client = connect(&server, &token).await;
+    let tools = client.list_all_tools().await.unwrap();
+    for (name, required) in [
+        (
+            "create_shelf",
+            json!(["depot", "branch", "description", "edits"]),
+        ),
+        ("update_shelf", json!(["depot", "id", "edits"])),
+    ] {
+        let schema = &tools.iter().find(|t| t.name == name).unwrap().input_schema;
+        assert_eq!(schema["required"], required);
+        let item = &schema["properties"]["edits"]["items"];
+        assert_eq!(item["required"], json!(["path", "action"]));
+        assert_eq!(
+            item["properties"]["action"]["enum"],
+            json!(["add", "modify", "delete"])
+        );
+        assert_eq!(
+            item["properties"]["copy_from"]["required"],
+            json!(["path", "rev"])
+        );
+
+        for (edits, expected) in [
+            (
+                json!([{"path":"a"}]),
+                r#"edits[0]: missing required field "action" (one of: add, modify, delete)"#,
+            ),
+            (
+                json!([{"path":"a","action":"delete"},{"path":"b","action":"rename"}]),
+                r#"edits[1]: invalid field "action" (one of: add, modify, delete)"#,
+            ),
+            (
+                json!([{"path":"a","action":"add","copy_from":{"path":"b"}}]),
+                "edits[0].copy_from: missing field `rev`",
+            ),
+        ] {
+            let mut args = if name == "create_shelf" {
+                json!({"depot":"game","branch":"main","description":"test"})
+            } else {
+                json!({"depot":"game","id":1})
+            };
+            args["edits"] = edits;
+            let result = call_raw(&client, name, args).await;
+            assert_eq!(result.is_error, Some(true));
+            let error = result.structured_content.unwrap();
+            assert_eq!(error["code"], "invalid_request");
+            assert_eq!(error["message"], expected);
+        }
+    }
+    let checks = &tools
+        .iter()
+        .find(|t| t.name == "list_checks")
+        .unwrap()
+        .input_schema;
+    assert_eq!(checks["if"]["properties"]["target_kind"]["const"], "shelf");
+    assert_eq!(checks["then"]["required"], json!(["target_version"]));
+    let result = call_raw(
+        &client,
+        "list_checks",
+        json!({"depot":"game","target_id":1}),
+    )
+    .await;
+    let error = result.structured_content.unwrap();
+    assert_eq!(error["code"], "invalid_request");
+    assert_eq!(error["message"], "target_kind must be revision or shelf");
+    let result = call_raw(
+        &client,
+        "wait_for_events",
+        json!({"depot":"game","kinds":[42]}),
+    )
+    .await;
+    let error = result.structured_content.unwrap();
+    assert_eq!(error["code"], "invalid_request");
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("kinds[0] must be one of: "),
+        "{message}"
+    );
+    assert!(message.contains(lode_proto::feed::EVENTS[0]));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn http_shelf_and_commit_errors_identify_the_change() {
+    let server = TestServer::start().await;
+    server.create_depot("game").await;
+    let http = reqwest::Client::new();
+    for (route, mut body) in [
+        (
+            "shelves",
+            json!({"branch":"main","base_rev":1,"description":"test"}),
+        ),
+        (
+            "branches/main/commits",
+            json!({"request_id":"test","message":"test"}),
+        ),
+    ] {
+        for (change, reason) in [
+            (json!({"path":"b"}), "missing required field"),
+            (json!({"path":"b","action":"rename"}), "invalid field"),
+        ] {
+            body["changes"] = json!([{"path":"a","action":"delete"}, change]);
+            let response = http
+                .post(format!("{}/api/v1/depots/game/{route}", server.url()))
+                .bearer_auth(server.admin_token())
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+            let error: Value = response.json().await.unwrap();
+            assert_eq!(error["code"], "invalid_request");
+            assert_eq!(
+                error["message"],
+                format!(r#"changes[1]: {reason} "action" (one of: add, modify, delete)"#)
+            );
+        }
+    }
+}
+
 // The CLI runs synchronously, so the server needs threads of its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_shelf_reviewed_and_submitted_by_a_person() {
