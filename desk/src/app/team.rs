@@ -961,17 +961,15 @@ impl App {
     }
 
     fn submit_shelve(&self) {
-        let Some((w, root)) = self.team_root() else {
+        let Some((w, _)) = self.team_root() else {
             return;
         };
         let t = w.global::<Team>();
-        let mut d = t.get_shelve();
+        let d = t.get_shelve();
         if d.busy {
             return;
         }
-        d.busy = true;
-        d.error = ErrorInfo::default();
-        t.set_shelve(d);
+        // Validation owns the modal while this request is in flight.
         let update = usize::try_from(t.get_shelve_target())
             .ok()
             .and_then(|i| i.checked_sub(1))
@@ -985,60 +983,21 @@ impl App {
         let text = t.get_shelve_text().trim().to_owned();
         let keep = t.get_shelve_keep();
         let what = self.team.shelve.borrow().clone();
-        let Some(me) = self.me() else { return };
-        spawn(async move {
-            let result = async {
-                let mut request = ShelveRequest {
-                    message: (!text.is_empty()).then_some(text),
-                    keep,
-                    update,
-                    ..ShelveRequest::default()
-                };
-                match what {
-                    ShelveWhat::Files { paths, untracked } => {
-                        if !untracked.is_empty() {
-                            me.desk.add(root.clone(), untracked.clone()).await?;
-                        }
-                        request.paths = paths.into_iter().chain(untracked).collect();
-                    }
-                    ShelveWhat::List(name) => request.changelist = Some(name),
-                    ShelveWhat::None => {}
-                }
-                me.desk.shelve(root.clone(), request).await
+        let mut request = ShelveRequest {
+            message: (!text.is_empty()).then_some(text),
+            keep,
+            update,
+            ..Default::default()
+        };
+        let mut add = Vec::new();
+        match what {
+            ShelveWhat::Files { paths, untracked } => {
+                request.paths = paths.into_iter().chain(untracked.iter().cloned()).collect();
+                add = untracked;
             }
-            .await;
-            let Some(w) = me.window.upgrade() else { return };
-            let t = w.global::<Team>();
-            match result {
-                Ok(r) => {
-                    if w.get_dialog() == Dialog::Shelve {
-                        w.set_dialog(Dialog::None);
-                    }
-                    let shelf = r["shelf"].as_u64().unwrap_or(0);
-                    let files = usize::try_from(r["files"].as_u64().unwrap_or(0)).unwrap_or(0);
-                    let place = if r["updated"].as_bool() == Some(true) {
-                        format!(
-                            "Updated shelf {shelf} to version {}",
-                            r["version"].as_u64().unwrap_or(0)
-                        )
-                    } else {
-                        format!("Shelved as shelf {shelf}")
-                    };
-                    let kept = if r["kept"].as_bool() == Some(true) {
-                        ""
-                    } else {
-                        "; the files were reverted here"
-                    };
-                    me.changes_done(&format!("{place} ({}){kept}.", plural(files, "file")));
-                    me.refresh(root);
-                }
-                Err(e) => {
-                    let mut d = t.get_shelve();
-                    d.busy = false;
-                    d.error = error_info(&e);
-                    t.set_shelve(d);
-                }
-            }
-        });
+            ShelveWhat::List(name) => request.changelist = Some(name),
+            ShelveWhat::None => {}
+        }
+        self.start_validation(crate::validation::Action::Shelve, request, add);
     }
 }

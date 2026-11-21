@@ -20,5 +20,6 @@ pub mod links;
 pub mod merge;
 pub mod team;
 pub mod update;
+pub mod validation;
 pub mod views;
 pub mod watch;
