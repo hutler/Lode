@@ -864,8 +864,7 @@ impl Module for Locks {
             handler: Arc::new(move |caller, input| {
                 let ctx = ctx.clone();
                 Box::pin(async move {
-                    let input: ListLocksInput = serde_json::from_value(input)
-                        .map_err(|e| ApiError::invalid_request(format!("bad input: {e}")))?;
+                    let input: ListLocksInput = lode_server::extract::tool_input(input)?;
                     let list = list_locks(&ctx, &caller, &input.depot, input.query).await?;
                     serde_json::to_value(list).map_err(|_| ApiError::internal())
                 })

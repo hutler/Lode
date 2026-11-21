@@ -25,7 +25,7 @@ use crate::{create_shelf, get_shelf, submit_shelf, update_shelf, SCOPE_SHELVE};
 #[serde(deny_unknown_fields)]
 struct EditInput {
     path: String,
-    action: String,
+    action: ChangeAction,
     text: Option<String>,
     base64: Option<String>,
     executable: Option<bool>,
@@ -70,10 +70,6 @@ struct SubmitInput {
     message: Option<String>,
 }
 
-fn bad_input(e: serde_json::Error) -> ApiError {
-    ApiError::invalid_request(format!("bad input: {e}"))
-}
-
 fn too_large(message: String) -> ApiError {
     ApiError::new(ErrorCode::TooLarge, message)
 }
@@ -86,7 +82,8 @@ fn edits_schema() -> Value {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "File path, such as `src/main.rs`" },
-                "action": { "type": "string", "enum": ["add", "modify", "delete"] },
+                "action": { "type": "string", "enum": ChangeAction::NAMES,
+                            "description": "Required for every edit. Use add for a new path, modify for an existing file, or delete to remove it." },
                 "text": { "type": "string", "description": "New content as UTF-8 text" },
                 "base64": { "type": "string", "description": "New content as base64, for binary files" },
                 "executable": { "type": "boolean", "description": "Executable flag (default: unchanged, or false for a new file)" },
@@ -148,7 +145,7 @@ pub(crate) fn tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
             handler: Arc::new(move |caller, input| {
                 let ctx = create_ctx.clone();
                 Box::pin(async move {
-                    let input: CreateInput = serde_json::from_value(input).map_err(bad_input)?;
+                    let input: CreateInput = lode_server::extract::tool_input(input)?;
                     let (d, _) = ctx.depots().resolve(&caller, &input.depot).await?;
                     let base_rev = match input.base_rev {
                         Some(r) => r,
@@ -194,7 +191,7 @@ pub(crate) fn tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
             handler: Arc::new(move |caller, input| {
                 let ctx = update_ctx.clone();
                 Box::pin(async move {
-                    let input: UpdateInput = serde_json::from_value(input).map_err(bad_input)?;
+                    let input: UpdateInput = lode_server::extract::tool_input(input)?;
                     let (d, _) = ctx.depots().resolve(&caller, &input.depot).await?;
                     let current = get_shelf(&ctx, &caller, &input.depot, input.id, false).await?;
                     let base_rev = input.base_rev.unwrap_or(current.base_rev);
@@ -237,7 +234,7 @@ pub(crate) fn tools(ctx: &ModuleCtx) -> Vec<ToolDef> {
             handler: Arc::new(move |caller, input| {
                 let ctx = submit_ctx.clone();
                 Box::pin(async move {
-                    let input: SubmitInput = serde_json::from_value(input).map_err(bad_input)?;
+                    let input: SubmitInput = lode_server::extract::tool_input(input)?;
                     let req = SubmitShelfRequest {
                         expected_version: input.expected_version,
                         message: input.message,
@@ -309,17 +306,7 @@ async fn changes(
         let path = parse_path(&e.path)?;
         let base = ctx.depots().entry(caller, depot, base_rev, &path).await?;
         let base = base.filter(|b| b.kind != EntryKind::Dir);
-        let action = match e.action.as_str() {
-            "add" => ChangeAction::Add,
-            "modify" => ChangeAction::Modify,
-            "delete" => ChangeAction::Delete,
-            other => {
-                return Err(ApiError::invalid_request(format!(
-                    "{}: action must be `add`, `modify` or `delete`, not `{other}`",
-                    path.as_str()
-                )))
-            }
-        };
+        let action = e.action;
         let content = match (e.text, e.base64) {
             (Some(_), Some(_)) => {
                 return Err(ApiError::invalid_request(format!(

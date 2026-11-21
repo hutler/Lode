@@ -324,6 +324,11 @@ Two MCP servers, both speaking the standard Model Context Protocol:
   result for review.
 - With the feed module (§6.7) both endpoints offer `wait_for_events`.
 
+For `create_shelf` and `update_shelf`, every edit requires `path` and `action` (`add`,
+`modify` or `delete`). A supplied `copy_from` requires both `path` and `rev`. Invalid or
+missing actions return `invalid_request` with the array index and the allowed actions.
+HTTP shelf and commit requests use the same diagnostic for their `changes` array.
+
 Every tool returns structured JSON. Tools that write are only listed when the token allows them.
 Each module supplies its own tools (the lock tools come from the locks module, the shelf tools
 from the shelves module); the MCP module hosts them and adds the tools that read core data.

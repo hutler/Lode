@@ -1,5 +1,7 @@
 //! Extractors whose rejections use the API error shape.
 
+use std::error::Error;
+
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::request::Parts;
@@ -29,9 +31,55 @@ where
     }
 }
 
+/// Decode a tool's arguments with the same field paths as typed HTTP JSON bodies.
+pub fn tool_input<T: DeserializeOwned>(input: serde_json::Value) -> Result<T, ApiError> {
+    serde_path_to_error::deserialize(input).map_err(|e| input_error(&e))
+}
+
+type InputError = serde_path_to_error::Error<serde_json::Error>;
+
+fn input_error(error: &InputError) -> ApiError {
+    use serde_path_to_error::Segment::{Map, Seq};
+
+    // Serde knows which enum variants are valid for a supplied value. When the field is
+    // absent it reports only the field name, so supply the choices for a shelf/commit action.
+    let mut path = error.path().iter();
+    if let (Some(Map { key }), Some(Seq { index })) = (path.next(), path.next()) {
+        if key == "edits" || key == "changes" {
+            let message = match path.next() {
+                None if error
+                    .inner()
+                    .to_string()
+                    .starts_with("missing field `action`") =>
+                {
+                    Some("missing required field \"action\"")
+                }
+                Some(Map { key }) if key == "action" => Some("invalid field \"action\""),
+                _ => None,
+            };
+            if let Some(message) = message {
+                return ApiError::invalid_request(format!(
+                    "{key}[{index}]: {message} (one of: {})",
+                    lode_core::ChangeAction::NAMES.join(", ")
+                ));
+            }
+        }
+    }
+    ApiError::invalid_request(error.to_string())
+}
+
 fn json_rejection(r: JsonRejection) -> ApiError {
     if r.status() == StatusCode::PAYLOAD_TOO_LARGE {
         return ApiError::new(ErrorCode::TooLarge, "request body is too large");
+    }
+    if let JsonRejection::JsonDataError(ref data) = r {
+        let mut source = data.source();
+        while let Some(err) = source {
+            if let Some(input) = err.downcast_ref::<InputError>() {
+                return input_error(input);
+            }
+            source = err.source();
+        }
     }
     ApiError::invalid_request(r.body_text())
 }
