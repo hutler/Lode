@@ -14,6 +14,7 @@ use lode_desk::app::{
     self, ChangesState, CheckoutState, Dialog, ErrorInfo, ListDialogState, Options, Recent,
     ServerRowData, SignInState, WorkspaceTab,
 };
+use lode_desk::app::{AssetCard, Assets, DepotFolder};
 use lode_desk::app::{BlameState, DiffNote, DiffState, HistoryState, ImageState, Pane, Reading};
 use lode_desk::app::{
     BranchesState, Branching, ConflictState, FolderRow, MergeState, OutcomeState, RegionRow,
@@ -634,6 +635,66 @@ fn main() {
         });
         r.set_pane(Pane::View);
         shot("view-editor");
+
+        // The files pane in Workspace scope: the folder tree and the list with kind icons and
+        // lock badges.
+        let a = w.global::<Assets>();
+        a.set_local_only(true);
+        a.set_folder("Content/Textures".into());
+        a.set_lock_known(true);
+        a.set_folders(ModelRc::from(Rc::new(VecModel::from(vec![
+            DepotFolder {
+                path: "Content".into(),
+                caption: "Content".into(),
+                depth: 0,
+                expanded: true,
+            },
+            DepotFolder {
+                path: "Content/Maps".into(),
+                caption: "Maps".into(),
+                depth: 1,
+                expanded: false,
+            },
+            DepotFolder {
+                path: "Content/Textures".into(),
+                caption: "Textures".into(),
+                depth: 1,
+                expanded: true,
+            },
+        ]))));
+        let card = |name: &str, local: bool, holder: &str| AssetCard {
+            path: format!("Content/Textures/{name}").into(),
+            name: name.into(),
+            kind: changes::file_kind(name).into(),
+            picture: lamp(true),
+            preview: true,
+            local,
+            writable: true,
+            size: "1.2 MB".into(),
+            holder: holder.into(),
+            ..AssetCard::default()
+        };
+        a.set_rows(ModelRc::from(Rc::new(VecModel::from(vec![
+            card("Lamp_D.png", true, ""),
+            card("Lamp_N.png", true, "bob"),
+            card("Waves.png", false, ""),
+            card("Harbor.png", true, ""),
+            card("Boat.png", true, "alice"),
+        ]))));
+        let mut sel = card("Lamp_N.png", true, "bob");
+        sel.mine = false;
+        sel.comment = "Retexturing for harbor-night".into();
+        sel.workspace = "D:\\work\\game".into();
+        a.set_selected(sel);
+        a.set_page_label("1–5 of 5".into());
+        r.set_pane(Pane::Files);
+        shot("files");
+        a.set_local_only(false);
+        a.set_selected(AssetCard::default());
+        a.set_rows(ModelRc::default());
+        a.set_folders(ModelRc::default());
+        a.set_folder("".into());
+
         r.set_pane(Pane::Changes);
         w.set_workspaces(ModelRc::default());
 

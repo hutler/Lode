@@ -1,8 +1,6 @@
 //! The open folder is read at the workspace revision. Only one page of previews is decoded.
 use super::read::View;
-use super::{
-    human_bytes, spawn, App, AppWindow, AssetCard, AssetLine, Assets, DepotFolder, Pane, Reading,
-};
+use super::{human_bytes, spawn, App, AppWindow, AssetCard, Assets, DepotFolder, Pane, Reading};
 use crate::asset_preview;
 use serde_json::Value;
 use slint::{ComponentHandle, Image, ModelRc, SharedPixelBuffer};
@@ -265,7 +263,7 @@ impl App {
         let ui = w.global::<Assets>();
         ui.set_selected(AssetCard::default());
         ui.set_folders(ModelRc::default());
-        ui.set_lines(ModelRc::default());
+        ui.set_rows(ModelRc::default());
         ui.set_folder("".into());
         ui.set_message("".into());
         ui.set_lock_known(false);
@@ -337,7 +335,7 @@ impl App {
         ui.set_lock_known(false);
         ui.set_previous(false);
         ui.set_next(false);
-        ui.set_lines(ModelRc::default());
+        ui.set_rows(ModelRc::default());
         ui.set_page_label("".into());
         self.assets.cards.borrow_mut().clear();
         let generation = self.assets.generation.get() + 1;
@@ -421,6 +419,7 @@ impl App {
                         .get(f.path.as_str())
                         .copied()
                         .unwrap_or(&Value::Null);
+                    let kind = crate::changes::file_kind(&f.path);
                     let img = f.pixels.map(|pixels| {
                         Image::from_rgba8(SharedPixelBuffer::clone_from_slice(
                             pixels.as_raw(),
@@ -431,6 +430,7 @@ impl App {
                     AssetCard {
                         path: f.path.into(),
                         name: f.name.into(),
+                        kind: kind.into(),
                         local: f.local,
                         writable: f.writable,
                         preview: img.is_some(),
@@ -443,11 +443,7 @@ impl App {
                     }
                 })
                 .collect();
-            let lines: Vec<_> = cards
-                .chunks(3)
-                .map(|c| AssetLine { tiles: c.into() })
-                .collect();
-            ui.set_lines(lines.as_slice().into());
+            ui.set_rows(cards.as_slice().into());
             if let Some(c) = cards.iter().find(|c| c.path == keep) {
                 ui.set_selected(c.clone());
             }
