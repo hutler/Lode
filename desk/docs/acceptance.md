@@ -1,9 +1,24 @@
 # Lode Desk acceptance checklist
 
-What [the Lode Desk guide](guide.md) promises that only a person can check: installers, an
-update, and a link clicked in another app. Everything else in the guide is driven through the
-app's commands against a real server by `desk/tests/acceptance.rs` (run by CI in
-the Lode Desk job), and the screens by the UI tests.
+This checklist covers the installers, updates and links opened by another app. The Desk CI job
+also tests commands against a real server and drives the screens through UI tests.
+
+## Run packaged acceptance on GitHub
+
+Open **Actions → Desk installer acceptance → Run workflow**. Leave the inputs empty to test
+the version in the public update feed. Windows installs the newest older stable Desk MSI,
+updates through the app and compares the installed executable with the published MSI. It then
+tests sign-in, checkout, lock contention, a two-file commit, revision links and NSIS uninstall.
+Ubuntu installs the Debian package and opens two links in the same Desk process.
+
+Before publishing, enter the run ID of a successful **desk-release** build in
+`candidate_run`. The job uses its signed packages and serves its update feed on the runner.
+For either mode, `previous_tag` selects a particular older release containing a Desk MSI,
+and `core_tag` selects the server release for the Windows test. The default server is the
+newest stable Lode release. Candidate runs require the unexpired `lode-desk-release` artifact.
+
+Changes to this workflow or its test scripts run the public-feed check on the pull request.
+Use the manual checklist below for macOS and for visual checks on each platform.
 
 Run this on each system before a release, with the release's own files, and note the result
 and the date. Windows is required for every release; macOS and Linux when someone has them.
