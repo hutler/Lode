@@ -88,9 +88,9 @@ embed-resource = "3"
 [dependencies]
 # The Lode core, at a pinned version (see "The core version" in README.md). Desk moves to a new
 # core in its own change: set the same `rev` (or `tag`) on all six lines and run `cargo update`.
-lode-client = { git = "https://github.com/hutler/Lode", rev = "f25411e2166cebbbd5479c19739db142f29e09fb" }
-lode-ops = { git = "https://github.com/hutler/Lode", rev = "f25411e2166cebbbd5479c19739db142f29e09fb" }
-lode-core = { git = "https://github.com/hutler/Lode", rev = "f25411e2166cebbbd5479c19739db142f29e09fb" }
+lode-client = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
+lode-ops = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
+lode-core = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
 base64 = "0.22"
 directories = "6"
 # Decodes the two sides of an image diff (Slint takes pixels); already in the tree through rfd.
@@ -113,9 +113,9 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
 [dev-dependencies]
 i-slint-backend-testing = "=1.18.1"
 png = "0.17"
-lode-proto = { git = "https://github.com/hutler/Lode", rev = "f25411e2166cebbbd5479c19739db142f29e09fb" }
-lode-server = { git = "https://github.com/hutler/Lode", rev = "f25411e2166cebbbd5479c19739db142f29e09fb" }
-lode-testkit = { git = "https://github.com/hutler/Lode", rev = "f25411e2166cebbbd5479c19739db142f29e09fb" }
+lode-proto = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
+lode-server = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
+lode-testkit = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
 minisign = "0.10.0"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
