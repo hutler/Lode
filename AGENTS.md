@@ -14,6 +14,11 @@ Use English for project documentation and agent instructions. Keep translations 
 the English original. For tasks carried out in a Lode depot, start with the
 [agent workflow guide](docs/agent-guide.md).
 
+Track new Lode tasks in [Beads](.beads/README.md). Run `bd bootstrap` in a fresh clone,
+`bd dolt pull` before planning and `bd dolt push` after updating issues. Check the issue's
+acceptance criteria and approval status before implementing it. Existing milestone task IDs
+and specifications remain in `lode/docs/tasks/`.
+
 ## One task, one subproject
 
 - A task belongs to one subproject. Work only inside that subproject's folder.
