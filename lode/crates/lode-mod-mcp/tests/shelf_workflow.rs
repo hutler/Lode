@@ -58,9 +58,16 @@ async fn tool_names(client: &McpClient) -> Vec<String> {
 
 #[tokio::test]
 async fn published_schemas_and_input_errors_identify_the_edit() {
-    let server = TestServer::start().await;
+    let server = TestServer::start_with(TestServerOptions {
+        configure: Box::new(|c| c.modules.checks = true),
+    })
+    .await;
     server.create_depot("game").await;
-    let client = connect(&server, server.admin_token()).await;
+    server.create_user("owner", &["read"]).await;
+    let token = server
+        .create_agent("bot", "owner", &["read", "shelve"])
+        .await;
+    let client = connect(&server, &token).await;
     let tools = client.list_all_tools().await.unwrap();
     for (name, required) in [
         (

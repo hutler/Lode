@@ -44,28 +44,25 @@ fn input_error(error: &InputError) -> ApiError {
     // Serde knows which enum variants are valid for a supplied value. When the field is
     // absent it reports only the field name, so supply the choices for a shelf/commit action.
     let mut path = error.path().iter();
-    if let (Some(Map { key }), Some(Seq { index })) = (path.next(), path.next()) {
-        if key == "edits" || key == "changes" {
-            let message = match path.next() {
-                None if error
-                    .inner()
-                    .to_string()
-                    .starts_with("missing field `action`") =>
-                {
-                    Some("missing required field \"action\"")
-                }
-                Some(Map { key }) if key == "action" => Some("invalid field \"action\""),
-                _ => None,
-            };
-            if let Some(message) = message {
-                return ApiError::invalid_request(format!(
-                    "{key}[{index}]: {message} (one of: {})",
-                    lode_core::ChangeAction::NAMES.join(", ")
-                ));
-            }
+    let (Some(Map { key }), Some(Seq { index })) = (path.next(), path.next()) else {
+        return ApiError::invalid_request(error.to_string());
+    };
+    let reason = match (key.as_str(), path.next()) {
+        ("edits" | "changes", None)
+            if error
+                .inner()
+                .to_string()
+                .starts_with("missing field `action`") =>
+        {
+            "missing required field"
         }
-    }
-    ApiError::invalid_request(error.to_string())
+        ("edits" | "changes", Some(Map { key })) if key == "action" => "invalid field",
+        _ => return ApiError::invalid_request(error.to_string()),
+    };
+    ApiError::invalid_request(format!(
+        r#"{key}[{index}]: {reason} "action" (one of: {})"#,
+        lode_core::ChangeAction::NAMES.join(", ")
+    ))
 }
 
 fn json_rejection(r: JsonRejection) -> ApiError {
