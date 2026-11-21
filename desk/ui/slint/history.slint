@@ -1,7 +1,7 @@
 // History, blame and diffs of an open workspace (T132). The state lives in the global
 // `Reading`, which src/app/read.rs fills; the views only draw it and call its callbacks.
 
-import { Button, ListView, Slider, Palette } from "std-widgets.slint";
+import { Button, LineEdit, ListView, Slider, Palette } from "std-widgets.slint";
 import { ErrorInfo, ErrorBanner, Muted, Title } from "parts.slint";
 import { CheckBadgeInfo, CheckRow, CheckBadge, ChecksList, CheckColors } from "checks.slint";
 import { Links, CopyLinkButton } from "links.slint";
@@ -71,6 +71,8 @@ export struct HistoryState {
     error: ErrorInfo,
     /// Shown when there are no revisions.
     empty: string,
+    /// Only revisions whose summary, author or label hold this text are listed.
+    filter: string,
     lanes: int,
     /// The row to keep in view, after a step with the arrow keys.
     scroll-to: int,
@@ -192,6 +194,7 @@ export global Reading {
     callback select-rev(int);
     callback step-rev(int);
     callback more-revs();
+    callback filter-history(string);
     callback refresh-history();
     callback branch-history();
     callback file-history(string);
@@ -1122,6 +1125,13 @@ export component HistoryView inherits Rectangle {
                     font-family: Reading.history.path != "" ? Reading.mono : "";
                 }
                 if Reading.history.loading: Muted { text: "Loading revisions…"; vertical-alignment: center; }
+                LineEdit {
+                    width: 160px;
+                    placeholder-text: "Filter history…";
+                    text: Reading.history.filter;
+                    accessible-label: "Filter history";
+                    edited(t) => { Reading.filter-history(t); }
+                }
                 if Reading.history.path != "": Button {
                     text: "Branch history";
                     clicked => { Reading.branch-history(); }

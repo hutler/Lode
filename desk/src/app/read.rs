@@ -68,6 +68,8 @@ pub(super) struct ReadState {
     rev_checks: Rc<VecModel<CheckRow>>,
     branch: RefCell<String>,
     selected: Cell<Option<u64>>,
+    /// Only revisions whose summary, author or label hold this text are listed.
+    filter: RefCell<String>,
     /// The diff's hunks, laid out again when the layout changes.
     hunks: RefCell<Vec<Hunk>>,
     layout: Cell<Layout>,
@@ -103,6 +105,7 @@ impl ReadState {
             rev_checks: Rc::new(VecModel::default()),
             branch: RefCell::new(String::new()),
             selected: Cell::new(None),
+            filter: RefCell::new(String::new()),
             hunks: RefCell::new(Vec::new()),
             layout: Cell::new(Layout::parse(&prefs.diff_layout)),
             image_mode: RefCell::new(match prefs.image_mode.as_str() {
@@ -165,6 +168,8 @@ pub(super) fn connect(window: &AppWindow, app: &Rc<App>) {
     r.on_step_rev(move |d| a.step_rev(d));
     let a = Rc::clone(app);
     r.on_more_revs(move || a.more_revs());
+    let a = Rc::clone(app);
+    r.on_filter_history(move |t| a.filter_history(&t));
     let a = Rc::clone(app);
     r.on_refresh_history(move || {
         let rev = a.read.selected.get();
@@ -439,6 +444,7 @@ impl App {
             loading: true,
             lanes: 1,
             scroll_to: -1,
+            filter: self.read.filter.borrow().as_str().into(),
             ..HistoryState::default()
         });
         if rev.is_some() {
@@ -512,6 +518,7 @@ impl App {
                         me.read.selected.get(),
                         &me.read.checks.borrow(),
                     );
+                    let rows = history::filter_rows(&rows, &me.read.filter.borrow());
                     sync(&me.read.revs, rows);
                 }
                 Err(e) => h.error = error_info(&e),
@@ -564,6 +571,7 @@ impl App {
             self.read.selected.get(),
             &self.read.checks.borrow(),
         );
+        let rows = history::filter_rows(&rows, &self.read.filter.borrow());
         sync(&self.read.revs, rows);
         self.show_selected_checks();
     }
@@ -577,6 +585,28 @@ impl App {
             None => Vec::new(),
         };
         sync(&self.read.rev_checks, rows);
+    }
+
+    /// Keeps only the revisions matching `text` in the list (all of them when it is blank).
+    fn filter_history(&self, text: &str) {
+        *self.read.filter.borrow_mut() = text.to_owned();
+        let Some(w) = self.window.upgrade() else {
+            return;
+        };
+        let r = w.global::<Reading>();
+        let mut h = r.get_history();
+        h.filter = text.into();
+        let more = h.more;
+        r.set_history(h);
+        let rows = history::rows(
+            &self.read.revisions.borrow(),
+            &self.read.branch.borrow(),
+            more,
+            self.read.selected.get(),
+            &self.read.checks.borrow(),
+        );
+        let rows = history::filter_rows(&rows, text);
+        sync(&self.read.revs, rows);
     }
 
     fn more_revs(&self) {

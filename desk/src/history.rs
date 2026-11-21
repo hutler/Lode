@@ -128,6 +128,32 @@ pub fn rows(
     out
 }
 
+/// The rows whose summary, author or revision label hold `filter` (ignoring case); a blank
+/// filter keeps them all. The kept rows are re-linked so the graph's line runs unbroken.
+pub fn filter_rows(rows: &[RevRow], filter: &str) -> Vec<RevRow> {
+    let needle = filter.trim().to_lowercase();
+    if needle.is_empty() {
+        return rows.to_vec();
+    }
+    let mut out: Vec<RevRow> = rows
+        .iter()
+        .filter(|r| {
+            r.summary.to_lowercase().contains(&needle)
+                || r.author.to_lowercase().contains(&needle)
+                || r.label.to_lowercase().contains(&needle)
+        })
+        .cloned()
+        .collect();
+    let n = out.len();
+    for (i, row) in out.iter_mut().enumerate() {
+        row.line_above = i > 0;
+        if i + 1 < n {
+            row.line_below = true;
+        }
+    }
+    out
+}
+
 /// The details of one revision (`lode log -v` of it), and its changed files.
 pub fn detail(r: &Value, branch: &str) -> (RevDetail, Vec<RevFile>) {
     let message = r["message"].as_str().unwrap_or_default();
@@ -300,6 +326,34 @@ mod tests {
             "message": format!("change {n}\n\nmore words"),
             "merged_from": [],
         })
+    }
+
+    #[test]
+    fn filter_keeps_matching_revisions_and_relates_them() {
+        let revs = vec![
+            rev(5, "main", Some(4)),
+            rev(4, "main", Some(3)),
+            rev(3, "main", Some(2)),
+        ];
+        let all = rows(&revs, "main", true, Some(4), &Value::Null);
+        let same = filter_rows(&all, "  ");
+        assert_eq!(same.len(), 3, "a blank filter keeps every row");
+        let r = filter_rows(&all, "change 5");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].rev, 5);
+        assert!(!r[0].line_above, "the first kept row starts the graph");
+        assert!(r[0].line_below, "the last kept row keeps its line down");
+        let r = filter_rows(&all, "CHANGE 3");
+        assert_eq!(r.len(), 1, "the match ignores case");
+        assert_eq!(r[0].rev, 3);
+        let r = filter_rows(&all, "alice");
+        assert_eq!(r.len(), 3, "the author matches too");
+        assert!(r[0].line_below && r[1].line_above && r[1].line_below);
+        assert!(!r[2].line_below || all[2].line_below);
+        let r = filter_rows(&all, "r4");
+        assert_eq!(r.len(), 1, "the revision label matches");
+        assert_eq!(r[0].rev, 4);
+        assert!(filter_rows(&all, "nobody").is_empty());
     }
 
     #[test]
