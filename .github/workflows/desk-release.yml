@@ -210,10 +210,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: lode-desk-*
-          path: desk
+          path: release-assets
           merge-multiple: true
       - name: Checksums
-        working-directory: desk
+        working-directory: release-assets
         run: |
           for f in lode-desk-*; do case "$f" in *.sig) ;; *) sha256sum "$f" > "$f.sha256" ;; esac; done
           cat *.sha256
@@ -234,23 +234,23 @@ jobs:
             echo "Test build ${GITHUB_SHA::7}" > notes.md
           fi
           base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
-          if ls desk/*.sig > /dev/null 2>&1; then
+          if ls release-assets/*.sig > /dev/null 2>&1; then
             (cd desk && cargo run --quiet --locked --example feed -- \
-              "$GITHUB_WORKSPACE/desk" "$version" "$base" "$GITHUB_WORKSPACE/notes.md") > desk/latest.json
-            pipx run check-jsonschema --schemafile desk/packaging/feed.schema.json desk/latest.json
-            cat desk/latest.json
+              "$GITHUB_WORKSPACE/release-assets" "$version" "$base" "$GITHUB_WORKSPACE/notes.md") > release-assets/latest.json
+            pipx run check-jsonschema --schemafile desk/packaging/feed.schema.json release-assets/latest.json
+            cat release-assets/latest.json
           else
             echo "::warning::No signed bundles, so no update feed"
           fi
       - uses: actions/upload-artifact@v4
         with:
           name: lode-desk-release
-          path: desk/
+          path: release-assets/
       - name: Attach to the release and publish the feed
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        working-directory: desk
+        working-directory: release-assets
         run: |
           files=$(ls lode-desk-* | grep -v '\.sig$')
           gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" $files
