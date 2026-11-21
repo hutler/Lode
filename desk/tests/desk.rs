@@ -90,6 +90,39 @@ async fn setup_on(server: TestServer) -> Setup {
 }
 
 #[tokio::test]
+async fn connection_settings_use_the_selected_server() {
+    let s = setup().await;
+    let url = s.server.url().to_owned();
+    let report = s.desk.connection_test(url.clone()).await.unwrap();
+    assert!(report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["name"] == "dns" && c["status"] == "ok"));
+    assert!(s
+        .desk
+        .save_proxy(url.clone(), "broken address".into())
+        .await
+        .is_err());
+    assert!(
+        s.desk.save_proxy(url.clone(), url.clone()).await.is_err(),
+        "an ordinary server cannot be a cache"
+    );
+    let offline = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let cache = format!("http://{}", offline.local_addr().unwrap());
+    let reset = tokio::spawn(async move { drop(offline.accept().await.unwrap()) });
+    s.desk.save_proxy(url.clone(), cache.clone()).await.unwrap();
+    reset.await.unwrap();
+    assert_eq!(
+        s.desk.saved_proxy(&url).unwrap().trim_end_matches('/'),
+        cache
+    );
+    assert_eq!(s.desk.saved_proxy("https://other.example").unwrap(), "");
+    s.desk.save_proxy(url.clone(), String::new()).await.unwrap();
+    assert_eq!(s.desk.saved_proxy(&url).unwrap(), "");
+}
+
+#[tokio::test]
 async fn sign_in_check_out_open_and_status() {
     let s = setup().await;
     let url = s.server.url().trim_end_matches('/').to_owned();

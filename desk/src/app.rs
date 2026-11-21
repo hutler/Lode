@@ -37,6 +37,7 @@ mod screens {
 pub use screens::*;
 
 mod branch;
+mod connection;
 mod outside;
 mod read;
 mod team;
@@ -203,6 +204,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     app.refresh_recent();
     connect(&window, &app);
     work::connect(&window, &app);
+    connection::connect(&window, &app, options.open_browser.clone());
     validation::connect(&window, &app, options.open_browser);
     read::connect(&window, &app);
     team::connect(&window, &app);
@@ -743,6 +745,7 @@ impl App {
             return;
         };
         match w.get_dialog() {
+            Dialog::Connection if w.global::<Connection>().get_busy() => {}
             Dialog::Validation => self.close_validation(),
             Dialog::CheckOut if w.get_checkout().busy => {}
             Dialog::Branches if !w.global::<Branching>().get_branches().busy.is_empty() => {}
