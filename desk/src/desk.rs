@@ -251,6 +251,119 @@ impl Desk {
         })
     }
 
+    /// Run the selected validation, commit or shelf operation on its own runtime.
+    /// The normal send path validates the actual gathered changes under the workspace lock.
+    pub async fn check_or_send(
+        &self,
+        workspace: String,
+        action: crate::validation::Action,
+        request: ShelveRequest,
+        no_verify: bool,
+        control: Arc<crate::validation::Control>,
+        emit: impl Fn(crate::validation::Event) + Send + Sync + 'static,
+    ) -> Result<Value, ErrorView> {
+        use crate::validation::{Action, ValidationUi};
+        let ui = Arc::new(ValidationUi {
+            control: control.clone(),
+            emit: Box::new(emit),
+            parent: self.ui.clone(),
+        });
+        let mut ctx = Ctx::in_dir(Globals::default(), Path::new(&workspace), ui)?;
+        if let Some(dir) = &self.config_dir {
+            ctx = ctx.with_config_dir(dir);
+        }
+        run_op(move || async move {
+            let paths = request.paths.into_iter().map(PathBuf::from).collect();
+            let message = request.message.filter(|m| !m.trim().is_empty());
+            control
+                .during(async {
+                    match action {
+                        Action::Check => {
+                            lode_ops::cmd::validate::validate(
+                                &ctx,
+                                lode_ops::cmd::validate::ValidateArgs {
+                                    paths,
+                                    changelist: request.changelist,
+                                    ..Default::default()
+                                },
+                            )
+                            .await
+                        }
+                        Action::Commit => {
+                            commit::commit(
+                                &ctx,
+                                commit::CommitArgs {
+                                    paths,
+                                    changelist: request.changelist,
+                                    message,
+                                    no_verify,
+                                    ..Default::default()
+                                },
+                            )
+                            .await
+                        }
+                        Action::Shelve => {
+                            shelve::shelve(
+                                &ctx,
+                                shelve::ShelveArgs {
+                                    paths,
+                                    changelist: request.changelist,
+                                    message,
+                                    keep: request.keep,
+                                    update: request.update,
+                                    no_verify,
+                                },
+                            )
+                            .await
+                        }
+                    }
+                })
+                .await
+        })
+        .await
+    }
+
+    /// The branch's local policy and every script covered by the core trust prompt.
+    pub fn validation_policy(root: &Path, branch: &str) -> (bool, Vec<String>) {
+        let config = std::fs::read(root.join(".lodeconfig"))
+            .ok()
+            .and_then(|b| lode_core::LodeConfig::parse(&b).ok());
+        match config {
+            Some(c) => (
+                !c.shelf_only.matches_str(branch),
+                c.validate
+                    .scripts
+                    .iter()
+                    .map(|s| s.run.to_string())
+                    .collect(),
+            ),
+            None => (false, Vec::new()),
+        }
+    }
+
+    /// Display a bounded, read-only preview of a depot script inside this workspace.
+    pub fn script_preview(root: &Path, path: &str) -> std::io::Result<String> {
+        use std::io::Read;
+        let root = root.canonicalize()?;
+        let path = root.join(path).canonicalize()?;
+        if !path.starts_with(&root) || !path.is_file() {
+            return Err(std::io::Error::other(
+                "Script is outside the workspace or is not a file.",
+            ));
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(65537)
+            .read_to_end(&mut bytes)?;
+        let cut = bytes.len() > 65536;
+        bytes.truncate(65536);
+        let mut preview = String::from_utf8_lossy(&bytes).into_owned();
+        if cut {
+            preview.push_str("\n… (preview limited to 64 KiB)");
+        }
+        Ok(preview)
+    }
+
     /// Who is signed in to `server`, or null when nobody is (or the token was revoked).
     pub async fn signed_in(&self, server: String) -> Result<Value, ErrorView> {
         let ctx = self.ctx(&self.home, Some(server))?;

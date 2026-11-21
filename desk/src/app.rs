@@ -40,6 +40,7 @@ mod branch;
 mod outside;
 mod read;
 mod team;
+mod validation;
 mod work;
 
 use branch::BranchState;
@@ -137,7 +138,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     let window = AppWindow::new().map_err(|e| e.to_string())?;
     let ui = Arc::new(WindowUi {
         window: window.as_weak(),
-        open_browser: options.open_browser,
+        open_browser: options.open_browser.clone(),
     });
     let changed = window.as_weak();
     let mut desk = Desk::new(options.home, &options.data_dir, ui).with_change_hook(move |root| {
@@ -195,12 +196,14 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         team,
         branch,
         outside,
+        validation: validation::State::default(),
         this: RefCell::new(RcWeak::new()),
     });
     *app.this.borrow_mut() = Rc::downgrade(&app);
     app.refresh_recent();
     connect(&window, &app);
     work::connect(&window, &app);
+    validation::connect(&window, &app, options.open_browser);
     read::connect(&window, &app);
     team::connect(&window, &app);
     branch::connect(&window, &app);
@@ -304,6 +307,7 @@ struct App {
     branch: BranchState,
     /// Links and updates (T135).
     outside: OutsideState,
+    validation: validation::State,
     /// This controller, for tasks that outlive a call.
     this: RefCell<RcWeak<App>>,
 }
@@ -739,6 +743,7 @@ impl App {
             return;
         };
         match w.get_dialog() {
+            Dialog::Validation => self.close_validation(),
             Dialog::CheckOut if w.get_checkout().busy => {}
             Dialog::Branches if !w.global::<Branching>().get_branches().busy.is_empty() => {}
             Dialog::NewBranch if w.global::<Branching>().get_new_branch().busy => {}

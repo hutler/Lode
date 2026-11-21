@@ -9,7 +9,7 @@ The pictures are the light screens of `cargo run --example screenshots` in `desk
 with sample data (a depot called `game` on `lode.example.com`).
 
 Contents: [Install](#install) · [Sign in](#sign-in) · [Check out](#check-out-a-depot) ·
-[The daily loop](#the-daily-loop) · [History, blame and diffs](#history-blame-and-diffs) ·
+[The daily loop](#the-daily-loop) · [Validation](#check-changes) · [History, blame and diffs](#history-blame-and-diffs) ·
 [Shelves and review](#shelves-and-review) · [Branches and merges](#branches-and-merges) ·
 [Conflicts](#conflicts) · [The workspace view](#the-workspace-view) · [Links](#links) ·
 [Updates](#updates) · [Errors](#what-errors-mean)
@@ -80,6 +80,34 @@ file in your editor and it shows up within a moment.
   again.
 
 ![A refused commit names the files](guide/changes-refused-light.png)
+
+### Check changes
+
+Pick the files you want to check and choose **Check changes**. With no boxes checked, Desk
+checks the highlighted file. Add new files to the workspace before checking them. **Commit**
+and **Shelve** run the configured scripts on the files in their own operation. While a script
+runs, Desk shows its name and file count. **Cancel** stops the script and keeps your edits.
+
+When Desk first asks to run depot scripts, select a script and choose **Show script** to
+inspect its contents. **Run** trusts the current script versions for this depot.
+**Don’t run** stops the operation. If Python is missing or too old, the banner’s **Python help**
+opens the [interpreter setup guide](../../docs/agent-validation.md#trust-the-scripts-and-select-python).
+Dismiss the banner to hide it for this session.
+
+Each script has a result. Click a
+diagnostic to select its file and scroll to the reported line when it appears in the diff.
+**Check broke** includes the script’s captured output. After saving edits, choose
+**Fix and check again** to recheck the same files without sending them.
+
+**Shelve anyway** skips local checks for this attempt. A server with validation enabled
+checks the new shelf version, and a gated branch requires passing checks before submission.
+**Commit anyway** uses the current commit message and is only available for a direct commit
+on a branch that allows it. When the branch requires a shelf, **Shelve instead** runs the
+normal shelf checks and keeps the local edits.
+
+![Failed checks grouped by file in the light theme](guide/validation-light.png)
+
+[View the same results in the dark theme](guide/validation-dark.png).
 
 ### Locks
 

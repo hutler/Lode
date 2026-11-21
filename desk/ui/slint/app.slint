@@ -1,6 +1,8 @@
 // Lode Desk's main window (T130): Home with recent workspaces, sign-in, check out, and one tab
 // per open workspace. The Rust side (src/app.rs) runs the operations and fills the properties.
 
+import { Validation, ValidationRow, ValidationPanel } from "validation.slint";
+export { Validation, ValidationRow }
 import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Links, LinkChoice, LinkState, RefusedLinkDialog, ChooseWorkspaceDialog, NoWorkspaceDialog } from "links.slint";
 import { Updates, UpdateOffer, UpdateSettings, UpdateBanner, UpdateSettingsPanel } from "updates.slint";
@@ -52,7 +54,7 @@ export struct WorkspaceTab {
     server-url: string,
 }
 
-export enum Dialog { none, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
+export enum Dialog { none, validation, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
 
 /// A tab of the window's title strip: Workspaces, then one per open workspace.
 component Tab inherits Rectangle {
@@ -958,6 +960,12 @@ export component AppWindow inherits Window {
     if root.dialog != Dialog.none: Rectangle {
         background: #00000080;
         TouchArea {}
+        if root.dialog == Dialog.validation: ValidationPanel {
+            width: min(parent.width - 32px, 760px);
+            height: min(parent.height - 32px, Validation.stage == "results" || Validation.preview != "" ? 520px : 250px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
         if root.dialog == Dialog.sign-in: SignInDialog {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 3;

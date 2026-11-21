@@ -2,6 +2,7 @@
 // box with recent messages, and the changelist dialogs. The Rust side (src/changes.rs and
 // src/app.rs) builds the rows and runs the operations.
 
+import { Validation } from "validation.slint";
 import { Reading, DiffPanel } from "history.slint";
 import { Team } from "team.slint";
 import { Branching } from "branches.slint";
@@ -346,6 +347,13 @@ export component ChangesView inherits Rectangle {
     property <FileDetails> d: root.state.details;
 
     VerticalLayout {
+        if Validation.python-warning != "": HorizontalLayout {
+            padding: 6px;
+            spacing: 6px;
+            Muted { text: Validation.python-warning; wrap: word-wrap; horizontal-stretch: 1; }
+            Button { text: "Python help"; clicked => { Validation.help(); } }
+            Button { text: "Dismiss"; clicked => { Validation.python-warning = ""; } }
+        }
         if root.state.merging != "": Rectangle {
             background: Palette.accent-background.transparentize(0.85);
             height: merge-line.preferred-height;
@@ -553,6 +561,11 @@ export component ChangesView inherits Rectangle {
                     VerticalLayout {
                         spacing: 6px;
                         alignment: end;
+                        Button {
+                            text: "Check changes";
+                            enabled: root.idle && (root.state.picked > 0 || root.d.shown);
+                            clicked => { Validation.check(); }
+                        }
                         Button {
                             text: "Recent messages…";
                             enabled: root.idle;

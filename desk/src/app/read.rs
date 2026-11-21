@@ -300,7 +300,7 @@ impl App {
             View::Diff { path, rev } => {
                 r.set_pane(Pane::Diff);
                 let g = self.next_diff();
-                self.load_diff(&w, root, path, rev, g);
+                self.load_diff(&w, root, path, rev, g, 0);
             }
             View::Locks => {
                 r.set_pane(Pane::Locks);
@@ -366,7 +366,14 @@ impl App {
             return;
         };
         let g = self.next_diff();
-        self.load_diff(&w, root, path, rev, g);
+        self.load_diff(&w, root, path, rev, g, 0);
+    }
+
+    pub(super) fn peek_at_line(&self, path: String, line: i32) {
+        let Some((w, root)) = self.reading() else {
+            return;
+        };
+        self.load_diff(&w, root, path, None, self.next_diff(), line);
     }
 
     /// Empties the diff beside the lists, and drops any answer still on its way.
@@ -719,6 +726,7 @@ impl App {
         path: String,
         rev: Option<u64>,
         generation: u64,
+        line: i32,
     ) {
         let r = w.global::<Reading>();
         self.read.diff.set_vec(Vec::new());
@@ -766,6 +774,18 @@ impl App {
                     }
                 }
                 Err(e) => d.error = error_info(&e),
+            }
+            if line > 0 {
+                let target = line.to_string();
+                let at =
+                    me.read.diff.iter().position(|r| {
+                        r.new_num == target.as_str() || r.right.num == target.as_str()
+                    });
+                if let Some(i) = at.and_then(|i| i32::try_from(i).ok()) {
+                    d.focus_row = i + 1;
+                } else {
+                    d.plain = format!("Line {line} is outside the displayed diff.").into();
+                }
             }
             r.set_diff(d);
         });

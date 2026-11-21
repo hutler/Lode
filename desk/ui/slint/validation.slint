@@ -1,0 +1,88 @@
+import { Button, ComboBox, ListView, Palette, TextEdit } from "std-widgets.slint";
+import { Card, Muted, Title } from "parts.slint";
+
+export struct ValidationRow { kind: string, label: string, path: string, line: int }
+
+export global Validation {
+    in-out property <int> generation;
+    in-out property <string> stage;
+    in-out property <string> heading;
+    in-out property <string> detail;
+    in-out property <[ValidationRow]> rows;
+    in-out property <[string]> scripts;
+    in-out property <string> preview;
+    in-out property <bool> python-seen;
+    in-out property <string> python-warning;
+    in-out property <bool> allow-commit;
+    in-out property <bool> allow-shelve;
+    in-out property <bool> retryable;
+    in-out property <bool> shelf-required;
+    callback check();
+    callback cancel();
+    callback retry();
+    callback bypass(bool);
+    callback consent(bool);
+    callback show-script(string);
+    callback problem(string, int);
+    callback help();
+    callback close();
+}
+
+export component ValidationPanel inherits Card {
+    accessible-role: groupbox;
+    accessible-label: Validation.heading;
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        Title { text: Validation.heading; }
+        if Validation.detail != "": Muted { text: Validation.detail; wrap: word-wrap; }
+        if Validation.stage == "trust": VerticalLayout {
+            spacing: 8px;
+            Muted { text: "Run grants trust to the current versions of these depot scripts on this computer."; wrap: word-wrap; }
+            HorizontalLayout {
+                spacing: 6px;
+                scripts := ComboBox { horizontal-stretch: 1; model: Validation.scripts; }
+                Button { text: "Show script"; enabled: scripts.current-value != ""; clicked => { Validation.show-script(scripts.current-value); } }
+            }
+            if Validation.preview != "": TextEdit { text: Validation.preview; read-only: true; vertical-stretch: 1; }
+        }
+        if Validation.stage == "results": ListView {
+            vertical-stretch: 1;
+            accessible-label: "Validation results";
+            for row in Validation.rows: VerticalLayout {
+                padding-top: row.kind == "script" ? 7px : 2px;
+                padding-left: row.kind == "script" ? 0px : row.kind == "file" ? 8px : 16px;
+                if row.path != "": Button {
+                    text: row.label;
+                    accessible-label: row.path + " " + row.label;
+                    clicked => { Validation.problem(row.path, row.line); }
+                }
+                if row.path == "": Text {
+                    text: row.label;
+                    font-weight: row.kind == "script" ? 700 : row.kind == "file" ? 600 : 400;
+                    color: Palette.foreground;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        if Validation.stage == "results" && Validation.allow-shelve && !Validation.shelf-required: Muted {
+            text: "The server checks the shelf again when validation is enabled. Required checks must pass before submission.";
+            wrap: word-wrap;
+        }
+        Rectangle { vertical-stretch: 1; max-height: Validation.stage == "results" ? 1px : 300px; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            if Validation.stage == "checking": Button { text: "Cancel"; clicked => { Validation.cancel(); } }
+            if Validation.stage == "trust": Button { text: "Don’t run"; clicked => { Validation.consent(false); } }
+            if Validation.stage == "trust": Button { text: "Run"; enabled: Validation.scripts.length > 0; clicked => { Validation.consent(true); } }
+            if Validation.stage == "results": Button { text: "Close"; clicked => { Validation.close(); } }
+            if Validation.stage == "results" && Validation.retryable: Button { text: "Fix and check again"; clicked => { Validation.retry(); } }
+            if Validation.stage == "results" && Validation.allow-shelve: Button {
+                text: Validation.shelf-required ? "Shelve instead" : "Shelve anyway";
+                clicked => { Validation.bypass(false); }
+            }
+            if Validation.stage == "results" && Validation.allow-commit: Button { text: "Commit anyway"; clicked => { Validation.bypass(true); } }
+        }
+    }
+}

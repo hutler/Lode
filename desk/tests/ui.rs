@@ -179,6 +179,45 @@ async fn start(rt: Handle) -> World {
     let story = story(&server).await;
     add_user(&server, "alice", Some("correct horse"), None).await;
     add_user(&server, "bob", Some("battery staple"), None).await;
+    server.create_depot("validation").await;
+    server
+        .commit_files(
+            "validation",
+            "main",
+            &[
+                ("a.txt", b"one\ntwo\n"),
+                (
+                    ".lodeconfig",
+                    br#"[[validate.script]]
+name = "text"
+run = "check.py"
+paths = ["*.txt"]
+"#,
+                ),
+                (
+                    "check.py",
+                    br#"import json, sys
+from pathlib import Path
+data = json.load(sys.stdin)
+for f in data["files"]:
+    if "BAD" in Path(f["path"]).read_text():
+        print(json.dumps({"level":"error","message":"Remove BAD","path":f["path"],"line":2}))
+        sys.exit(1)
+"#,
+                ),
+            ],
+        )
+        .await;
+    server
+        .acl(
+            "validation",
+            "alice",
+            "*",
+            "**",
+            AclEffect::Allow,
+            AccessLevel::Write,
+        )
+        .await;
     server
         .acl(
             "game",
@@ -988,6 +1027,128 @@ fn value_or_empty(w: &AppWindow, label: &str) -> String {
 }
 
 /// 20 000 changed files become rows and reach the window in under a second.
+async fn content_validation(world: &World) {
+    let home = Home::new();
+    let roots = with_workspaces(world, &home, &[("validation", "verify")]).await;
+    let root = Path::new(&roots[0]);
+    let file = root.join("a.txt");
+    let w = home.window(world, None);
+    let v = w.global::<app::Validation>();
+    w.invoke_open_recent(roots[0].as_str().into());
+    std::fs::write(&file, "one\nBAD\n").unwrap();
+    until("tracked edit visible", || row(&w, "a.txt", false).is_some()).await;
+    click(&w, "Pick a.txt");
+    type_into(&w, "Commit message", "Change text");
+    click(&w, "Check changes");
+    until("trust question", || v.get_stage() == "trust").await;
+    assert!(v.get_detail().contains("check.py"));
+    click(&w, "Show script");
+    assert!(v.get_preview().contains("json.load"));
+    click(&w, "Don’t run");
+    until("refused script left edits alone", || {
+        w.get_dialog() == Dialog::None
+    })
+    .await;
+    click(&w, "Commit 1 file");
+    until("trust on commit", || v.get_stage() == "trust").await;
+    click(&w, "Run");
+    until("per-file results", || v.get_stage() == "results").await;
+    assert!(v
+        .get_rows()
+        .iter()
+        .any(|r| r.kind == "script" && r.label == "text · Failed"));
+    assert!(v.get_allow_commit() && v.get_allow_shelve());
+    click(&w, "a.txt Line 2 · error: Remove BAD");
+    let reading = w.global::<Reading>();
+    until("problem opens its diff row", || {
+        w.get_changes().details.path == "a.txt" && reading.get_diff().focus_row > 0
+    })
+    .await;
+    let at = (reading.get_diff().focus_row - 1) as usize;
+    let target = reading.get_diff_rows().row_data(at).unwrap();
+    assert!(target.new_num == "2" || target.right.num == "2");
+
+    click(&w, "Check changes");
+    until("manual check refused", || {
+        w.get_dialog() == Dialog::Validation && v.get_stage() == "results"
+    })
+    .await;
+    std::fs::write(&file, "one\ngood\n").unwrap();
+    click(&w, "Fix and check again");
+    until("fixed check passes", || {
+        v.get_rows().iter().any(|r| r.label == "text · Passed")
+    })
+    .await;
+    click(&w, "Close");
+    let config_path = root.join(".lodeconfig");
+    let config_text = std::fs::read_to_string(&config_path).unwrap();
+    std::fs::write(
+        &config_path,
+        format!("[validate]\npython = \"3.999\"\n{config_text}"),
+    )
+    .unwrap();
+    click(&w, "Check changes");
+    until("missing Python skips check", || {
+        v.get_rows().iter().any(|r| r.label == "text · Skipped") && v.get_python_seen()
+    })
+    .await;
+    click(&w, "Close");
+    assert!(v.get_python_warning().contains("3.999"));
+    click(&w, "Dismiss");
+    click(&w, "Check changes");
+    until("second check finishes", || {
+        v.get_rows().iter().any(|r| r.label == "text · Skipped")
+    })
+    .await;
+    click(&w, "Close");
+    assert!(v.get_python_warning().is_empty());
+    std::fs::write(config_path, config_text).unwrap();
+    std::fs::write(&file, "one\nBAD again\n").unwrap();
+    click(&w, "Commit 1 file");
+    until("commit refused again", || {
+        w.get_dialog() == Dialog::Validation && v.get_stage() == "results"
+    })
+    .await;
+    click(&w, "Shelve anyway");
+    until("unverified shelf created", || {
+        value_or_empty(&w, "Done").starts_with("Shelved as shelf")
+    })
+    .await;
+    assert!(std::fs::read_to_string(&file)
+        .unwrap()
+        .contains("BAD again"));
+    click(&w, "Commit 1 file");
+    until("commit bypass offered", || {
+        w.get_dialog() == Dialog::Validation && v.get_stage() == "results" && v.get_allow_commit()
+    })
+    .await;
+    click(&w, "Commit anyway");
+    until("unverified commit created", || {
+        value_or_empty(&w, "Done").starts_with("Committed r")
+    })
+    .await;
+
+    let config = root.join(".lodeconfig");
+    let mut settings = std::fs::read_to_string(&config).unwrap();
+    settings.push_str("\n[branches]\nshelf_only = [\"main\"]\n");
+    std::fs::write(config, settings).unwrap();
+    std::fs::write(&file, "one\nlast edit\n").unwrap();
+    until("new edit after commit", || {
+        row(&w, "a.txt", false).is_some_and(|r| !r.picked)
+    })
+    .await;
+    click(&w, "Pick a.txt");
+    type_into(&w, "Commit message", "Shelf-only edit");
+    click(&w, "Commit 1 file");
+    until("shelf-only action", || v.get_shelf_required()).await;
+    assert!(!v.get_allow_commit());
+    click(&w, "Shelve instead");
+    until("normal validated shelf on protected branch", || {
+        value_or_empty(&w, "Done").starts_with("Shelved as shelf")
+    })
+    .await;
+}
+
 async fn twenty_thousand_rows(world: &World) {
     let home = Home::new();
     let w = home.window(world, None);
@@ -2014,6 +2175,7 @@ fn main() -> std::process::ExitCode {
         check_out_before_signing_in(&world).await;
         opening_a_folder_that_is_not_a_workspace(&world).await;
         changes_pick_commit_revert_and_changelists(&world).await;
+        content_validation(&world).await;
         twenty_thousand_rows(&world).await;
         history_blame_and_diffs(&world).await;
         locks_shelves_and_checks(&world).await;
