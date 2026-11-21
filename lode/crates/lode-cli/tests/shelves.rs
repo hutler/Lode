@@ -57,6 +57,7 @@ fn checkout(server: &TestServer, token: &str) -> TestWorkspace {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn review_shelves_by_depot_without_checkout() {
     let t = team().await;
+    checkout(&t.server, t.server.admin_token()).json(&["branch", "create", "other"]);
     let author = checkout(&t.server, &t.ana);
     author.write("a.txt", "review this change\n");
     let created = author.json(&["shelve", "-m", "Review"]);
