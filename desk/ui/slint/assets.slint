@@ -1,9 +1,10 @@
 // Native depot browser and asset inspector.
 import { Button, ListView, Palette } from "std-widgets.slint";
 import { Muted, Title } from "parts.slint";
+import { AssetSearch } from "asset_search.slint";
 import { KindIcon } from "changes.slint";
 import { Icon, Icons } from "icons.slint";
-export struct DepotFolder { path: string, caption: string, depth: int, expanded: bool }
+export struct DepotFolder { path: string, caption: string, depth: int, parent-index: int, expanded: bool }
 export struct AssetCard { path: string, name: string, kind: string, picture: image, preview: bool, local: bool, writable: bool, size: string, holder: string, mine: bool, comment: string, workspace: string }
 export global Assets {
     in-out property <[DepotFolder]> folders;
@@ -17,6 +18,7 @@ export global Assets {
     in-out property <bool> busy;
     in-out property <bool> lock-known;
     in-out property <bool> local-only;
+    in-out property <int> tree-index;
     callback browse(string);
     callback toggle(string);
     callback pick(string);
@@ -30,29 +32,70 @@ export global Assets {
 }
 export component DepotTree inherits VerticalLayout {
     in property <string> depot;
+    in property <bool> active;
+    Button { text: "Find asset…"; accessible-label: "Find asset in depot"; clicked => { AssetSearch.open(); } }
     HorizontalLayout {
         Button { text: "Depot"; checkable: true; checked: !Assets.local-only; clicked => { Assets.scope(false); } }
         Button { text: "Workspace"; checkable: true; checked: Assets.local-only; clicked => { Assets.scope(true); } }
     }
-    Button { text: root.depot; accessible-label: "Browse depot root"; clicked => { Assets.browse(""); } }
-    for f in Assets.folders: HorizontalLayout {
-        Rectangle { width: min(f.depth * 10px + 4px, 48px); }
-        Rectangle {
-            width: 18px;
-            accessible-role: button;
-            accessible-label: (f.expanded ? "Collapse folder " : "Expand folder ") + f.path;
-            accessible-action-default => { Assets.toggle(f.path); }
-            expand-touch := TouchArea { clicked => { Assets.toggle(f.path); } }
-            Text {
-                text: f.expanded ? "▾" : "▸";
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                color: Palette.foreground.transparentize(0.35);
-                accessible-role: none;
+    tree := FocusScope {
+        height: min(max(1, Assets.folders.length), 9) * 25px;
+        accessible-role: list; accessible-label: "Depot folders";
+        function cursor(i: int) {
+            if i >= 0 && i < Assets.folders.length {
+                Assets.tree-index = i;
+                if i * 25px < -folder-list.content-y { folder-list.content-y = -i * 25px; }
+                else if (i + 1) * 25px > -folder-list.content-y + folder-list.visible-height {
+                    folder-list.content-y = min(0px, folder-list.visible-height - (i + 1) * 25px);
+                }
             }
         }
-        Button { text: f.caption; horizontal-stretch: 1;
-            accessible-label: "Browse folder " + f.path; clicked => { Assets.browse(f.path); } }
+        key-pressed(e) => {
+            if Assets.folders.length == 0 { return reject; }
+            if e.text == Key.DownArrow { self.cursor(Assets.tree-index + 1); return accept; }
+            if e.text == Key.UpArrow { self.cursor(Assets.tree-index - 1); return accept; }
+            if e.text == Key.Home { self.cursor(0); return accept; }
+            if e.text == Key.End { self.cursor(Assets.folders.length - 1); return accept; }
+            if e.text == Key.RightArrow {
+                if !Assets.folders[Assets.tree-index].expanded { Assets.toggle(Assets.folders[Assets.tree-index].path); }
+                else if Assets.tree-index + 1 < Assets.folders.length && Assets.folders[Assets.tree-index + 1].depth > Assets.folders[Assets.tree-index].depth {
+                    self.cursor(Assets.tree-index + 1);
+                }
+                return accept;
+            }
+            if e.text == Key.LeftArrow {
+                if Assets.folders[Assets.tree-index].expanded { Assets.toggle(Assets.folders[Assets.tree-index].path); }
+                else { self.cursor(Assets.folders[Assets.tree-index].parent-index); }
+                return accept;
+            }
+            if e.text == Key.Return || e.text == " " { Assets.browse(Assets.folders[Assets.tree-index].path); return accept; }
+            return reject;
+        }
+        folder-list := ListView {
+            for f[i] in Assets.folders: Rectangle {
+                height: 25px;
+                background: Assets.folder == f.path && root.active ? Palette.accent-background.transparentize(0.76)
+                    : row-hit.has-hover ? Palette.alternate-background : transparent;
+                border-width: tree.has-focus && Assets.tree-index == i ? 1px : 0px;
+                border-color: Palette.accent-background;
+                accessible-role: list-item; accessible-label: f.path == "" ? "Browse depot root" : "Browse folder " + f.path;
+                accessible-item-selectable: true; accessible-item-selected: root.active && Assets.folder == f.path;
+                accessible-action-default => { tree.focus(); tree.cursor(i); Assets.browse(f.path); }
+                row-hit := TouchArea { clicked => { tree.focus(); tree.cursor(i); Assets.browse(f.path); } }
+                HorizontalLayout {
+                    padding-left: min(f.depth * 12px, 96px); padding-right: 4px; spacing: 3px;
+                    Rectangle {
+                        width: 18px;
+                        accessible-role: button; accessible-label: (f.expanded ? "Collapse folder " : "Expand folder ") + (f.path == "" ? root.depot : f.path);
+                        accessible-action-default => { tree.focus(); tree.cursor(i); Assets.toggle(f.path); }
+                        Text { text: f.expanded ? "▾" : "▸"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { clicked => { tree.focus(); tree.cursor(i); Assets.toggle(f.path); } }
+                    }
+                    Icon { name: Icons.folder; size: 14px; tint: Palette.foreground.transparentize(0.22); y: (parent.height - self.height) / 2; }
+                    Text { text: f.path == "" ? root.depot : f.caption; color: Palette.foreground; vertical-alignment: center; overflow: elide; }
+                }
+            }
+        }
     }
 }
 component AssetRow inherits Rectangle {

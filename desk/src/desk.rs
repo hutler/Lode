@@ -1230,6 +1230,45 @@ impl Desk {
         run_op(move || async move { view::view_summary(&ctx).await }).await
     }
 
+    /// Search filenames in the authenticated manifest at one revision, independent of checkout view.
+    pub(crate) async fn find_assets(
+        &self,
+        server: String,
+        depot: String,
+        rev: u64,
+        needle: String,
+        cancel: futures::future::AbortRegistration,
+    ) -> Result<(Vec<String>, bool), ErrorView> {
+        use futures::{future::Abortable, StreamExt};
+        let ctx = self.ctx(&self.home, Some(server.clone()))?;
+        run_op(move || async move {
+            Abortable::new(
+                async move {
+                    let client = ctx.client(&ctx.parse_server(&server)?)?;
+                    let mut entries = client.manifest(&depot, rev, &[], &[]).await?;
+                    let mut paths = Vec::new();
+                    let mut more = false;
+                    while let Some(entry) = entries.next().await {
+                        let path = entry?.path;
+                        if path.name().to_lowercase().contains(&needle) {
+                            if paths.len() == 200 {
+                                more = true;
+                                break;
+                            }
+                            paths.push(path.as_str().to_owned());
+                        }
+                    }
+                    paths.sort();
+                    Ok((paths, more))
+                },
+                cancel,
+            )
+            .await
+            .map_err(|_| OpError::failed("cancelled", "Search cancelled"))?
+        })
+        .await
+    }
+
     /// One folder of the depot (`path` a depot path; the root when None) at the workspace's
     /// revision, whether or not it is in the view.
     pub async fn view_tree(
@@ -1239,8 +1278,11 @@ impl Desk {
     ) -> Result<Value, ErrorView> {
         let ctx = self.ctx(Path::new(&workspace), None)?;
         // Depot paths are relative to the workspace root, where the context starts.
-        let path = Some(path.filter(|p| !p.is_empty()).unwrap_or_else(|| ".".into()));
+        let folder = path.filter(|p| !p.is_empty()).unwrap_or_else(|| ".".into());
         run_op(move || async move {
+            // A literal directory name may itself end in a revision-like suffix.
+            let rev = lode_ops::local::synced_rev(&ctx.workspace()?)?;
+            let path = Some(format!("{folder}@{rev}"));
             history::ls(
                 &ctx,
                 history::LsArgs {

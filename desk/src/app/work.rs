@@ -228,6 +228,9 @@ impl App {
                 self.workspaces.set_row_data(i, tab);
                 self.reload_assets_for(root);
                 if self.shown_root.borrow().as_deref() == Some(root) {
+                    if let Some(w) = self.window.upgrade() {
+                        self.dismiss_asset_search(&w);
+                    }
                     self.refresh_side_branches();
                 }
             }

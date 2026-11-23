@@ -36,6 +36,7 @@ mod screens {
 
 pub use screens::*;
 
+mod asset_search;
 mod assets;
 mod branch;
 mod connection;
@@ -197,6 +198,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
         read,
         team,
         branch,
+        search: asset_search::SearchState::default(),
         assets: assets::Browser::default(),
         outside,
         validation: validation::State::default(),
@@ -205,6 +207,7 @@ pub fn build(options: Options) -> Result<AppWindow, String> {
     *app.this.borrow_mut() = Rc::downgrade(&app);
     app.refresh_recent();
     connect(&window, &app);
+    asset_search::connect(&window, &app);
     assets::connect(&window, &app);
     work::connect(&window, &app);
     connection::connect(&window, &app, options.open_browser.clone());
@@ -310,6 +313,7 @@ struct App {
     team: TeamState,
     /// Branches, merges, conflicts and the view (T134).
     branch: BranchState,
+    search: asset_search::SearchState,
     assets: assets::Browser,
     /// Links and updates (T135).
     outside: OutsideState,
@@ -749,6 +753,10 @@ impl App {
             return;
         };
         match w.get_dialog() {
+            Dialog::AssetSearch => {
+                self.search.cancel();
+                w.set_dialog(Dialog::None);
+            }
             Dialog::Connection if w.global::<Connection>().get_busy() => {}
             Dialog::Validation => self.close_validation(),
             Dialog::CheckOut if w.get_checkout().busy => {}

@@ -3,7 +3,7 @@ use super::read::View;
 use super::{human_bytes, spawn, App, AppWindow, AssetCard, Assets, DepotFolder, Pane, Reading};
 use crate::asset_preview;
 use serde_json::Value;
-use slint::{ComponentHandle, Image, ModelRc, SharedPixelBuffer};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedPixelBuffer};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -13,12 +13,13 @@ const PAGE: usize = 18;
 #[derive(Default)]
 pub(super) struct Browser {
     // Parent -> its visible child directory paths. Only expanded nodes have entries.
-    dirs: RefCell<BTreeMap<String, Vec<String>>>,
+    pub(super) dirs: RefCell<BTreeMap<String, Vec<String>>>,
     cards: RefCell<Vec<AssetCard>>,
     key: RefCell<(String, String, String)>,
     page: Cell<usize>,
     generation: Cell<u64>,
     watch_generation: Cell<u64>,
+    tree_epoch: Cell<u64>,
 }
 
 struct Entry {
@@ -70,7 +71,14 @@ fn child_dirs(
     dirs
 }
 
-fn page_data(root: &Path, folder: &str, listing: &Value, local_only: bool, index: usize) -> Page {
+fn page_data(
+    root: &Path,
+    folder: &str,
+    listing: &Value,
+    local_only: bool,
+    index: usize,
+    reveal: Option<&str>,
+) -> Page {
     let mut files = Vec::new();
     let canonical = root.canonicalize().ok();
     let dirs = child_dirs(canonical.as_deref(), folder, listing, local_only);
@@ -107,7 +115,10 @@ fn page_data(root: &Path, folder: &str, listing: &Value, local_only: bool, index
     }
     files.sort_by(|a, b| a.0.cmp(b.0));
     let total = files.len();
-    let index = index.min(total.saturating_sub(1) / PAGE);
+    let index = reveal
+        .and_then(|p| files.iter().position(|(_, path, _, _)| path == p))
+        .map_or(index, |i| i / PAGE)
+        .min(total.saturating_sub(1) / PAGE);
     let files = files
         .into_iter()
         .skip(index * PAGE)
@@ -151,11 +162,11 @@ pub(super) fn connect(w: &AppWindow, app: &Rc<App>) {
     ui.on_toggle(move |path| {
         let folder = path.to_string();
         if a.assets.dirs.borrow().contains_key(&folder) {
+            a.assets.tree_epoch.set(a.assets.tree_epoch.get() + 1);
             // Collapse: forget the folder and everything under it.
-            a.assets
-                .dirs
-                .borrow_mut()
-                .retain(|k, _| k != &folder && !k.starts_with(&format!("{folder}/")));
+            a.assets.dirs.borrow_mut().retain(|k, _| {
+                !folder.is_empty() && k != &folder && !k.starts_with(&format!("{folder}/"))
+            });
             if let Some(w) = a.window.upgrade() {
                 a.folder_rows(&w);
             }
@@ -279,6 +290,7 @@ impl App {
         });
     }
     pub(super) fn reset_assets(&self, w: &AppWindow) {
+        self.dismiss_asset_search(w);
         self.stop_asset_watch(w);
         self.assets.generation.set(self.assets.generation.get() + 1);
         self.assets.dirs.borrow_mut().clear();
@@ -286,7 +298,8 @@ impl App {
         self.assets.page.set(0);
         let ui = w.global::<Assets>();
         ui.set_selected(AssetCard::default());
-        ui.set_folders(ModelRc::default());
+        self.folder_rows(w);
+        ui.set_tree_index(0);
         ui.set_rows(ModelRc::default());
         ui.set_folder("".into());
         ui.set_message("".into());
@@ -302,16 +315,28 @@ impl App {
             return;
         };
         let local = w.global::<Assets>().get_local_only();
+        let Some(tab) = self.workspaces_row(&root) else {
+            return;
+        };
+        let epoch = self.assets.tree_epoch.get();
         let Some(me) = self.me() else { return };
         spawn(async move {
             let Ok(listing) = me.desk.view_tree(root.clone(), Some(folder.clone())).await else {
                 return;
             };
             // The workspace may have changed while the listing was on its way.
-            if me.shown_root.borrow().as_deref() != Some(root.as_str()) {
+            if me.shown_root.borrow().as_deref() != Some(root.as_str())
+                || me.assets.tree_epoch.get() != epoch
+                || !me
+                    .workspaces_row(&root)
+                    .is_some_and(|now| now.branch == tab.branch && now.rev == tab.rev)
+            {
                 return;
             }
             let Some(w) = me.window.upgrade() else { return };
+            if w.global::<Assets>().get_local_only() != local {
+                return;
+            }
             let canonical = Path::new(&root).canonicalize().ok();
             let children = child_dirs(canonical.as_deref(), &folder, &listing, local);
             me.assets.dirs.borrow_mut().insert(folder, children);
@@ -323,24 +348,39 @@ impl App {
         fn append(
             parent: &str,
             depth: i32,
+            parent_index: i32,
             dirs: &BTreeMap<String, Vec<String>>,
             out: &mut Vec<DepotFolder>,
         ) {
             if let Some(children) = dirs.get(parent) {
                 for child in children {
+                    let index = i32::try_from(out.len()).unwrap_or(i32::MAX);
                     out.push(DepotFolder {
+                        parent_index,
                         path: child.into(),
                         caption: child.rsplit('/').next().unwrap_or(child).into(),
                         depth,
                         expanded: dirs.contains_key(child),
                     });
-                    append(child, depth + 1, dirs, out);
+                    append(child, depth + 1, index, dirs, out);
                 }
             }
         }
-        let mut rows = Vec::new();
-        append("", 0, &self.assets.dirs.borrow(), &mut rows);
-        w.global::<Assets>().set_folders(rows.as_slice().into());
+        let ui = w.global::<Assets>();
+        let old = ui
+            .get_folders()
+            .row_data(ui.get_tree_index() as usize)
+            .unwrap_or_default()
+            .path;
+        let dirs = self.assets.dirs.borrow();
+        let mut rows = vec![DepotFolder {
+            expanded: dirs.contains_key(""),
+            ..Default::default()
+        }];
+        append("", 1, 0, &dirs, &mut rows);
+        let index = rows.iter().position(|r| r.path == old).unwrap_or(0);
+        ui.set_folders(rows.as_slice().into());
+        ui.set_tree_index(index as i32);
     }
     pub(super) fn reload_assets_for(&self, root: &str) {
         if self.shown_root.borrow().as_deref() == Some(root) {
@@ -373,7 +413,10 @@ impl App {
         let ui = w.global::<Assets>();
         let local = ui.get_local_only();
         let idx = self.assets.page.get();
-        let keep = if ui.get_folder().as_str() == folder {
+        let reveal = self.search.reveal.borrow_mut().take();
+        let keep = if let Some(path) = &reveal {
+            path.as_str().into()
+        } else if ui.get_folder().as_str() == folder {
             ui.get_selected().path
         } else {
             Default::default()
@@ -388,6 +431,16 @@ impl App {
         ui.set_rows(ModelRc::default());
         ui.set_page_label("".into());
         self.assets.cards.borrow_mut().clear();
+        let epoch = self.assets.tree_epoch.get();
+        let mut missing_ancestors = Vec::new();
+        let mut child = folder.as_str();
+        while !child.is_empty() {
+            let parent = child.rsplit_once('/').map_or("", |(p, _)| p);
+            if !self.assets.dirs.borrow().contains_key(parent) {
+                missing_ancestors.push(parent.to_owned());
+            }
+            child = parent;
+        }
         let generation = self.assets.generation.get() + 1;
         self.assets.generation.set(generation);
         let Some(me) = self.me() else { return };
@@ -406,15 +459,36 @@ impl App {
             let result = async {
                 let listing = listing.map_err(|e| e.message)?;
                 let locks = me.desk.locks(root.clone(), false).await;
+                let canonical = Path::new(&root).canonicalize().ok();
+                let mut ancestors = Vec::new();
+                for parent in missing_ancestors {
+                    if !live() {
+                        return Err("Folder changed".into());
+                    }
+                    let listing = me
+                        .desk
+                        .view_tree(root.clone(), Some(parent.clone()))
+                        .await
+                        .map_err(|e| e.message)?;
+                    let children = child_dirs(canonical.as_deref(), &parent, &listing, local);
+                    ancestors.push((parent, children));
+                }
                 let dir = folder.clone();
                 let (send, recv) = tokio::sync::oneshot::channel();
                 std::thread::Builder::new()
                     .name("desk-asset-previews".into())
                     .spawn(move || {
-                        let _ = send.send(page_data(Path::new(&root), &dir, &listing, local, idx));
+                        let _ = send.send(page_data(
+                            Path::new(&root),
+                            &dir,
+                            &listing,
+                            local,
+                            idx,
+                            reveal.as_deref(),
+                        ));
                     })
                     .map_err(|e| e.to_string())?;
-                Ok::<_, String>((recv.await.map_err(|e| e.to_string())?, locks))
+                Ok::<_, String>((recv.await.map_err(|e| e.to_string())?, locks, ancestors))
             }
             .await;
             if !live() {
@@ -423,7 +497,7 @@ impl App {
             let Some(w) = me.window.upgrade() else { return };
             let ui = w.global::<Assets>();
             ui.set_busy(false);
-            let (page, locks) = match result {
+            let (page, locks, ancestors) = match result {
                 Ok(v) => v,
                 Err(e) => {
                     ui.set_message(e.into());
@@ -446,20 +520,10 @@ impl App {
                 .flatten()
                 .filter_map(|l| Some((l["path"].as_str()?, l)))
                 .collect();
-            {
-                let dirs = &mut *me.assets.dirs.borrow_mut();
+            if me.assets.tree_epoch.get() == epoch {
+                let mut dirs = me.assets.dirs.borrow_mut();
+                dirs.extend(ancestors);
                 dirs.insert(folder.clone(), page.dirs);
-                // Rebuild the ancestry when restoring a previously opened workspace tab.
-                let mut child = folder.as_str();
-                while !child.is_empty() {
-                    let parent = child.rsplit_once('/').map_or("", |(p, _)| p);
-                    let siblings = dirs.entry(parent.into()).or_default();
-                    if !siblings.iter().any(|s| s == child) {
-                        siblings.push(child.into());
-                        siblings.sort();
-                    }
-                    child = parent;
-                }
             }
             let cards: Vec<_> = page
                 .files
@@ -514,6 +578,13 @@ impl App {
             ui.set_message(message.into());
             *me.assets.cards.borrow_mut() = cards;
             me.folder_rows(&w);
+            if let Some(index) = ui
+                .get_folders()
+                .iter()
+                .position(|r| r.path.as_str() == folder)
+            {
+                ui.set_tree_index(index as i32);
+            }
         });
     }
 }

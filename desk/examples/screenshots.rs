@@ -14,7 +14,7 @@ use lode_desk::app::{
     self, ChangesState, CheckoutState, Dialog, ErrorInfo, ListDialogState, Options, Recent,
     ServerRowData, SignInState, WorkspaceTab,
 };
-use lode_desk::app::{AssetCard, Assets, DepotFolder};
+use lode_desk::app::{AssetCard, AssetSearch, Assets, DepotFolder};
 use lode_desk::app::{BlameState, DiffNote, DiffState, HistoryState, ImageState, Pane, Reading};
 use lode_desk::app::{
     BranchesState, Branching, ConflictState, FolderRow, MergeState, OutcomeState, RegionRow,
@@ -644,21 +644,28 @@ fn main() {
         a.set_lock_known(true);
         a.set_folders(ModelRc::from(Rc::new(VecModel::from(vec![
             DepotFolder {
+                expanded: true,
+                ..Default::default()
+            },
+            DepotFolder {
                 path: "Content".into(),
                 caption: "Content".into(),
-                depth: 0,
+                depth: 1,
+                parent_index: 0,
                 expanded: true,
             },
             DepotFolder {
                 path: "Content/Maps".into(),
                 caption: "Maps".into(),
-                depth: 1,
+                depth: 2,
+                parent_index: 1,
                 expanded: false,
             },
             DepotFolder {
                 path: "Content/Textures".into(),
                 caption: "Textures".into(),
-                depth: 1,
+                depth: 2,
+                parent_index: 1,
                 expanded: true,
             },
         ]))));
@@ -689,6 +696,20 @@ fn main() {
         a.set_page_label("1–5 of 5".into());
         r.set_pane(Pane::Files);
         shot("files");
+        let search = w.global::<AssetSearch>();
+        search.set_query("rock".into());
+        search.set_paths(
+            [
+                "Content/Art/BigRock.uasset".into(),
+                "Environment/Cliffs/BigRock.uasset".into(),
+            ]
+            .as_slice()
+            .into(),
+        );
+        search.set_message("2 matches".into());
+        w.set_dialog(Dialog::AssetSearch);
+        shot("asset-search");
+        w.set_dialog(Dialog::None);
         a.set_local_only(false);
         a.set_selected(AssetCard::default());
         a.set_rows(ModelRc::default());
