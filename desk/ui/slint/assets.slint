@@ -103,72 +103,102 @@ export component DepotTree inherits VerticalLayout {
         }
     }
 }
+component FileCell inherits Text {
+    font-size: 12px;
+    color: Palette.foreground;
+    vertical-alignment: center;
+    overflow: elide;
+    accessible-role: text;
+    accessible-label: self.text;
+}
+
+// The header and every row share these widths, including the scrollbar gutter.
+component FileColumns inherits HorizontalLayout {
+    in property <bool> header;
+    in property <AssetCard> asset;
+    in property <string> lock-owner;
+    in property <string> workspace-state;
+    padding-left: 8px;
+    padding-right: 8px;
+    spacing: 10px;
+    HorizontalLayout {
+        spacing: 6px;
+        horizontal-stretch: 1;
+        if !root.header: KindIcon { kind: root.asset.kind; y: (parent.height - self.height) / 2; }
+        FileCell {
+            text: root.header ? "Name" : root.asset.name;
+            font-weight: 600;
+            min-width: 0px; horizontal-stretch: 1;
+        }
+    }
+    HorizontalLayout {
+        width: 110px;
+        spacing: 4px;
+        if !root.header && Assets.lock-known && root.asset.holder != "": Icon {
+            name: Icons.lock; size: 13px; y: (parent.height - self.height) / 2;
+        }
+        FileCell {
+            text: root.header ? "Lock owner" : root.lock-owner;
+            font-weight: root.header ? 600 : 400;
+            min-width: 0px; horizontal-stretch: 1;
+        }
+    }
+    FileCell {
+        width: 62px; horizontal-alignment: right;
+        text: root.header ? "Size" : root.asset.size;
+        font-weight: root.header ? 600 : 400;
+    }
+    FileCell {
+        width: 85px;
+        text: root.header ? "Workspace" : root.workspace-state;
+        font-weight: root.header ? 600 : 400;
+    }
+}
+
 component AssetRow inherits Rectangle {
     in property <AssetCard> asset;
+    in property <bool> odd;
+    private property <string> lock-owner: !Assets.lock-known ? "Unknown" : asset.holder == "" ? "Unlocked"
+        : asset.mine ? asset.holder + " (you)" : asset.holder;
+    private property <string> workspace-state: !asset.local ? "Depot only" : asset.writable ? "Writable" : "Read-only";
     height: 30px;
-    border-radius: 5px;
     background: Assets.selected.path == asset.path ? Palette.accent-background.transparentize(0.75)
-        : touch.has-hover ? Palette.alternate-background : transparent;
+        : touch.has-hover ? Palette.alternate-background : root.odd ? Palette.alternate-background.transparentize(0.55) : transparent;
     accessible-role: list-item;
     accessible-label: "Inspect " + asset.path;
+    accessible-value: root.lock-owner + ", " + asset.size + ", " + root.workspace-state;
     accessible-item-selectable: true;
     accessible-item-selected: Assets.selected.path == asset.path;
     accessible-action-default => { Assets.pick(asset.path); }
     touch := TouchArea { clicked => { Assets.pick(root.asset.path); } }
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 8px;
-        spacing: 8px;
-        KindIcon { kind: root.asset.kind; y: (parent.height - self.height) / 2; }
-        Text {
-            text: root.asset.name;
-            color: Palette.foreground;
-            font-weight: 600;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-            accessible-role: none;
-        }
-        if root.asset.holder != "": HorizontalLayout {
-            spacing: 4px;
-            Icon {
-                name: Icons.lock;
-                size: 13px;
-                y: (parent.height - self.height) / 2;
-                tint: root.asset.mine ? Palette.accent-background : #dc2626;
-            }
-            Muted {
-                text: root.asset.mine ? "my lock" : root.asset.holder;
-                font-size: 11.5px;
-                vertical-alignment: center;
-                color: root.asset.mine ? Palette.accent-background : #dc2626;
-                accessible-role: none;
-            }
-        }
-        Muted { text: root.asset.size; font-size: 11.5px; vertical-alignment: center; accessible-role: none; }
-        Muted {
-            text: root.asset.local ? "In workspace" : "Depot only";
-            font-size: 11.5px;
-            vertical-alignment: center;
-            width: 90px;
-            accessible-role: none;
-        }
-    }
+    FileColumns { asset: root.asset; lock-owner: root.lock-owner; workspace-state: root.workspace-state; }
 }
+
 export component AssetBrowser inherits VerticalLayout {
     padding: 10px; spacing: 8px;
-    HorizontalLayout { Title { text: Assets.folder == "" ? "Depot files" : Assets.folder; horizontal-stretch: 1; }
+    HorizontalLayout { height: 34px; Title { text: Assets.folder == "" ? "Depot files" : Assets.folder; horizontal-stretch: 1; }
         Button { text: "Refresh"; accessible-label: "Refresh depot folder"; enabled: !Assets.busy; clicked => { Assets.refresh(); } }
     }
     if Assets.message != "": Text { text: Assets.message; color: Palette.foreground; wrap: word-wrap; }
     HorizontalLayout {
-        spacing: 12px;
+        spacing: 12px; vertical-stretch: 1;
         VerticalLayout {
             horizontal-stretch: 2;
-            ListView {
-                for asset in Assets.rows: AssetRow { asset: asset; }
+            Rectangle {
+                min-width: 320px; preferred-width: 520px; min-height: 80px;
+                horizontal-stretch: 1; vertical-stretch: 1;
+                accessible-role: table; accessible-label: "Folder files";
+                Rectangle {
+                    y: 0; height: 28px; background: Palette.alternate-background;
+                    FileColumns { width: file-list.visible-width; header: true; }
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.border; }
+                }
+                file-list := ListView {
+                    y: 28px; height: parent.height - self.y;
+                    for asset[i] in Assets.rows: AssetRow { asset: asset; odd: mod(i, 2) == 1; }
+                }
             }
-            HorizontalLayout { alignment: center; spacing: 5px;
+            HorizontalLayout { height: 32px; alignment: center; spacing: 5px;
                 Button { text: "Previous"; enabled: Assets.previous && !Assets.busy; clicked => { Assets.change-page(-1); } }
                 Muted { text: Assets.page-label; }
                 Button { text: "Next"; enabled: Assets.next && !Assets.busy; clicked => { Assets.change-page(1); } }
