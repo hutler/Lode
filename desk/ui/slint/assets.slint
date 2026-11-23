@@ -41,14 +41,16 @@ export component DepotTree inherits VerticalLayout {
     tree := FocusScope {
         height: min(max(1, Assets.folders.length), 9) * 25px;
         accessible-role: list; accessible-label: "Depot folders";
-        function cursor(i: int) {
-            if i >= 0 && i < Assets.folders.length {
-                Assets.tree-index = i;
-                if i * 25px < -folder-list.content-y { folder-list.content-y = -i * 25px; }
-                else if (i + 1) * 25px > -folder-list.content-y + folder-list.visible-height {
-                    folder-list.content-y = min(0px, folder-list.visible-height - (i + 1) * 25px);
-                }
+        in property <int> cursor-index: Assets.tree-index;
+        changed cursor-index => {
+            if self.cursor-index * 25px < -folder-list.content-y {
+                folder-list.content-y = -self.cursor-index * 25px;
+            } else if (self.cursor-index + 1) * 25px > -folder-list.content-y + folder-list.visible-height {
+                folder-list.content-y = min(0px, folder-list.visible-height - (self.cursor-index + 1) * 25px);
             }
+        }
+        function cursor(i: int) {
+            if i >= 0 && i < Assets.folders.length { Assets.tree-index = i; }
         }
         key-pressed(e) => {
             if Assets.folders.length == 0 { return reject; }
@@ -85,10 +87,13 @@ export component DepotTree inherits VerticalLayout {
                 HorizontalLayout {
                     padding-left: min(f.depth * 12px, 96px); padding-right: 4px; spacing: 3px;
                     Rectangle {
-                        width: 18px;
+                        width: 18px; height: 25px;
                         accessible-role: button; accessible-label: (f.expanded ? "Collapse folder " : "Expand folder ") + (f.path == "" ? root.depot : f.path);
                         accessible-action-default => { tree.focus(); tree.cursor(i); Assets.toggle(f.path); }
-                        Text { text: f.expanded ? "▾" : "▸"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; }
+                        Icon {
+                            name: f.expanded ? "M5 9l7 7 7-7" : "M9 5l7 7-7 7";
+                            size: 12px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+                        }
                         TouchArea { clicked => { tree.focus(); tree.cursor(i); Assets.toggle(f.path); } }
                     }
                     Icon { name: Icons.folder; size: 14px; tint: Palette.foreground.transparentize(0.22); y: (parent.height - self.height) / 2; }
