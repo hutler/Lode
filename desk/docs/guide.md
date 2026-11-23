@@ -135,7 +135,12 @@ or moves to its first child, Left collapses it or moves to its parent, and Enter
 that listing to files present in your checkout. Opening a folder loads its direct children.
 Use **Previous** and **Next** for additional pages.
 
-Select an asset by its preview or name. Desk reads previews from local bitmap files and
+The file table shows the name, lock owner, size and workspace state. **Depot only** means
+there is no local copy. **Read-only** and **Writable** describe local file access. A lock held
+by your workspace shows the owner's name and **(you)**. **Unknown** means Desk could not
+read the locks from the server.
+
+Select a row to inspect the asset. Desk reads previews from local bitmap files and
 saved PNG/JPEG thumbnails in supported versioned Unreal editor packages. Depot-only files,
 packages without an embedded preview and unsupported images show **No preview**.
 The inspector shows the actual lock owner, workspace, comment and local write access.

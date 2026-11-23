@@ -1663,6 +1663,26 @@ async fn artist_browser(world: &World) {
     assert_eq!(ui.get_folder(), "Environment/Cliffs@2");
     assert!(ui.get_previous());
     assert!(!ui.get_selected().local);
+    let table = find_as(&w, "Folder files", &[AccessibleRole::Table]);
+    for heading in ["Name", "Lock owner", "Size", "Workspace"] {
+        assert!(
+            table
+                .query_descendants()
+                .match_predicate(move |e| {
+                    e.accessible_role() == Some(AccessibleRole::Text)
+                        && e.accessible_label().as_deref() == Some(heading)
+                })
+                .find_first()
+                .is_some(),
+            "missing file table header {heading}"
+        );
+    }
+    assert_eq!(
+        button(&w, &format!("Inspect {remote}"))
+            .accessible_value()
+            .unwrap(),
+        format!("Unlocked, {}, Depot only", ui.get_selected().size)
+    );
     assert!(shown(&w, "Browse folder Content"));
 
     for label in [
@@ -1677,6 +1697,17 @@ async fn artist_browser(world: &World) {
     until("gallery loads", || shown(&w, select) && !ui.get_busy()).await;
     click(&w, select);
     let card = ui.get_selected();
+    let selected_row = button(&w, select);
+    assert_eq!(
+        selected_row.accessible_value().unwrap(),
+        format!("bob, {}, Read-only", card.size)
+    );
+    ui.set_lock_known(false);
+    assert_eq!(
+        selected_row.accessible_value().unwrap(),
+        format!("Unknown, {}, Read-only", card.size)
+    );
+    ui.set_lock_known(true);
     assert!(card.preview);
     assert_eq!(card.holder, "bob");
     assert_eq!(card.comment, "silhouette pass");
@@ -1707,6 +1738,10 @@ async fn artist_browser(world: &World) {
         .unwrap()
         .permissions()
         .readonly());
+    assert_eq!(
+        button(&w, select).accessible_value().unwrap(),
+        format!("alice (you), {}, Writable", ui.get_selected().size)
+    );
     click(&w, "Release my lock");
     until("unlock restores file protection", || {
         !ui.get_busy() && !ui.get_selected().mine && !ui.get_selected().writable

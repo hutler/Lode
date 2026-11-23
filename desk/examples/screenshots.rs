@@ -639,7 +639,7 @@ fn main() {
         // The files pane in Workspace scope: the folder tree and the list with kind icons and
         // lock badges.
         let a = w.global::<Assets>();
-        a.set_local_only(true);
+        a.set_local_only(false);
         a.set_folder("Content/Textures".into());
         a.set_lock_known(true);
         a.set_folders(ModelRc::from(Rc::new(VecModel::from(vec![
@@ -676,7 +676,8 @@ fn main() {
             picture: lamp(true),
             preview: true,
             local,
-            writable: true,
+            writable: local && holder != "bob",
+            mine: holder == "alice",
             size: "1.2 MB".into(),
             holder: holder.into(),
             ..AssetCard::default()
