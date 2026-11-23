@@ -187,6 +187,8 @@ async fn start(rt: Handle) -> World {
             &[
                 ("Content/Art/BigRock.uasset", &rock_package()),
                 ("Content/Art/Unknown.uasset", b"no thumbnail"),
+                ("Environment/Cliffs@2/BigRock.uasset", b"remote rock"),
+                ("Restricted/BigRock.uasset", b"private rock"),
                 (".lodeconfig", b"[locks]\nrequired = [\"**/*.uasset\"]\n"),
             ],
         )
@@ -203,6 +205,24 @@ async fn start(rt: Handle) -> World {
             )
             .await;
     }
+    let names: Vec<_> = (0..18)
+        .map(|i| format!("Environment/Cliffs@2/A{i:02}.txt"))
+        .collect();
+    let files: Vec<_> = names
+        .iter()
+        .map(|name| (name.as_str(), &b"note"[..]))
+        .collect();
+    server.commit_files("artist", "main", &files).await;
+    server
+        .acl(
+            "artist",
+            "alice",
+            "*",
+            "Restricted/**",
+            AclEffect::Deny,
+            AccessLevel::Read,
+        )
+        .await;
     server.create_depot("validation").await;
     server
         .commit_files(
@@ -1551,6 +1571,100 @@ async fn artist_browser(world: &World) {
         .readonly());
     assert_eq!(w.global::<Reading>().get_pane(), Pane::Changes);
     let ui = w.global::<lode_desk::app::Assets>();
+    let alice = Desk::new(
+        home.path().into(),
+        &home.path().join("app"),
+        Arc::new(Quiet),
+    )
+    .with_config_dir(home.path().join("config"));
+    alice
+        .view_apply(
+            folder.display().to_string(),
+            vec![],
+            vec!["Environment/**".into()],
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+    let remote = "Environment/Cliffs@2/BigRock.uasset";
+    assert!(!folder.join(remote).exists());
+
+    click(&w, "Expand folder artist");
+    until("root expands inside Changes", || {
+        shown(&w, "Browse folder Content")
+    })
+    .await;
+    assert_eq!(w.global::<Reading>().get_pane(), Pane::Changes);
+    press(&w, &[], Key::RightArrow);
+    assert_eq!(
+        ui.get_folders()
+            .row_data(ui.get_tree_index() as usize)
+            .unwrap()
+            .path,
+        "Content"
+    );
+    press(&w, &[], Key::RightArrow);
+    until("keyboard expands Content", || {
+        shown(&w, "Browse folder Content/Art")
+    })
+    .await;
+    press(&w, &[], Key::DownArrow);
+    press(&w, &[], Key::LeftArrow);
+    assert_eq!(
+        ui.get_folders()
+            .row_data(ui.get_tree_index() as usize)
+            .unwrap()
+            .path,
+        "Content"
+    );
+
+    click(&w, "Find asset in depot");
+    type_into(&w, "Asset name", ".txt");
+    click_in(&w, "Find asset in depot", "Search");
+    click_in(&w, "Find asset in depot", "Close");
+    click(&w, "Workspace");
+    until("workspace folder listing", || {
+        ui.get_local_only() && !ui.get_busy()
+    })
+    .await;
+    click(&w, "Find asset in depot");
+    assert!(w
+        .global::<lode_desk::app::AssetSearch>()
+        .get_query()
+        .is_empty());
+    type_into(&w, "Asset name", "nonexistent");
+    click_in(&w, "Find asset in depot", "Search");
+    let search = w.global::<lode_desk::app::AssetSearch>();
+    until("no results", || {
+        search.get_message() == "No matching files."
+    })
+    .await;
+    type_into(&w, "Asset name", "gRoC");
+    click_in(&w, "Find asset in depot", "Search");
+    until("both readable rocks found", || {
+        search.get_paths().row_count() == 2
+    })
+    .await;
+    assert_eq!(
+        search
+            .get_paths()
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>(),
+        [root, remote]
+    );
+    click(&w, &format!("Open asset {remote}"));
+    until("depot-only rock opens on its exact page", || {
+        !ui.get_busy() && ui.get_selected().path == remote
+    })
+    .await;
+    assert!(!ui.get_local_only());
+    assert_eq!(ui.get_folder(), "Environment/Cliffs@2");
+    assert!(ui.get_previous());
+    assert!(!ui.get_selected().local);
+    assert!(shown(&w, "Browse folder Content"));
+
     for label in [
         "Browse depot root",
         "Browse folder Content",

@@ -92,6 +92,7 @@ lode-client = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b
 lode-ops = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
 lode-core = { git = "https://github.com/hutler/Lode", rev = "e1ebfa78630ee404b664921160406dcffa2c856b" }
 base64 = "0.22"
+futures = "0.3"
 directories = "6"
 # Decodes the two sides of an image diff (Slint takes pixels); already in the tree through rfd.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }

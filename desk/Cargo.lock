@@ -3429,6 +3429,7 @@ dependencies = [
  "base64 0.22.1",
  "directories",
  "embed-resource",
+ "futures",
  "i-slint-backend-testing",
  "image",
  "lode-client",

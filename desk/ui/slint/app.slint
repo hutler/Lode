@@ -3,6 +3,8 @@
 
 import { Assets, AssetCard, DepotFolder, AssetBrowser, DepotTree } from "assets.slint";
 export { Assets, AssetCard, DepotFolder }
+import { AssetSearch, AssetSearchDialog } from "asset_search.slint";
+export { AssetSearch }
 import { Validation, ValidationRow, ValidationPanel } from "validation.slint";
 export { Validation, ValidationRow }
 import { Button, LineEdit, ListView, ProgressIndicator, Palette, ScrollView, HorizontalBox, VerticalBox } from "std-widgets.slint";
@@ -58,7 +60,7 @@ export struct WorkspaceTab {
     server-url: string,
 }
 
-export enum Dialog { none, connection, validation, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
+export enum Dialog { none, asset-search, connection, validation, sign-in, check-out, about, new-changelist, rename-changelist, commit-changelist, delete-changelist, revert, move-to, messages, lock, confirm, shelve, submit-shelf, unshelved, branches, new-branch, merge, outcome, link-refused, link-choose, link-none }
 
 /// A tab of the window's title strip: Workspaces, then one per open workspace.
 component Tab inherits Rectangle {
@@ -448,7 +450,7 @@ component Sidebar inherits Rectangle {
                     clicked => { Reading.show-pane(Pane.view); }
                 }
             }
-            SideSection { title: "FILES"; DepotTree { depot: root.ws.depot; } }
+            SideSection { title: "FILES"; DepotTree { depot: root.ws.depot; active: Reading.pane == Pane.files; } }
             SideSection {
                 title: "BRANCHES";
                 for b in Branching.side-rows: SideItem {
@@ -1001,6 +1003,11 @@ export component AppWindow inherits Window {
             height: min(parent.height - 32px, Validation.stage == "results" || Validation.preview != "" ? 520px : 250px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
+        }
+        if root.dialog == Dialog.asset-search: AssetSearchDialog {
+            width: min(620px, parent.width - 28px); height: min(430px, parent.height - 28px);
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            close => { root.close-dialog(); }
         }
         if root.dialog == Dialog.connection: ConnectionDialog {
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;

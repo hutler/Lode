@@ -1,0 +1,39 @@
+import { Button, LineEdit, ListView, Palette } from "std-widgets.slint";
+import { Card, Title, Muted } from "parts.slint";
+export global AssetSearch {
+    in-out property <string> query;
+    in-out property <[string]> paths;
+    in-out property <string> message;
+    in-out property <bool> busy;
+    callback open(); callback edited(); callback run(); callback reveal(string);
+}
+export component AssetSearchDialog inherits Card {
+    callback close();
+    accessible-role: groupbox; accessible-label: "Find asset in depot";
+    init => { query.focus(); }
+    VerticalLayout { padding: 14px; spacing: 8px;
+        Title { text: "Find asset in depot"; }
+        HorizontalLayout { spacing: 6px;
+            query := LineEdit { text <=> AssetSearch.query; placeholder-text: "Part of a file name";
+                accessible-label: "Asset name"; edited => { AssetSearch.edited(); } accepted => { AssetSearch.run(); } }
+            Button { text: "Search"; enabled: !AssetSearch.busy && AssetSearch.query != ""; clicked => { AssetSearch.run(); } }
+        }
+        Muted { text: AssetSearch.message; }
+        ListView {
+            for path in AssetSearch.paths: Rectangle {
+                height: max(30px, label.preferred-height + 8px);
+                Button {
+                    width: parent.width; height: parent.height;
+                    accessible-label: "Open asset " + path;
+                    clicked => { AssetSearch.reveal(path); }
+                }
+                label := Text {
+                    x: 8px; width: parent.width - 16px; height: parent.height;
+                    text: path; color: Palette.foreground; wrap: char-wrap;
+                    vertical-alignment: center; accessible-role: none;
+                }
+            }
+        }
+        HorizontalLayout { alignment: end; Button { text: "Close"; clicked => { root.close(); } } }
+    }
+}

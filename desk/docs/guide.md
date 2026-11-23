@@ -123,8 +123,15 @@ normal shelf checks and keeps the local edits.
 
 ### Browse files and take an asset into work
 
-From **Changes**, open the depot name under **Files**, then expand folders such as
-`Content/Art`. **Depot** lists the workspace revision on the server. **Workspace** filters
+From **Changes**, choose **Find asset…** under **Files**, enter part of a file name
+(for example, `rock`) and press Enter. Desk searches the files you can read at the
+workspace revision, including files outside your checkout. Matching ignores case.
+Each result shows its full depot path. Choose a path to open its folder and select the
+file in the inspector. For more than 200 matches, narrow the name.
+
+To browse manually, click a folder name to open it or its arrow to expand it in place.
+With the tree focused, Up and Down move between visible rows. Right expands a folder
+or moves to its first child, Left collapses it or moves to its parent, and Enter opens it. **Depot** lists the workspace revision on the server. **Workspace** filters
 that listing to files present in your checkout. Opening a folder loads its direct children.
 Use **Previous** and **Next** for additional pages.
 
