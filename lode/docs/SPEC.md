@@ -426,6 +426,8 @@ from the shelves module); the MCP module hosts them and adds the tools that read
 - Client runs are a convenience; the server run is the enforcement. Neither is a sandbox:
   a script runs with the rights of whoever runs it.
 
+The [approved built-in validation design](proposals/builtin-validation.md) defines the next server validation model for new depots.
+
 ## 7. AI support
 
 ### 7.1 Agent identities
