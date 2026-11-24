@@ -229,3 +229,15 @@ the new `validate` module adds its own table when it is turned on.
   `validate/<name>` checks that gate submits on `[checks].branches`. The server must have
   Python 3; the container image does not include it yet. Read the HARDENING note before
   turning it on: the scripts run as the `loded` user.
+
+### 0.5.1: reliable online filesystem backups
+
+Upgrade the running server and any separate copy of `loded` used for manual backups
+together. From 0.5.0 there is no database migration or configuration change.
+
+Filesystem backups protect the metadata snapshot and object copy against concurrent GC
+deletion, obliterate and permanent depot removal. Retry a conflicting operation after the
+backup finishes. A failed directory scan or object copy stops the backup and preserves the
+previous scheduled generation. PostgreSQL metadata and primary S3 content still require
+their own backups. To verify a SQLite/filesystem backup, restore it in a separate directory
+and run `loded fsck --config <restored-config> --full`.
