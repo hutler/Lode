@@ -177,6 +177,140 @@ async fn backups_are_copied_pruned_and_restored() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_backup_keeps_historical_content_during_object_removal() {
+    use lode_proto::admin::{ObliterateRequest, ObliterateTarget};
+    use lode_server::maintenance::{backup, fsck};
+    use tokio::io::AsyncReadExt;
+    use tokio::sync::oneshot;
+
+    let server = TestServer::start_with(lode_testkit::TestServerOptions {
+        configure: Box::new(|config| config.gc.grace_seconds = 0),
+    })
+    .await;
+    if server.state().meta().dialect() != lode_meta::Dialect::Sqlite {
+        return; // The Postgres snapshot belongs to the external backup operator.
+    }
+    server.create_depot("game").await;
+    let rev = server
+        .commit_files("game", "main", &[("art.txt", b"original")])
+        .await;
+    server
+        .commit_files("game", "main", &[("art.txt", b"replacement")])
+        .await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dest = tmp.path().join("snapshot");
+    let manual = open_state(
+        ServerConfig::with_data_dir(server.data_dir()),
+        Arc::new(SystemClock),
+        Vec::new(),
+    )
+    .await
+    .unwrap();
+    let (captured, snapshot_ready) = oneshot::channel();
+    let (resume, copying) = oneshot::channel();
+    let target = dest.clone();
+    let worker = tokio::task::spawn_blocking(move || {
+        // Drive the real CLI backup to its SQLite await, then let its snapshot finish.
+        // A single blocking worker makes the checkpoint deterministic without sleeps.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let (release, hold) = oneshot::channel::<()>();
+            let occupied = tokio::task::spawn_blocking(move || hold.blocking_recv().unwrap());
+            let mut work = std::pin::pin!(backup(&manual, &target));
+            assert!(futures::poll!(&mut work).is_pending());
+            release.send(()).unwrap();
+            occupied.await.unwrap();
+            tokio::task::spawn_blocking(|| ()).await.unwrap();
+            captured.send(()).unwrap();
+            copying.await.unwrap();
+            work.await.unwrap()
+        })
+    });
+    snapshot_ready.await.unwrap();
+    let request = ObliterateRequest {
+        targets: vec![ObliterateTarget {
+            path: lode_core::DepotPath::parse("art.txt").unwrap(),
+            rev: Some(rev),
+        }],
+        reason: "remove old content".into(),
+        dry_run: false,
+    };
+    let client = server.admin();
+    let orphan = b"unused upload";
+    client
+        .put_blob(
+            "game",
+            &lode_core::blob_id(orphan.as_slice()).unwrap(),
+            std::io::Cursor::new(orphan.to_vec()),
+        )
+        .await
+        .unwrap();
+    server.clock().advance_ms(60_000);
+    assert!(client.gc("game", true).await.unwrap().objects_affected > 0);
+    assert_eq!(
+        client
+            .gc("game", false)
+            .await
+            .unwrap_err()
+            .api()
+            .unwrap()
+            .status,
+        409
+    );
+    let rejected = client.obliterate("game", &request).await.unwrap_err();
+    assert_eq!(rejected.api().unwrap().status, 409);
+    assert_eq!(
+        client
+            .delete_depot("game", "game", true)
+            .await
+            .unwrap_err()
+            .api()
+            .unwrap()
+            .status,
+        409
+    );
+    server
+        .commit_files("game", "main", &[("later.txt", b"after snapshot")])
+        .await;
+    resume.send(()).unwrap();
+    worker.await.unwrap();
+    client.obliterate("game", &request).await.unwrap();
+    let restored = open_state(
+        ServerConfig::with_data_dir(&dest),
+        Arc::new(SystemClock),
+        Vec::new(),
+    )
+    .await
+    .unwrap();
+    let depot = restored
+        .meta()
+        .read(|tx| tx.depot_by_name("game"))
+        .await
+        .unwrap()
+        .unwrap();
+    let report = fsck(&restored, depot.id, FsckOptions { full: true })
+        .await
+        .unwrap();
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+    let id = lode_core::blob_id(b"original".as_slice()).unwrap();
+    let mut bytes = Vec::new();
+    restored
+        .blobs()
+        .get(depot.id, &id)
+        .await
+        .unwrap()
+        .reader
+        .read_to_end(&mut bytes)
+        .await
+        .unwrap();
+    assert_eq!(bytes, b"original");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_copy_is_recorded_and_tried_again() {
     let fake = fake().await;
     let s = TestServer::start().await;

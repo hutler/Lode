@@ -275,6 +275,7 @@ pub async fn obliterate(
             "a garbage collection or obliterate is running; try again when it has finished",
         )
     })?;
+    let _backup = super::backup_lock::for_removal(state)?;
     let _exclusive = state.gc_fence().write().await;
     // Heads may have moved since the first look.
     let in_use = in_active_heads(state, depot, &ids, &mut clean).await?;

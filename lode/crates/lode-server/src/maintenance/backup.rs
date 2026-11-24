@@ -3,8 +3,7 @@
 //! The database is copied first with SQLite's online backup, then the object store. Objects
 //! are immutable and a revision's objects are stored before the revision is committed, so
 //! every object the copied database references is already on disk when the copy of
-//! `depots/` starts. Revisions are never removed, so garbage collection cannot delete those
-//! objects either.
+//! `depots/` starts. A cross-process lock prevents object removal until the copy finishes.
 //!
 //! With S3 storage (`[storage] kind = "s3"`) the content is not copied: it stays in the
 //! bucket, which the bucket's own versioning or replication protects. The backup then holds
@@ -76,6 +75,15 @@ fn io_err(context: impl Into<String>) -> impl FnOnce(io::Error) -> BackupError {
 /// Copies the data directory of `state` into `dest`, which must be missing or empty. The
 /// result is a data directory `loded` can open.
 pub async fn backup(state: &AppState, dest: &Path) -> Result<BackupReport, BackupError> {
+    let objects = state.config().storage.s3_in_use().is_none();
+    let guard = if objects {
+        Some(
+            super::backup_lock::for_backup(&state.config().data_dir)
+                .map_err(io_err("cannot start filesystem backup"))?,
+        )
+    } else {
+        None
+    };
     if dest.exists() {
         let mut rd =
             std::fs::read_dir(dest).map_err(io_err(format!("cannot read {}", dest.display())))?;
@@ -95,8 +103,9 @@ pub async fn backup(state: &AppState, dest: &Path) -> Result<BackupReport, Backu
     let src_root = state.config().data_dir.clone();
     let config = state.config().source.clone();
     let dest_root = dest.to_owned();
-    let objects = state.config().storage.s3_in_use().is_none();
     let mut report = tokio::task::spawn_blocking(move || {
+        // The blocking copy can outlive cancellation of the async caller.
+        let _guard = guard;
         copy_store(&src_root, &dest_root, objects, config.as_ref())
     })
     .await
@@ -145,7 +154,10 @@ fn copy_store(
     let config = src_root.join(CONFIG_FILE_NAME);
     if let Some(source) = source {
         write_backup_config(&source.0, &dest_root.join(CONFIG_FILE_NAME))?;
-    } else if config.is_file() {
+    } else if config
+        .try_exists()
+        .map_err(io_err(format!("cannot stat {}", config.display())))?
+    {
         std::fs::copy(&config, dest_root.join(CONFIG_FILE_NAME))
             .map_err(io_err("cannot copy the configuration"))?;
     }
@@ -155,17 +167,23 @@ fn copy_store(
     }
     let depots = src_root.join("depots");
     std::fs::create_dir_all(dest_root.join("depots")).map_err(io_err("cannot create depots/"))?;
-    let Ok(rd) = std::fs::read_dir(&depots) else {
-        return Ok(report);
-    };
-    for depot in rd.flatten() {
+    let rd =
+        std::fs::read_dir(&depots).map_err(io_err(format!("cannot read {}", depots.display())))?;
+    for depot in rd {
+        let depot = depot.map_err(io_err(format!("cannot read {}", depots.display())))?;
         let objects = depot.path().join("objects");
         let target = dest_root
             .join("depots")
             .join(depot.file_name())
             .join("objects");
         std::fs::create_dir_all(&target).map_err(io_err("cannot create a depot directory"))?;
-        copy_tree(&objects, &target, &mut report)?;
+        // A new depot may have only temporary uploads and no object directory yet.
+        if objects
+            .try_exists()
+            .map_err(io_err(format!("cannot stat {}", objects.display())))?
+        {
+            copy_tree(&objects, &target, &mut report)?;
+        }
     }
     Ok(report)
 }
@@ -173,11 +191,7 @@ fn copy_store(
 /// Copies a directory tree of object files. Temporary upload files live outside `objects/`
 /// and are not copied.
 fn copy_tree(src: &Path, dest: &Path, report: &mut BackupReport) -> Result<(), BackupError> {
-    let rd = match std::fs::read_dir(src) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(io_err(format!("cannot read {}", src.display()))(e)),
-    };
+    let rd = std::fs::read_dir(src).map_err(io_err(format!("cannot read {}", src.display())))?;
     for entry in rd {
         let entry = entry.map_err(io_err(format!("cannot read {}", src.display())))?;
         let path = entry.path();
@@ -187,15 +201,9 @@ fn copy_tree(src: &Path, dest: &Path, report: &mut BackupReport) -> Result<(), B
             std::fs::create_dir_all(&target).map_err(io_err("cannot create a directory"))?;
             copy_tree(&path, &target, report)?;
         } else if ft.is_file() {
-            match std::fs::copy(&path, &target) {
-                Ok(n) => {
-                    report.objects += 1;
-                    report.bytes += n;
-                }
-                // Deleted by garbage collection after the listing: it was unreferenced.
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(io_err(format!("cannot copy {}", path.display()))(e)),
-            }
+            report.bytes += std::fs::copy(&path, &target)
+                .map_err(io_err(format!("cannot copy {}", path.display())))?;
+            report.objects += 1;
         }
     }
     Ok(())

@@ -87,9 +87,14 @@ fn list(dir: &Path) -> Result<(Complete, Vec<PathBuf>), BackupError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((complete, partial)),
         Err(e) => return Err(io_err(format!("cannot read {}", dir.display()))(e)),
     };
-    for entry in rd.flatten() {
+    for entry in rd {
+        let entry = entry.map_err(io_err(format!("cannot read {}", dir.display())))?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+        if !entry
+            .file_type()
+            .map_err(io_err(format!("cannot stat {}", entry.path().display())))?
+            .is_dir()
+        {
             continue;
         }
         if let Some(base) = name.strip_suffix(PARTIAL) {

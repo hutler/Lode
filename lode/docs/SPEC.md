@@ -225,6 +225,10 @@ caches on people's computers, and webhook payloads already sent.
   (`[backup.copy_to]`): Backblaze B2, Wasabi, AWS, Hetzner, or MinIO on a second server.
   Each copy uploads only new content plus the database; copies beyond `keep` are removed
   with the content only they needed.
+- With filesystem storage, a running backup excludes another backup and physical object
+  removal (GC deletion, obliterate, or a depot purge) in the same data directory. Conflicting
+  operations can be retried. Commits and uploads can continue. Failure to enumerate the store
+  or copy an object fails the backup; a failed scheduled backup does not rotate earlier copies.
 - `loded restore --config FILE [--name NAME] DEST` brings a data directory back from the
   bucket, also on a new machine; `--list` shows the copies. `loded backup-copy` sends the
   newest backup at once. The admin overview shows the last copy.

@@ -111,7 +111,8 @@ fn local_objects(backup: &Path) -> Result<Vec<(String, PathBuf)>, CopyError> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(out),
         Err(e) => return Err(io_err(format!("cannot read {}", depots.display()))(e)),
     };
-    for depot in rd.flatten() {
+    for depot in rd {
+        let depot = depot.map_err(io_err(format!("cannot read {}", depots.display())))?;
         let id = depot.file_name().to_string_lossy().into_owned();
         if id.parse::<u64>().is_err() {
             continue;
@@ -124,11 +125,7 @@ fn local_objects(backup: &Path) -> Result<Vec<(String, PathBuf)>, CopyError> {
 
 /// Object files below `dir` (`<h0h1>/<h2h3>/<hex>`), added as `<depot>/<hex>`.
 fn walk(dir: &Path, depot: &str, out: &mut Vec<(String, PathBuf)>) -> Result<(), CopyError> {
-    let rd = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(io_err(format!("cannot read {}", dir.display()))(e)),
-    };
+    let rd = std::fs::read_dir(dir).map_err(io_err(format!("cannot read {}", dir.display())))?;
     for entry in rd {
         let entry = entry.map_err(io_err(format!("cannot read {}", dir.display())))?;
         let ft = entry.file_type().map_err(io_err("cannot stat"))?;

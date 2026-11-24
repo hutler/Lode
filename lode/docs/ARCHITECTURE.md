@@ -1367,7 +1367,12 @@ from a disk cache and fetches each object from the main server ("upstream") once
   revision, path and object id; `loded fsck --config <file> [--full] [depot…]` does the same
   offline and exits with 1 when anything is wrong.
 - **Backup:** SQLite online backup of `meta.db` first, then copy `depots/` (objects are
-  immutable; any object referenced by the copied database is already on disk).
+  immutable; any object referenced by the copied database is already on disk). For local
+  storage a file lock in the data directory spans the database snapshot and the object copy,
+  including when the command runs in a separate process. Another local backup or a destructive
+  maintenance operation (GC deletion, obliterate, permanent depot removal) that conflicts
+  with it can be retried. Ordinary commits and uploads continue. A directory enumeration or
+  object copy error fails the backup; a failed scheduled copy never replaces a retained copy.
   `loded backup --config <file> <dest>` runs beside a live server; `dest` must be missing or
   empty and becomes a data directory. Its `loded.toml` contains the settings loaded from
   `--config`, with `data_dir = "."` for restore. Relative references to external certificate
