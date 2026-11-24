@@ -88,6 +88,40 @@ async fn backups_follow_the_clock_and_keep_the_newest() {
 }
 
 #[tokio::test]
+async fn a_failed_depot_scan_keeps_the_previous_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = ManualClock::new(START);
+    let state = state(dir.path(), &clock).await;
+    let schedule = BackupSchedule {
+        every: Duration::from_secs(3600),
+        keep: 1,
+        dir: dir.path().join("backups"),
+        copy_to: None,
+    };
+    backup_tick(&state, &schedule).await.unwrap();
+    let good = names(&schedule.dir);
+    clock.advance_ms(HOUR);
+    // A file at the directory path gives a real enumeration error even as root or on Windows.
+    let depots = state.config().data_dir.join("depots");
+    let original = dir.path().join("original-depots");
+    std::fs::rename(&depots, &original).unwrap();
+    std::fs::write(&depots, b"not a directory").unwrap();
+    let err = backup_tick(&state, &schedule).await.unwrap_err();
+    assert!(
+        err.to_string().contains(&depots.display().to_string()),
+        "{err}"
+    );
+    assert_eq!(names(&schedule.dir), good);
+    std::fs::remove_file(&depots).unwrap();
+    std::fs::rename(original, depots).unwrap();
+    assert!(matches!(
+        backup_tick(&state, &schedule).await.unwrap(),
+        BackupTick::Done { .. }
+    ));
+    assert_eq!(names(&schedule.dir), ["lode-backup-20261101T040000Z"]);
+}
+
+#[tokio::test]
 async fn the_scheduler_backs_up_and_stops() {
     let dir = tempfile::tempdir().unwrap();
     let clock = ManualClock::new(START);

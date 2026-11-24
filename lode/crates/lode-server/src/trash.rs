@@ -78,6 +78,11 @@ async fn delete_handler(
         )));
     }
     let found = find(&state, &name).await?;
+    let _backup = if req.force {
+        crate::maintenance::backup_lock::for_removal(&state)?
+    } else {
+        None
+    };
     let d = match (found, req.force) {
         (Found::Live(d), false) => {
             let now = state.clock().now_ms();
@@ -113,7 +118,7 @@ async fn delete_handler(
         }
         (Found::Trashed(d), true) => d,
     };
-    purge(&state, d.id).await?;
+    purge_objects_and_rows(&state, d.id).await?;
     tracing::info!(depot = %name, by = %caller.principal.name, "depot erased");
     Ok(Json(DeleteDepotResponse {
         name,
@@ -170,6 +175,11 @@ async fn list_handler(State(state): State<AppState>, caller: Caller) -> ApiResul
 /// Erases a depot that is in the trash: its stored content, then its history and every
 /// module's rows. Safe to run again after an interruption.
 pub async fn purge(state: &AppState, depot: DepotId) -> ApiResult<()> {
+    let _backup = crate::maintenance::backup_lock::for_removal(state)?;
+    purge_objects_and_rows(state, depot).await
+}
+
+async fn purge_objects_and_rows(state: &AppState, depot: DepotId) -> ApiResult<()> {
     state.blobs().delete_depot(depot).await?;
     let modules = state.modules().to_vec();
     let now = state.clock().now_ms();

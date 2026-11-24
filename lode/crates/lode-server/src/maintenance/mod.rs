@@ -2,6 +2,7 @@
 //! moving content to S3 and metadata to Postgres.
 
 mod backup;
+pub(crate) mod backup_lock;
 pub mod copy;
 mod fsck;
 mod gc;

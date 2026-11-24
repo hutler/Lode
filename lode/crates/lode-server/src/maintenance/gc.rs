@@ -257,6 +257,11 @@ async fn collect(
         dry_run: opts.dry_run,
         problems: Vec::new(),
     };
+    let _backup = if opts.dry_run || candidates.is_empty() {
+        None
+    } else {
+        super::backup_lock::for_removal(state)?
+    };
     for batch in candidates.chunks(BATCH) {
         let _exclusive = state.gc_fence().write().await;
         // Commits that finished since the last batch may reference candidates.
